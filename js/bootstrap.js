@@ -40,11 +40,11 @@ $("saveBtn").addEventListener("click", (event) => {
   event.currentTarget.blur();
 });
 $("newGameBtn").addEventListener("click", (event) => {
-  newGamePrompt();
+  if (state) newGamePrompt();
+  else renderClassSelect();
   event.currentTarget.blur();
 });
 
-// Initial boot: render class select unless a saved run exists.
-renderClassSelect();
-if (loadGame()) render();
-else render();
+// Initial boot always stops at the title screen. The player chooses whether to continue.
+renderStartScreen();
+render();

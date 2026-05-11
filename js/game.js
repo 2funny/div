@@ -1,6 +1,7 @@
 let state = null;
 let activeTab = "inventory";
 let selectedTile = null;
+let battleFx = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,6 +17,15 @@ function choice(list) {
 function uid() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function resetBattleFx(kind = "action") {
+  battleFx = { kind, hero: null, enemy: null, center: null, seq: Date.now() };
+}
+
+function setBattleFx(target, data) {
+  if (!battleFx) resetBattleFx();
+  battleFx[target] = { ...data, seq: `${battleFx.seq}-${target}` };
 }
 
 // Create a new persistent hero state and enter the first floor.
@@ -34,6 +44,9 @@ function startGame(classId) {
     maxMp: cls.mp,
     stats: { ...cls.stats },
     statPoints: 0,
+    skillPoints: 0,
+    skillDust: 0,
+    skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     inventory: [
       potion("小型生命药水", "hp", 40),
       potion("小型法力药水", "mp", 25)
@@ -43,6 +56,7 @@ function startGame(classId) {
     equipment: starterEquipment(classId),
     map: null,
     player: { x: 1, y: 1 },
+    facing: "down",
     currentEnemy: null,
     log: []
   };
@@ -85,7 +99,7 @@ function themeForFloor(floor) {
   return THEMES.find((theme) => theme.floors.includes(floor)) || THEMES[0];
 }
 
-// Generate a semi-random floor with guaranteed path to the portal.
+// Generate a larger semi-random floor with guaranteed path to the down stairs.
 function generateFloor() {
   const size = MAP_SIZE;
   const theme = themeForFloor(state.floor);
@@ -107,6 +121,7 @@ function generateFloor() {
     map[center][center].object = makeEnemy(true);
     map[center - 3][center - 3].object = { type: "altar" };
     map[center - 3][center + 3].object = { type: "forge" };
+    if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
   } else {
     for (let y = 1; y < size - 1; y++) {
       for (let x = 1; x < size - 1; x++) {
@@ -115,16 +130,18 @@ function generateFloor() {
       }
     }
     carvePath(map, 1, 1, size - 2, size - 2);
-    scatter(map, "monster", 10 + Math.floor(state.floor / 2));
-    scatter(map, "chest", 3);
-    scatter(map, "trap", state.floor >= 4 ? 3 : 2);
-    scatter(map, "altar", 2);
+    scatter(map, "monster", 16 + Math.floor(state.floor * 1.5));
+    scatter(map, "chest", 5);
+    scatter(map, "trap", state.floor >= 4 ? 5 : 3);
+    scatter(map, "altar", 3);
     if (state.floor % 3 === 1) scatter(map, "shop", 1);
     if (state.floor % 3 === 2) scatter(map, "forge", 1);
-    map[size - 2][size - 2].object = { type: "portal" };
+    if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
+    map[size - 2][size - 2].object = { type: "stairsDown" };
   }
 
   state.player = { x: 1, y: 1 };
+  state.facing = state.facing || "down";
   state.map = { size, theme: theme.id, cells: map };
   updateVisibility();
 }
@@ -152,10 +169,26 @@ function scatter(map, type, count) {
     const y = rand(1, max);
     const cell = map[y][x];
     if (cell.terrain === "floor" && !cell.object && !(x === 1 && y === 1)) {
-      cell.object = type === "monster" ? makeEnemy(Math.random() < .14) : { type };
+      cell.object = type === "monster" ? makeEnemyWithVariant(Math.random() < .14) : { type };
       placed++;
     }
   }
+}
+
+function makeEnemyWithVariant(eliteOrBoss = false) {
+  const enemy = makeEnemy(eliteOrBoss);
+  if (enemy.type === "boss") {
+    enemy.variant = "boss";
+  } else if (enemy.type === "elite") {
+    enemy.variant = "elite";
+  } else if (state.floor < 4) {
+    enemy.variant = choice(["slime", "rat"]);
+  } else if (state.floor < 7) {
+    enemy.variant = choice(["bat", "slime"]);
+  } else {
+    enemy.variant = choice(["wolf", "slime"]);
+  }
+  return enemy;
 }
 
 // Create monster stats scaled by floor and elite/boss status.
@@ -194,11 +227,14 @@ function updateVisibility() {
 // Move the player by one tile and resolve the destination cell.
 function move(dx, dy) {
   if (state.currentEnemy) return;
+  if (dx < 0) state.facing = "left";
+  if (dx > 0) state.facing = "right";
+  if (dy < 0) state.facing = "up";
+  if (dy > 0) state.facing = "down";
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
   const cell = state.map.cells[ny]?.[nx];
   if (!cell || cell.terrain === "wall") {
-    log("冰冷的墙壁挡住了去路。");
     render();
     return;
   }
@@ -229,8 +265,10 @@ function resolveCell(cell) {
     showEvent("触发陷阱", `<p>地面机关突然弹起，你受到 ${damage} 点伤害。</p>`, "继续探索");
   } else if (obj.type === "altar") {
     useAltar(cell);
-  } else if (obj.type === "portal") {
+  } else if (obj.type === "stairsDown" || obj.type === "portal") {
     nextFloor();
+  } else if (obj.type === "stairsUp") {
+    previousFloor();
   }
 }
 
@@ -302,12 +340,28 @@ function useAltar(cell) {
 function nextFloor() {
   if (state.floor >= 10) return;
   state.floor++;
+  state.facing = "down";
   generateFloor();
   state.hp = Math.min(state.maxHp, state.hp + 20);
   state.mp = Math.min(state.maxMp, state.mp + 12);
   log(`进入第 ${state.floor} 层。`);
   saveGame(false);
-  showEvent("进入下一层", `<p>你穿过传送门，抵达第 ${state.floor} 层。</p>`, "继续探索");
+  showEvent("进入下一层", `<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`, "继续探索");
+}
+
+function previousFloor() {
+  if (state.floor <= 1) return;
+  state.floor--;
+  state.facing = "up";
+  generateFloor();
+  const size = state.map.size;
+  state.player = { x: size - 2, y: size - 2 };
+  updateVisibility();
+  state.hp = Math.min(state.maxHp, state.hp + 8);
+  state.mp = Math.min(state.maxMp, state.mp + 5);
+  log(`返回第 ${state.floor} 层。`);
+  saveGame(false);
+  showEvent("返回上一层", `<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`, "继续探索");
 }
 
 // Combine base attributes, equipment, upgrades, and runes.
@@ -346,9 +400,11 @@ function attackEnemy(mode, skill = null) {
   const enemy = state.currentEnemy;
   const t = totals();
   let result = "";
+  resetBattleFx(mode);
   if (mode === "attack") {
     result = dealDamage(enemy, Math.max(2, t.atk - enemy.def * .35), "普通攻击");
   } else if (mode === "skill") {
+    skill = upgradedSkill(skill);
     if (state.mp < skill.mp) {
       log("法力不足。");
       render();
@@ -359,6 +415,8 @@ function attackEnemy(mode, skill = null) {
   } else if (mode === "defend") {
     const block = 7 + t.def;
     state._guard = block;
+    setBattleFx("hero", { type: "guard", text: `-${block}`, label: "防御" });
+    setBattleFx("center", { type: "guard", text: "防御姿态" });
     result = `你进入防御姿态，准备抵挡 ${block} 点伤害。`;
   }
   log(result);
@@ -375,6 +433,7 @@ function dealDamage(enemy, amount, label) {
   const crit = Math.random() < (0.06 + totals().luk * .008);
   const damage = Math.max(1, Math.round(amount * (crit ? 1.7 : 1)));
   enemy.hp -= damage;
+  setBattleFx("enemy", { type: crit ? "crit" : "hit", text: `-${damage}`, label });
   return `${label}${crit ? "暴击" : ""}，造成 ${damage} 点伤害。`;
 }
 
@@ -382,15 +441,22 @@ function dealDamage(enemy, amount, label) {
 function castSkill(enemy, skill, t) {
   if (skill.type === "guard") {
     state._guard = 12 + t.def;
-    enemy.hp -= Math.round(t.atk * skill.power);
-    return `格挡反击，造成 ${Math.round(t.atk * skill.power)} 点伤害。`;
+    const damage = Math.round(t.atk * skill.power);
+    enemy.hp -= damage;
+    setBattleFx("hero", { type: "guard", text: `-${state._guard}`, label: "格挡" });
+    setBattleFx("enemy", { type: "hit", text: `-${damage}`, label: skill.name });
+    return `格挡反击，造成 ${damage} 点伤害。`;
   }
   if (skill.type === "shield") {
     state._guard = 18 + t.mag;
+    setBattleFx("hero", { type: "shield", text: `+${state._guard}`, label: skill.name });
+    setBattleFx("center", { type: "shield", text: "护盾展开" });
     return `奥术护盾展开，抵挡 ${state._guard} 点伤害。`;
   }
   if (skill.type === "evade") {
     state._evade = true;
+    setBattleFx("hero", { type: "evade", text: "闪避", label: skill.name });
+    setBattleFx("center", { type: "evade", text: "拉开距离" });
     return "你拉开距离，下回合更容易闪避。";
   }
   if (skill.type === "double") {
@@ -400,7 +466,11 @@ function castSkill(enemy, skill, t) {
   }
   const base = skill.scale === "mag" ? t.mag : t.atk;
   const text = dealDamage(enemy, base * skill.power + state.floor * 2, skill.name);
-  if (["burn", "poison"].includes(skill.type)) enemy.hp -= 5 + state.floor;
+  if (["burn", "poison"].includes(skill.type)) {
+    const extra = 5 + state.floor;
+    enemy.hp -= extra;
+    setBattleFx("enemy", { type: skill.type, text: `-${extra}`, label: skill.name });
+  }
   if (skill.type === "weaken") enemy.atk = Math.max(1, enemy.atk - 3);
   if (skill.type === "slow") enemy.atk = Math.max(1, enemy.atk - 2);
   return text;
@@ -412,6 +482,7 @@ function enemyTurn(enemy) {
   const dodge = Math.random() < (t.spd * .006 + (state._evade ? .35 : .04));
   state._evade = false;
   if (dodge) {
+    setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
     log(`${enemy.name}的攻击落空。`);
     return;
   }
@@ -421,8 +492,37 @@ function enemyTurn(enemy) {
     state._guard = 0;
   }
   state.hp -= damage;
+  setBattleFx("hero", { type: "hit", text: `-${damage}`, label: enemy.name });
   log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
   if (state.hp <= 0) death();
+}
+
+function skillLevel(id) {
+  return state.skillLevels?.[id] || 0;
+}
+
+function skillById(id) {
+  return CLASSES[state.classId].skills.find((skill) => skill.id === id);
+}
+
+function upgradedSkill(skill) {
+  const level = skillLevel(skill.id);
+  return {
+    ...skill,
+    level,
+    mp: Math.max(1, skill.mp - Math.floor(level / 2)),
+    power: Number((skill.power * (1 + level * .14)).toFixed(2))
+  };
+}
+
+function skillUpgradeCost(skillId) {
+  const nextLevel = skillLevel(skillId) + 1;
+  return { points: 1, dust: nextLevel };
+}
+
+function canUpgradeSkill(skillId) {
+  const cost = skillUpgradeCost(skillId);
+  return (state.skillPoints || 0) >= cost.points && (state.skillDust || 0) >= cost.dust;
 }
 
 // Finish combat, award rewards, clear the enemy tile, and check boss win.
@@ -433,27 +533,54 @@ function winBattle(enemy) {
   const cell = state.map.cells[state.player.y][state.player.x];
   cell.object = null;
   state.currentEnemy = null;
-  maybeDrop(enemy);
+  setBattleFx("center", { type: "victory", text: "胜利" });
+  const rewards = [
+    `经验 +${enemy.xp}`,
+    `金币 +${enemy.gold}`
+  ];
+  rewards.push(...maybeDrop(enemy));
+  const levelBefore = state.level;
   while (state.xp >= state.xpNext) levelUp();
+  if (state.level > levelBefore) rewards.push(`等级提升到 Lv.${state.level}`);
   if (enemy.type === "boss") {
-    showModal("通关", "<p>符文守王倒下了，地牢深处的王座重新安静下来。第一版到这里通关。</p>", [
+    showModal("通关", `<p>符文守王倒下了，地牢深处的王座重新安静下来。第一版到这里通关。</p>${battleResultList(rewards)}`, [
       { text: "继续整理装备", action: closeModal }
+    ]);
+  } else {
+    showModal(`击败 ${enemy.name}`, `<p>战斗结束，你清点了这次收获。</p>${battleResultList(rewards)}`, [
+      { text: "收下", action: closeModal }
     ]);
   }
 }
 
 // Roll post-combat equipment and rune drops.
 function maybeDrop(enemy) {
+  const drops = [];
+  const dustChance = enemy.type === "boss" ? 1 : enemy.type === "elite" ? .85 : .32;
+  if (Math.random() < dustChance) {
+    const dust = enemy.type === "boss" ? 5 : enemy.type === "elite" ? 2 : 1;
+    state.skillDust = (state.skillDust || 0) + dust;
+    log(`获得 ${dust} 点技能尘。`);
+    drops.push(`技能尘 +${dust}`);
+  }
   if (Math.random() < .42 || enemy.type !== "monster") {
     const loot = randomEquipment();
     state.inventory.push(loot);
     log(`${enemy.name}掉落了${loot.name}。`);
+    drops.push(`装备：${loot.name}`);
   }
   if (Math.random() < .35) {
     const rune = choice(RUNES) + "1";
     state.runes[rune] = (state.runes[rune] || 0) + 1;
     log(`获得${rune}符文。`);
+    drops.push(`符文：${rune}`);
   }
+  if (!drops.length) drops.push("未发现额外掉落");
+  return drops;
+}
+
+function battleResultList(rewards) {
+  return `<ul class="reward-list">${rewards.map((reward) => `<li>${reward}</li>`).join("")}</ul>`;
 }
 
 // Increase level, grant stat point, and refresh resources.
@@ -462,11 +589,12 @@ function levelUp() {
   state.level++;
   state.xpNext = Math.round(state.xpNext * 1.28 + 12);
   state.statPoints++;
+  state.skillPoints = (state.skillPoints || 0) + 1;
   state.maxHp += 8;
   state.maxMp += 4;
   state.hp = state.maxHp;
   state.mp = state.maxMp;
-  log(`升级到 Lv.${state.level}，获得 1 点属性点。`);
+  log(`升级到 Lv.${state.level}，获得 1 点属性点和 1 点技能点。`);
 }
 
 // Handle defeat without deleting the save: reset to floor entrance with penalty.
@@ -490,7 +618,7 @@ function autoBattle() {
   }
   let rounds = 0;
   while (state.currentEnemy && state.hp > 0 && rounds < 30) {
-    const bestSkill = CLASSES[state.classId].skills.find((skill) => state.mp >= skill.mp && skill.type !== "evade");
+    const bestSkill = CLASSES[state.classId].skills.find((skill) => state.mp >= upgradedSkill(skill).mp && skill.type !== "evade");
     attackEnemy(bestSkill ? "skill" : "attack", bestSkill || null);
     rounds++;
   }
@@ -516,6 +644,13 @@ function addStat(key) {
   render();
 }
 
+function confirmAddStat(key) {
+  if (state.statPoints <= 0) return;
+  const name = STAT_NAMES[key] || key;
+  const extra = key === "def" ? "，并额外提升 4 点生命上限" : key === "res" ? "，并额外提升 3 点法力上限" : "";
+  showConfirm("属性提升确认", `<p>消耗 1 点属性点，提升 1 点${name}${extra}。</p>`, "提升", () => addStat(key));
+}
+
 // Equip an inventory item and return the old item to the bag.
 function equipItem(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id);
@@ -527,6 +662,12 @@ function equipItem(id) {
   if (old) state.inventory.push(old);
   log(`装备了${entry.name}。`);
   render();
+}
+
+function confirmEquipItem(id) {
+  const entry = state.inventory.find((item) => item.id === id);
+  if (!entry) return;
+  showConfirm("装备确认", `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>`, "装备", () => equipItem(id));
 }
 
 // Use a consumable potion from the inventory.
@@ -541,6 +682,12 @@ function useItem(id) {
   render();
 }
 
+function confirmUseItem(id) {
+  const entry = state.inventory.find((item) => item.id === id);
+  if (!entry) return;
+  showConfirm("使用确认", `<p>要使用 ${entry.name} 吗？</p><p>效果：恢复 ${entry.amount} 点${entry.effect === "hp" ? "生命" : "法力"}。</p>`, "使用", () => useItem(id));
+}
+
 // Combine three same-type runes into the next tier.
 function craftRune(name) {
   if ((state.runes[name] || 0) < 3) return;
@@ -553,15 +700,68 @@ function craftRune(name) {
   render();
 }
 
+function confirmCraftRune(name) {
+  if ((state.runes[name] || 0) < 3) return;
+  const level = Number(name.slice(-1));
+  const base = name.slice(0, -1);
+  showConfirm("合成确认", `<p>消耗 3 个 ${name}，合成 1 个 ${base + (level + 1)} 符文。</p>`, "合成", () => craftRune(name));
+}
+
 // Upgrade an equipped item with gold and strengthening material.
 function enhance(slot) {
   const eq = state.equipment[slot];
-  if (!eq || (state.materials["强化石"] || 0) <= 0 || state.gold < 20) return;
+  if (!canEnhance(slot)) return;
   state.materials["强化石"]--;
   state.gold -= 20;
   eq.level++;
   log(`${eq.name}强化到 +${eq.level}。`);
   render();
+}
+
+function confirmEnhance(slot) {
+  const eq = state.equipment[slot];
+  if (!canEnhance(slot)) return;
+  showConfirm("强化确认", `<p>消耗 20 金币和 1 个强化石，将 ${eq.name} 强化到 +${eq.level + 1}。</p>`, "强化", () => enhance(slot));
+}
+
+function canEnhance(slot) {
+  const eq = state.equipment[slot];
+  return !!eq && (state.materials["强化石"] || 0) > 0 && state.gold >= 20;
+}
+
+function enhanceDisabledReason(slot) {
+  const eq = state.equipment[slot];
+  if (!eq) return "未装备";
+  if ((state.materials["强化石"] || 0) <= 0) return "缺少强化石";
+  if (state.gold < 20) return "金币不足";
+  return "";
+}
+
+function upgradeSkill(skillId) {
+  if (!canUpgradeSkill(skillId)) return;
+  const cost = skillUpgradeCost(skillId);
+  state.skillPoints -= cost.points;
+  state.skillDust -= cost.dust;
+  state.skillLevels[skillId] = skillLevel(skillId) + 1;
+  const skill = skillById(skillId);
+  log(`${skill.name}提升到 Lv.${state.skillLevels[skillId]}。`);
+  render();
+}
+
+function confirmUpgradeSkill(skillId) {
+  const skill = skillById(skillId);
+  if (!skill || !canUpgradeSkill(skillId)) return;
+  const cost = skillUpgradeCost(skillId);
+  const next = upgradedSkill({ ...skill, id: skill.id });
+  const currentLevel = skillLevel(skillId);
+  const nextPower = Number((skill.power * (1 + (currentLevel + 1) * .14)).toFixed(2));
+  const nextMp = Math.max(1, skill.mp - Math.floor((currentLevel + 1) / 2));
+  showConfirm(
+    "技能升级确认",
+    `<p>消耗 ${cost.points} 点技能点和 ${cost.dust} 点技能尘，将 ${skill.name} 升到 Lv.${currentLevel + 1}。</p><p>倍率 ${next.power} → ${nextPower}，耗蓝 ${next.mp} → ${nextMp}。</p>`,
+    "升级",
+    () => upgradeSkill(skillId)
+  );
 }
 
 // Buy basic consumables from the merchant tile.
@@ -580,6 +780,24 @@ function buy(kind) {
 }
 
 // Render the initial class selection cards.
+function renderStartScreen() {
+  const hasSave = !!localStorage.getItem(SAVE_KEY);
+  $("classSelect").innerHTML = `
+    <article class="class-card start-card">
+      <h2>符文地牢</h2>
+      <p>选择继续上次进度，或重新创建一名角色开始新的探索。</p>
+      <div class="start-actions">
+        <button type="button" ${hasSave ? "" : "disabled"} onclick="continueSavedGame()">继续冒险</button>
+        <button type="button" onclick="renderClassSelect()">新游戏</button>
+      </div>
+    </article>
+  `;
+}
+
+function continueSavedGame() {
+  if (loadGame()) render();
+}
+
 function renderClassSelect() {
   $("classSelect").innerHTML = Object.entries(CLASSES).map(([id, cls]) => `
     <article class="class-card">
@@ -596,6 +814,7 @@ function render() {
   if (!state) {
     $("classSelect").classList.remove("hidden");
     $("gameView").classList.add("hidden");
+    $("saveBtn").disabled = true;
     return;
   }
   if (!state.map?.cells?.length || state.map.size !== MAP_SIZE) generateFloor();
@@ -603,14 +822,21 @@ function render() {
   state.mp = Math.min(state.mp, effectiveMaxMp());
   $("classSelect").classList.add("hidden");
   $("gameView").classList.remove("hidden");
+  $("saveBtn").disabled = false;
   renderHero();
   renderMap();
   renderMinimap();
   renderLegend();
+  renderBattleView();
   renderContext();
   renderTab();
   renderLog();
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+}
+
+function confirmBuy(kind) {
+  const name = kind === "hp" ? "小型生命药水" : "小型法力药水";
+  showConfirm("购买确认", `<p>花费 25 金币购买 ${name}。</p>`, "购买", () => buy(kind));
 }
 
 // Render player portrait, bars, stats, and stat-point controls.
@@ -628,13 +854,49 @@ function renderHero() {
   $("mpBar").style.width = `${Math.max(0, Math.min(100, state.mp / mpMax * 100))}%`;
   $("xpBar").style.width = `${Math.max(0, Math.min(100, state.xp / state.xpNext * 100))}%`;
   $("statPoints").textContent = state.statPoints;
+  $("skillPointsText").textContent = state.skillPoints || 0;
+  $("skillDustText").textContent = state.skillDust || 0;
   $("goldText").textContent = state.gold;
   $("statsGrid").innerHTML = Object.entries(STAT_NAMES).map(([key, name]) => `
     <div class="stat">
       <span>${name} ${t[key]}</span>
-      <button type="button" ${state.statPoints ? "" : "disabled"} onclick="addStat('${key}')">+</button>
+      <button type="button" ${state.statPoints ? "" : "disabled"} onclick="confirmAddStat('${key}')">+</button>
     </div>
   `).join("");
+  renderPaperdoll();
+}
+
+function renderPaperdoll() {
+  const slots = [
+    ["weapon", "weapon"],
+    ["armor", "armor"],
+    ["boots", "boots"],
+    ["ring", "ring"],
+    ["amulet", "amulet"]
+  ];
+  $("paperdoll").innerHTML = `
+    <div class="paperdoll-figure">${imageTag(assetForClass(state.classId), CLASSES[state.classId].name)}</div>
+    ${slots.map(([slot, cls]) => {
+      const eq = state.equipment[slot];
+      return `<button class="gear-slot gear-${cls} ${eq ? "equipped" : ""}" type="button" onclick="showEquipmentSlot('${slot}')" title="${eq ? eq.name : SLOT_NAMES[slot]}">
+        <span>${SLOT_NAMES[slot]}</span>
+        <small>${eq ? `+${eq.level}` : "空"}</small>
+      </button>`;
+    }).join("")}
+  `;
+}
+
+function showEquipmentSlot(slot) {
+  const eq = state.equipment[slot];
+  const title = SLOT_NAMES[slot] || "装备";
+  if (!eq) {
+    showEvent(title, `<p>这个部位还没有装备。</p>`, "知道了");
+    return;
+  }
+  const runeText = eq.runeSlots
+    ? `${eq.runes.length}/${eq.runeSlots}：${eq.runes.length ? eq.runes.join("、") : "未镶嵌"}`
+    : "无";
+  showEvent(eq.name, equipmentDetailMarkup(eq, title, runeText), "关闭");
 }
 
 // Render the main dungeon map tiles.
@@ -644,10 +906,12 @@ function renderMap() {
   $("themeText").textContent = theme.name;
   const map = $("map");
   map.className = `map ${theme.colorClass}`;
-  map.style.setProperty("--size", state.map.size);
+  const view = mapViewBounds();
+  map.style.setProperty("--size", view.size);
   const cells = [];
-  for (const row of state.map.cells) {
-    for (const cell of row) {
+  for (let y = view.y; y < view.y + view.size; y++) {
+    for (let x = view.x; x < view.x + view.size; x++) {
+      const cell = state.map.cells[y][x];
       if (!cell.seen) {
         cells.push(`<button class="tile unseen" type="button" aria-label="未知"></button>`);
         continue;
@@ -656,7 +920,7 @@ function renderMap() {
       const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
       const isSelected = selectedTile?.x === cell.x && selectedTile?.y === cell.y;
       const isAdjacent = Math.abs(cell.x - state.player.x) + Math.abs(cell.y - state.player.y) === 1;
-      const tileSprite = isPlayer ? sprite("player", assetForClass(state.classId), CLASSES[state.classId].name)
+      const tileSprite = isPlayer ? sprite(`player facing-${state.facing || "down"}`, assetForClass(state.classId), CLASSES[state.classId].name)
         : cell.visible && cell.object ? objectSprite(cell.object) : "";
       const objectBadge = cell.visible && cell.object ? badgeForObject(cell.object.type) : "";
       const label = tileLabel(cell, isPlayer);
@@ -676,38 +940,152 @@ function renderMap() {
   map.innerHTML = cells.join("");
 }
 
+function mapViewBounds() {
+  const preferred = typeof MAP_VIEW_SIZE === "number" ? MAP_VIEW_SIZE : state.map.size;
+  const size = Math.min(preferred, state.map.size);
+  const half = Math.floor(size / 2);
+  const max = state.map.size - size;
+  return {
+    x: Math.max(0, Math.min(max, state.player.x - half)),
+    y: Math.max(0, Math.min(max, state.player.y - half)),
+    size
+  };
+}
+
 // Render compact floor overview in the top-right minimap.
 function renderMinimap() {
   const minimap = $("minimap");
+  const view = mapViewBounds();
   minimap.style.setProperty("--size", state.map.size);
-  minimap.innerHTML = state.map.cells.flatMap((row) => row.map((cell) => {
+  minimap.style.setProperty("--view-x", `${view.x / state.map.size * 100}%`);
+  minimap.style.setProperty("--view-y", `${view.y / state.map.size * 100}%`);
+  minimap.style.setProperty("--view-size", `${view.size / state.map.size * 100}%`);
+  const cells = state.map.cells.flatMap((row) => row.map((cell) => {
     const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
+    const inView = cell.x >= view.x && cell.x < view.x + view.size && cell.y >= view.y && cell.y < view.y + view.size;
     const classes = [
       "mini-cell",
       cell.seen ? "seen" : "unknown",
       cell.terrain === "wall" ? "wall" : "floor",
       cell.object ? `obj-${cell.object.type}` : "",
+      inView ? "in-view" : "",
       isPlayer ? "player" : ""
     ].join(" ");
-    return `<span class="${classes}" title="${tileLabel(cell, isPlayer)}"></span>`;
+    return `<button class="${classes}" type="button" title="${tileLabel(cell, isPlayer)}" onclick="selectMinimapTile(${cell.x},${cell.y})"></button>`;
   })).join("");
+  minimap.innerHTML = `<div class="mini-grid">${cells}<span class="mini-view-frame"></span></div>`;
+}
+
+function selectMinimapTile(x, y) {
+  selectedTile = { x, y };
+  render();
 }
 
 // Render always-visible icon meanings under the map.
 function renderLegend() {
-  $("legend").innerHTML = LEGEND_ITEMS.map(([type, label, desc]) => {
+  const legendItems = LEGEND_ITEMS
+    .filter(([type]) => type !== "portal")
+    .concat([
+      ["stairsDown", "下层", "进入下一层"],
+      ["stairsUp", "上层", "返回上一层"]
+    ]);
+  $("legend").innerHTML = legendItems.map(([type, label, desc]) => {
     const src = type === "player" ? assetForClass(state.classId) : ASSETS[type];
     return `
       <div class="legend-item" title="${desc}">
-        <img src="${src}" alt="${label}" draggable="false">
+        ${src ? `<img src="${src}" alt="${label}" draggable="false">` : iconSprite(iconClassForType(type), label)}
         <span>${label}</span>
       </div>
     `;
   }).join("");
 }
 
+// Swap the center map area into a focused battle board while an enemy is active.
+function renderBattleView() {
+  const enemy = state.currentEnemy;
+  const mapWrap = document.querySelector(".map-wrap");
+  const mapStage = document.querySelector(".map-stage");
+  let battleStage = $("battleStage");
+  if (!battleStage) {
+    battleStage = document.createElement("div");
+    battleStage.id = "battleStage";
+    battleStage.className = "battle-stage hidden";
+    mapWrap.insertBefore(battleStage, mapStage);
+  }
+
+  $("gameView").classList.toggle("in-battle", !!enemy);
+  [mapStage, $("legend")].forEach((el) => el?.classList.toggle("hidden", !!enemy));
+  battleStage.classList.toggle("hidden", !enemy);
+  if (!enemy) return;
+
+  const cls = CLASSES[state.classId];
+  const hpMax = effectiveMaxHp();
+  const mpMax = effectiveMaxMp();
+  const risk = battleRisk(enemy);
+  const hpPct = Math.max(0, Math.min(100, Math.round(state.hp / hpMax * 100)));
+  const mpPct = Math.max(0, Math.min(100, Math.round(state.mp / mpMax * 100)));
+  const enemyPct = Math.max(0, Math.min(100, Math.round(enemy.hp / enemy.maxHp * 100)));
+  $("themeText").textContent = "战斗中";
+  battleStage.innerHTML = `
+    <div class="battle-board">
+      <div class="combatant hero-combatant ${battleFxClass("hero")}">
+        <div class="battle-sprite">${sprite("player", assetForClass(state.classId), cls.name)}</div>
+        ${combatantFxMarkup("hero")}
+        <h2>${cls.name}</h2>
+        <div class="battle-meter"><span style="width:${hpPct}%"></span><b>${Math.ceil(state.hp)}/${hpMax} HP</b></div>
+        <div class="battle-meter mp"><span style="width:${mpPct}%"></span><b>${Math.ceil(state.mp)}/${mpMax} MP</b></div>
+      </div>
+      <div class="battle-center">
+        <strong>VS</strong>
+        <small>${risk.label} · 胜率估算 ${Math.round(risk.score * 100)}%</small>
+        ${centerFxMarkup()}
+      </div>
+      <div class="combatant enemy-combatant ${battleFxClass("enemy")}">
+        <div class="battle-sprite">${objectSprite(enemy)}</div>
+        ${combatantFxMarkup("enemy")}
+        <h2>${enemy.name}</h2>
+        <div class="battle-meter enemy"><span style="width:${enemyPct}%"></span><b>${Math.ceil(enemy.hp)}/${enemy.maxHp} HP</b></div>
+        <p>攻击 ${enemy.atk} · 防御 ${enemy.def}</p>
+      </div>
+    </div>
+    <div class="battle-actions">
+      <button type="button" onclick="attackEnemy('attack')">普通攻击</button>
+      ${renderSkillActionButtons()}
+      <button type="button" onclick="attackEnemy('defend')">防御</button>
+      <button type="button" onclick="autoBattle()">一键战斗</button>
+    </div>
+  `;
+}
+
+function renderSkillActionButtons() {
+  return CLASSES[state.classId].skills.map((skill) => {
+    const upgraded = upgradedSkill(skill);
+    const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
+    return `<button type="button" onclick="attackEnemy('skill', skillById('${skill.id}'))">${skill.name}${level} - ${upgraded.mp} MP</button>`;
+  }).join("");
+}
+
+function battleFxClass(target) {
+  const fx = battleFx?.[target];
+  if (!fx) return "";
+  return `fx-${fx.type}`;
+}
+
+function combatantFxMarkup(target) {
+  const fx = battleFx?.[target];
+  if (!fx) return "";
+  return `<span class="combat-fx combat-fx-${fx.type}" style="--fx-key:${fx.seq}"><b>${fx.text}</b><small>${fx.label}</small></span>`;
+}
+
+function centerFxMarkup() {
+  const fx = battleFx?.center;
+  if (!fx) return "";
+  return `<span class="center-fx center-fx-${fx.type}">${fx.text}</span>`;
+}
+
 // Convert a map object into its sprite markup.
 function objectSprite(obj) {
+  if (["monster", "elite", "boss"].includes(obj.type)) return enemySprite(obj);
   const map = {
     monster: ["monster", ASSETS.monster, "怪物"],
     elite: ["elite", ASSETS.elite, "精英怪"],
@@ -717,9 +1095,25 @@ function objectSprite(obj) {
     forge: ["forge", ASSETS.forge, "合成台"],
     shop: ["shop", ASSETS.shop, "商人"],
     trap: ["trap", ASSETS.trap, "陷阱"],
-    portal: ["portal", ASSETS.portal, "传送门"]
+    portal: ["portal", ASSETS.portal, "传送门"],
+    stairsDown: ["stairs-down", null, "下行楼梯"],
+    stairsUp: ["stairs-up", null, "上行楼梯"]
   };
   const [cls, src, alt] = map[obj.type] || ["monster", ASSETS.monster, "怪物"];
+  return src ? sprite(cls, src, alt) : iconSprite(cls, alt);
+}
+
+function enemySprite(enemy) {
+  const variants = {
+    slime: ["monster", ASSETS.monster, "史莱姆"],
+    rat: ["monster rat", ASSETS.monsterRat, "洞窟鼠"],
+    bat: ["monster bat", ASSETS.monsterBat, "矿洞蝙蝠"],
+    wolf: ["monster wolf", ASSETS.monsterWolf, "冰霜狼"],
+    elite: ["elite", ASSETS.elite, "精英怪"],
+    boss: ["boss", ASSETS.boss, "Boss"]
+  };
+  const fallback = enemy.type === "boss" ? "boss" : enemy.type === "elite" ? "elite" : "slime";
+  const [cls, src, alt] = variants[enemy.variant || fallback] || variants[fallback];
   return sprite(cls, src, alt);
 }
 
@@ -734,7 +1128,9 @@ function badgeForObject(type) {
     forge: "锻",
     shop: "商",
     trap: "陷",
-    portal: "门"
+    portal: "门",
+    stairsDown: "下",
+    stairsUp: "上"
   };
   return labels[type] ? `<span class="tile-badge badge-${type}">${labels[type]}</span>` : "";
 }
@@ -754,7 +1150,9 @@ function tileLabel(cell, isPlayer = false) {
     forge: "合成台：强化装备或合成符文",
     shop: "商人：购买药水和补给",
     trap: "陷阱：触发后受到伤害",
-    portal: "传送门：进入下一层"
+    portal: "传送门：进入下一层",
+    stairsDown: "下行楼梯：进入下一层",
+    stairsUp: "上行楼梯：返回上一层"
   };
   return labels[cell.object.type] || "未知物体";
 }
@@ -785,6 +1183,16 @@ function sprite(cls, src, alt) {
   return `<span class="sprite ${cls}">${imageTag(src, alt)}</span>`;
 }
 
+function iconSprite(cls, alt) {
+  return `<span class="sprite icon-sprite ${cls}" aria-label="${alt}"></span>`;
+}
+
+function iconClassForType(type) {
+  if (type === "stairsDown") return "stairs-down";
+  if (type === "stairsUp") return "stairs-up";
+  return type;
+}
+
 // Select a tile, moving if it is adjacent to the player.
 function clickTile(x, y) {
   selectedTile = { x, y };
@@ -803,7 +1211,7 @@ function renderContext() {
     $("contextBody").innerHTML = `
       <div class="item-row"><div>一键战斗评估<small>${risk.label}，胜率估算 ${Math.round(risk.score * 100)}%</small></div><button type="button" onclick="autoBattle()">一键战斗</button></div>
       <button type="button" onclick="attackEnemy('attack')">普通攻击</button>
-      ${CLASSES[state.classId].skills.map((skill) => `<button type="button" onclick="attackEnemy('skill', CLASSES[state.classId].skills.find(s => s.id === '${skill.id}'))">${skill.name} - ${skill.mp} MP</button>`).join("")}
+      ${renderSkillActionButtons()}
       <button type="button" onclick="attackEnemy('defend')">防御</button>
     `;
     return;
@@ -812,8 +1220,8 @@ function renderContext() {
   if (cell.object?.type === "shop") {
     $("contextTitle").textContent = "商人";
     $("contextBody").innerHTML = `
-      <button type="button" onclick="buy('hp')">购买生命药水 25 金币</button>
-      <button type="button" onclick="buy('mp')">购买法力药水 25 金币</button>
+      <button type="button" onclick="confirmBuy('hp')">购买生命药水 25 金币</button>
+      <button type="button" onclick="confirmBuy('mp')">购买法力药水 25 金币</button>
     `;
   } else if (cell.object?.type === "forge") {
     $("contextTitle").textContent = "合成台";
@@ -833,23 +1241,28 @@ function renderTab() {
   if (activeTab === "inventory") renderInventory();
   if (activeTab === "equipment") renderEquipment();
   if (activeTab === "craft") renderCraft();
+  if (activeTab === "skills") renderSkills();
 }
 
 // Render inventory rows and item action buttons.
 function renderInventory() {
-  $("tabBody").innerHTML = state.inventory.length ? state.inventory.map((entry) => {
+  const items = [...state.inventory].sort((a, b) => itemScore(b) - itemScore(a));
+  $("tabBody").innerHTML = items.length ? items.map((entry) => {
     if (entry.kind === "potion") {
-      return `<div class="item-row"><div>${entry.name}<small>恢复 ${entry.amount}</small></div><button type="button" onclick="useItem('${entry.id}')">使用</button></div>`;
+      return `<div class="item-row"><div>${entry.name}<small>评分 ${itemScore(entry)} · 恢复 ${entry.amount}</small></div><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div>`;
     }
-    return `<div class="item-row"><div>${entry.name}<small>${SLOT_NAMES[entry.slot]} ${statsText(entry)}</small></div><button type="button" onclick="equipItem('${entry.id}')">装备</button></div>`;
+    const better = isBetterThanEquipped(entry);
+    return `<div class="item-row equip-row equipment-card ${better ? "better-equipment" : ""}"><div><b>${entry.name}</b>${equipmentSummary(entry)}</div><button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button></div>`;
   }).join("") : `<p>背包为空。</p>`;
 }
 
 // Render equipped items and enhancement controls.
 function renderEquipment() {
-  $("tabBody").innerHTML = SLOTS.map((slot) => {
+  const slots = [...SLOTS].sort((a, b) => itemScore(state.equipment[b]) - itemScore(state.equipment[a]));
+  $("tabBody").innerHTML = slots.map((slot) => {
     const eq = state.equipment[slot];
-    return `<div class="item-row"><div>${SLOT_NAMES[slot]}<small>${eq ? `${eq.name} +${eq.level} ${statsText(eq)}` : "未装备"}</small></div><button type="button" ${eq ? "" : "disabled"} onclick="enhance('${slot}')">强化</button></div>`;
+    const disabledReason = enhanceDisabledReason(slot);
+    return `<div class="item-row equipment-card"><div><b>${SLOT_NAMES[slot]}</b>${eq ? `<span class="equipment-name">${eq.name}</span>${equipmentSummary(eq, disabledReason ? "不可强化" : "")}` : `<small>未装备</small>`}</div><button type="button" ${disabledReason ? "disabled" : ""} title="${disabledReason || "强化"}" onclick="confirmEnhance('${slot}')">强化</button></div>`;
   }).join("");
 }
 
@@ -858,13 +1271,80 @@ function renderCraft() {
   const runes = Object.entries(state.runes).filter(([, count]) => count > 0);
   $("tabBody").innerHTML = `
     <div class="item-row"><div>材料<small>强化石 ${state.materials["强化石"] || 0}，魔尘 ${state.materials["魔尘"] || 0}</small></div></div>
-    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>数量 ${count}，3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="craftRune('${name}')">合成</button></div>`).join("") : "<p>暂无符文。</p>"}
+    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>数量 ${count}，3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div>`).join("") : "<p>暂无符文。</p>"}
+  `;
+}
+
+function renderSkills() {
+  const skills = CLASSES[state.classId].skills;
+  $("tabBody").innerHTML = `
+    <div class="item-row"><div>技能资源<small>技能点 ${state.skillPoints || 0}，技能尘 ${state.skillDust || 0}</small></div></div>
+    ${skills.map((skill) => {
+      const upgraded = upgradedSkill(skill);
+      const cost = skillUpgradeCost(skill.id);
+      const disabled = canUpgradeSkill(skill.id) ? "" : "disabled";
+      return `<div class="item-row skill-row"><div>${skill.name} Lv.${upgraded.level}<small>${skill.desc}<br>倍率 ${upgraded.power}，耗蓝 ${upgraded.mp}。升级消耗 ${cost.points} 技能点 / ${cost.dust} 技能尘</small></div><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div>`;
+    }).join("")}
   `;
 }
 
 // Format an equipment stat summary.
 function statsText(eq) {
-  return Object.entries(eq.stats).map(([key, value]) => `${STAT_NAMES[key] || key}+${value}`).join(" ");
+  return Object.entries(eq.stats).map(([key, value]) => {
+    const enhance = eq.level ? `(+${eq.level})` : "";
+    return `${STAT_NAMES[key] || key}+${value}${enhance}`;
+  }).join(" ");
+}
+
+function equipmentSummary(eq, stateLabel = "") {
+  return `
+    <span class="equipment-meta">
+      <span>评分 ${itemScore(eq)}</span>
+      <span>${SLOT_NAMES[eq.slot]}</span>
+      <span class="quality-${eq.quality}">${eq.quality}</span>
+      <span>强化 +${eq.level}</span>
+      ${stateLabel ? `<span class="state-muted">${stateLabel}</span>` : ""}
+    </span>
+    <small class="equipment-stats">${statsText(eq) || "无属性"}</small>
+  `;
+}
+
+function enhanceText(eq) {
+  return Object.keys(eq.stats).map((key) => `${STAT_NAMES[key] || key}+${eq.level}`).join(" ");
+}
+
+function equipmentDetailMarkup(eq, slotName, runeText) {
+  return `
+    <div class="equipment-detail">
+      <div class="equipment-meta">
+        <span>评分 ${itemScore(eq)}</span>
+        <span>${slotName}</span>
+        <span class="quality-${eq.quality}">${eq.quality}</span>
+        <span>强化 +${eq.level}</span>
+      </div>
+      <div class="detail-row"><b>属性</b><span>${statsText(eq) || "无属性"}</span></div>
+      ${eq.level ? `<div class="detail-row"><b>强化提升</b><span>${enhanceText(eq)}</span></div>` : ""}
+      <div class="detail-row"><b>符文槽</b><span>${runeText}</span></div>
+    </div>
+  `;
+}
+
+function itemScore(item) {
+  if (!item) return 0;
+  if (item.kind === "potion") return item.amount || 0;
+  if (item.kind !== "equip") return 0;
+  const weights = { atk: 11, mag: 11, def: 9, res: 8, spd: 8, luk: 7, hp: 1.2, mp: 1.1 };
+  const statScore = Object.entries(item.stats).reduce((sum, [key, value]) => {
+    return sum + (weights[key] || 5) * (value + item.level);
+  }, 0);
+  const qualityScore = { 普通: 0, 优秀: 8, 稀有: 18, 史诗: 32, 传说: 50 }[item.quality] || 0;
+  const slotScore = (item.runeSlots || 0) * 6 + (item.runes?.length || 0) * 4;
+  return Math.round(statScore + qualityScore + slotScore);
+}
+
+function isBetterThanEquipped(item) {
+  if (item.kind !== "equip") return false;
+  return itemScore(item) > itemScore(state.equipment[item.slot]);
 }
 
 // Render newest adventure log entries.
@@ -893,6 +1373,13 @@ function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return false;
   state = JSON.parse(raw);
+  state.facing = state.facing || "down";
+  state.skillPoints = state.skillPoints || 0;
+  state.skillDust = state.skillDust || 0;
+  state.skillLevels = state.skillLevels || {};
+  for (const skill of CLASSES[state.classId].skills) {
+    state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
+  }
   if (!state.map?.cells?.length || state.map.size !== MAP_SIZE) generateFloor();
   updateVisibility();
   return true;
@@ -911,6 +1398,13 @@ function showModal(title, body, actions) {
 function showEvent(title, body, actionText = "确定") {
   showModal(title, body, [
     { text: actionText, action: closeModal }
+  ]);
+}
+
+function showConfirm(title, body, confirmText, onConfirm) {
+  showModal(title, body, [
+    { text: "取消", action: closeModal },
+    { text: confirmText, action: () => { closeModal(); onConfirm(); } }
   ]);
 }
 

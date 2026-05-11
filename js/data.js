@@ -52,21 +52,27 @@ const SLOTS = ["weapon", "armor", "boots", "ring", "amulet"];
 const SLOT_NAMES = { weapon: "武器", armor: "护甲", boots: "鞋子", ring: "戒指", amulet: "护符" };
 const STAT_NAMES = { atk: "攻击", mag: "法强", def: "防御", res: "抗性", spd: "速度", luk: "幸运" };
 const SAVE_KEY = "rune-dungeon-save-v1";
-const MAP_SIZE = 15;
+const MAP_SIZE = 27;
+const MAP_VIEW_SIZE = 15;
 
 const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
   mage: "assets/dawngeon/player-mage.png",
   ranger: "assets/dawngeon/player-ranger.png",
   monster: "assets/dawngeon/monster.png",
+  monsterRat: "assets/dawngeon/monster-rat.svg",
+  monsterBat: "assets/dawngeon/monster-bat.svg",
+  monsterWolf: "assets/dawngeon/monster-wolf.svg",
   elite: "assets/dawngeon/elite.png",
   boss: "assets/dawngeon/boss.png",
-  chest: "assets/dawngeon/chest.png",
-  altar: "assets/dawngeon/altar.png",
+  chest: "assets/dawngeon/trap.png",
+  altar: "assets/dawngeon/altar-rune.svg",
   forge: "assets/dawngeon/forge.png",
   shop: "assets/dawngeon/shop.png",
-  trap: "assets/dawngeon/trap.png",
-  portal: "assets/dawngeon/portal.png"
+  trap: "assets/dawngeon/trap-spikes.svg",
+  portal: "assets/dawngeon/portal.png",
+  stairsDown: null,
+  stairsUp: null
 };
 
 const LEGEND_ITEMS = [
