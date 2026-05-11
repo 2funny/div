@@ -85,9 +85,9 @@ function themeForFloor(floor) {
   return THEMES.find((theme) => theme.floors.includes(floor)) || THEMES[0];
 }
 
-// Generate a semi-random 9x9 floor with guaranteed path to the portal.
+// Generate a semi-random floor with guaranteed path to the portal.
 function generateFloor() {
-  const size = 9;
+  const size = MAP_SIZE;
   const theme = themeForFloor(state.floor);
   const map = Array.from({ length: size }, (_, y) =>
     Array.from({ length: size }, (_, x) => ({
@@ -100,12 +100,13 @@ function generateFloor() {
   );
 
   if (state.floor === 10) {
-    for (let y = 2; y < 7; y++) {
-      for (let x = 2; x < 7; x++) map[y][x].terrain = "floor";
+    const center = Math.floor(size / 2);
+    for (let y = center - 3; y <= center + 3; y++) {
+      for (let x = center - 3; x <= center + 3; x++) map[y][x].terrain = "floor";
     }
-    map[4][4].object = makeEnemy(true);
-    map[2][2].object = { type: "altar" };
-    map[2][6].object = { type: "forge" };
+    map[center][center].object = makeEnemy(true);
+    map[center - 3][center - 3].object = { type: "altar" };
+    map[center - 3][center + 3].object = { type: "forge" };
   } else {
     for (let y = 1; y < size - 1; y++) {
       for (let x = 1; x < size - 1; x++) {
@@ -114,10 +115,10 @@ function generateFloor() {
       }
     }
     carvePath(map, 1, 1, size - 2, size - 2);
-    scatter(map, "monster", 5 + Math.floor(state.floor / 2));
-    scatter(map, "chest", 2);
-    scatter(map, "trap", state.floor >= 4 ? 2 : 1);
-    scatter(map, "altar", 1);
+    scatter(map, "monster", 10 + Math.floor(state.floor / 2));
+    scatter(map, "chest", 3);
+    scatter(map, "trap", state.floor >= 4 ? 3 : 2);
+    scatter(map, "altar", 2);
     if (state.floor % 3 === 1) scatter(map, "shop", 1);
     if (state.floor % 3 === 2) scatter(map, "forge", 1);
     map[size - 2][size - 2].object = { type: "portal" };
@@ -143,9 +144,12 @@ function carvePath(map, sx, sy, tx, ty) {
 // Place monsters or map objects on empty floor cells.
 function scatter(map, type, count) {
   let placed = 0;
-  while (placed < count) {
-    const x = rand(1, 7);
-    const y = rand(1, 7);
+  let attempts = 0;
+  const max = map.length - 2;
+  while (placed < count && attempts < count * 80) {
+    attempts++;
+    const x = rand(1, max);
+    const y = rand(1, max);
     const cell = map[y][x];
     if (cell.terrain === "floor" && !cell.object && !(x === 1 && y === 1)) {
       cell.object = type === "monster" ? makeEnemy(Math.random() < .14) : { type };
@@ -181,9 +185,8 @@ function makeEnemy(eliteOrBoss = false) {
 function updateVisibility() {
   for (const row of state.map.cells) {
     for (const cell of row) {
-      const dist = Math.abs(cell.x - state.player.x) + Math.abs(cell.y - state.player.y);
-      cell.visible = dist <= 3;
-      if (cell.visible) cell.seen = true;
+      cell.visible = true;
+      cell.seen = true;
     }
   }
 }
@@ -213,6 +216,7 @@ function resolveCell(cell) {
   if (["monster", "elite", "boss"].includes(obj.type)) {
     state.currentEnemy = obj;
     log(`遭遇${obj.name}。`);
+    showEvent("遭遇敌人", `<p>${obj.name}挡住了你的去路。</p><p>你可以手动战斗，也可以根据风险选择一键战斗。</p>`, "进入战斗");
     return;
   }
   if (obj.type === "chest") {
@@ -222,6 +226,7 @@ function resolveCell(cell) {
     state.hp = Math.max(1, state.hp - damage);
     cell.object = null;
     log(`触发陷阱，受到 ${damage} 点伤害。`);
+    showEvent("触发陷阱", `<p>地面机关突然弹起，你受到 ${damage} 点伤害。</p>`, "继续探索");
   } else if (obj.type === "altar") {
     useAltar(cell);
   } else if (obj.type === "portal") {
@@ -232,20 +237,25 @@ function resolveCell(cell) {
 // Resolve chest rewards: equipment, rune, or materials/gold.
 function openChest(cell) {
   const roll = Math.random();
+  let message = "";
   if (roll < .42) {
     const loot = randomEquipment();
     state.inventory.push(loot);
     log(`打开宝箱，获得${loot.name}。`);
+    message = `获得装备：${loot.name}`;
   } else if (roll < .72) {
     const rune = choice(RUNES) + "1";
     state.runes[rune] = (state.runes[rune] || 0) + 1;
     log(`打开宝箱，获得${rune}符文。`);
+    message = `获得符文：${rune}`;
   } else {
     state.materials["强化石"] = (state.materials["强化石"] || 0) + 1;
     state.gold += rand(15, 40);
     log("打开宝箱，获得金币和强化石。");
+    message = "获得金币和强化石";
   }
   cell.object = null;
+  showEvent("打开宝箱", `<p>${message}</p>`, "收下");
 }
 
 // Generate equipment loot with slot, quality, stat, and rune-slot rolls.
@@ -285,6 +295,7 @@ function useAltar(cell) {
   state.mp = Math.min(state.maxMp, state.mp + 14);
   cell.object = null;
   log(`符文祭坛恢复了 ${heal} 点生命和少量法力。`);
+  showEvent("符文祭坛", `<p>祭坛亮起微光，恢复 ${heal} 点生命和少量法力。</p>`, "继续");
 }
 
 // Advance to the next floor and refresh a small amount of resources.
@@ -296,6 +307,7 @@ function nextFloor() {
   state.mp = Math.min(state.maxMp, state.mp + 12);
   log(`进入第 ${state.floor} 层。`);
   saveGame(false);
+  showEvent("进入下一层", `<p>你穿过传送门，抵达第 ${state.floor} 层。</p>`, "继续探索");
 }
 
 // Combine base attributes, equipment, upgrades, and runes.
@@ -586,7 +598,7 @@ function render() {
     $("gameView").classList.add("hidden");
     return;
   }
-  if (!state.map?.cells?.length) generateFloor();
+  if (!state.map?.cells?.length || state.map.size !== MAP_SIZE) generateFloor();
   state.hp = Math.min(state.hp, effectiveMaxHp());
   state.mp = Math.min(state.mp, effectiveMaxMp());
   $("classSelect").classList.add("hidden");
@@ -640,7 +652,6 @@ function renderMap() {
         cells.push(`<button class="tile unseen" type="button" aria-label="未知"></button>`);
         continue;
       }
-      const fog = cell.visible ? "" : " fog";
       const terrain = cell.terrain === "wall" ? "wall" : "floor";
       const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
       const isSelected = selectedTile?.x === cell.x && selectedTile?.y === cell.y;
@@ -649,15 +660,17 @@ function renderMap() {
         : cell.visible && cell.object ? objectSprite(cell.object) : "";
       const objectBadge = cell.visible && cell.object ? badgeForObject(cell.object.type) : "";
       const label = tileLabel(cell, isPlayer);
-      const hint = cell.visible ? `<span class="tile-hint">${label}</span>` : "";
+      const showHint = isPlayer || cell.object || cell.terrain === "wall";
+      const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
+      const title = showHint ? ` title="${label}"` : "";
       const flags = [
         terrain,
-        fog,
         isPlayer ? " current" : "",
         isAdjacent && cell.terrain !== "wall" ? " reachable" : "",
-        isSelected ? " selected" : ""
+        isSelected ? " selected" : "",
+        cell.object ? ` object object-${cell.object.type}` : ""
       ].join("");
-      cells.push(`<button class="tile ${flags}" type="button" title="${label}" aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${hint}</button>`);
+      cells.push(`<button class="tile ${flags}" type="button"${title} aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${hint}</button>`);
     }
   }
   map.innerHTML = cells.join("");
@@ -880,7 +893,7 @@ function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return false;
   state = JSON.parse(raw);
-  if (!state.map?.cells?.length) generateFloor();
+  if (!state.map?.cells?.length || state.map.size !== MAP_SIZE) generateFloor();
   updateVisibility();
   return true;
 }
@@ -892,6 +905,13 @@ function showModal(title, body, actions) {
   $("modalActions").innerHTML = actions.map((action, index) => `<button type="button" onclick="modalAction(${index})">${action.text}</button>`).join("");
   window._modalActions = actions;
   $("modal").classList.remove("hidden");
+}
+
+// Show an attention-grabbing map event message.
+function showEvent(title, body, actionText = "确定") {
+  showModal(title, body, [
+    { text: actionText, action: closeModal }
+  ]);
 }
 
 // Dispatch a modal button action by index.

@@ -52,6 +52,7 @@ const SLOTS = ["weapon", "armor", "boots", "ring", "amulet"];
 const SLOT_NAMES = { weapon: "武器", armor: "护甲", boots: "鞋子", ring: "戒指", amulet: "护符" };
 const STAT_NAMES = { atk: "攻击", mag: "法强", def: "防御", res: "抗性", spd: "速度", luk: "幸运" };
 const SAVE_KEY = "rune-dungeon-save-v1";
+const MAP_SIZE = 15;
 
 const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
