@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>符文地牢</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="topbar">
+      <div>
+        <h1>符文地牢</h1>
+        <p id="subtitle">半随机地牢闯关 RPG</p>
+      </div>
+      <div class="save-actions">
+        <button id="newGameBtn" type="button">新游戏</button>
+        <button id="saveBtn" type="button">保存</button>
+      </div>
+    </section>
+
+    <section id="classSelect" class="class-select"></section>
+
+    <section id="gameView" class="game-view hidden">
+      <aside class="panel hero-panel">
+        <div class="avatar" id="heroAvatar">剑</div>
+        <h2 id="heroName">剑士</h2>
+        <div class="bars">
+          <div class="bar"><span>生命</span><strong id="hpText"></strong><i id="hpBar"></i></div>
+          <div class="bar"><span>法力</span><strong id="mpText"></strong><i id="mpBar"></i></div>
+          <div class="bar"><span>经验</span><strong id="xpText"></strong><i id="xpBar"></i></div>
+        </div>
+        <div id="statsGrid" class="stats-grid"></div>
+        <div class="points">
+          <span>属性点 <b id="statPoints">0</b></span>
+          <span>金币 <b id="goldText">0</b></span>
+        </div>
+      </aside>
+
+      <section class="map-wrap">
+        <div class="floor-title">
+          <span id="floorText"></span>
+          <span id="themeText"></span>
+        </div>
+        <div class="map-stage">
+          <div id="map" class="map" aria-label="地牢地图"></div>
+          <div id="minimap" class="minimap" aria-label="小地图"></div>
+        </div>
+        <div id="legend" class="legend" aria-label="地图图例"></div>
+        <div class="dpad">
+          <button data-move="up" type="button">上</button>
+          <button data-move="left" type="button">左</button>
+          <button data-move="down" type="button">下</button>
+          <button data-move="right" type="button">右</button>
+        </div>
+      </section>
+
+      <aside class="panel action-panel">
+        <h2 id="contextTitle">行动</h2>
+        <div id="contextBody" class="context-body"></div>
+        <div class="tabs">
+          <button data-tab="inventory" type="button">背包</button>
+          <button data-tab="equipment" type="button">装备</button>
+          <button data-tab="craft" type="button">合成</button>
+        </div>
+        <div id="tabBody" class="tab-body"></div>
+
+        <section class="log-panel">
+          <h2>冒险日志</h2>
+          <div id="log" class="log"></div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/bootstrap.js"></script>
+</body>
+</html>
