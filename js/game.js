@@ -677,7 +677,8 @@ function nextFloor() {
   state.mp = Math.min(effectiveMaxMp(), state.mp + 12);
   log(`进入第 ${state.floor} 层。`);
   saveGame(false);
-  showEvent("进入下一层", `<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`, "继续探索");
+  showToast(`<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`)
+  // showEvent("进入下一层", `<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`, "继续探索");
 }
 
 function previousFloor() {
@@ -691,7 +692,8 @@ function previousFloor() {
   state.mp = Math.min(effectiveMaxMp(), state.mp + 5);
   log(`返回第 ${state.floor} 层。`);
   saveGame(false);
-  showEvent("返回上一层", `<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`, "继续探索");
+  showToast(`<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`)
+  // showEvent("返回上一层", `<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`, "继续探索");
 }
 
 function saveCurrentFloor() {
@@ -1650,6 +1652,8 @@ function renderBattleView() {
 }
 
 function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
+  const risk = state.currentEnemy ? battleRisk(state.currentEnemy) : null;
+  const winRate = risk ? percentScore(risk.score) : null;
   return `
     <div class="battle-command-panel">
       <div class="battle-basic-actions">
@@ -1660,7 +1664,8 @@ function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
           <b>防御</b><small>本回合减少伤害</small>
         </button>
         <button class="battle-action auto" type="button" onclick="autoBattle()">
-          <b>一键战斗</b><small>先评估胜率</small>
+          <span class="battle-action-head"><b>一键战斗</b>${risk ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
+          <small>${risk ? risk.label : "先评估胜率"}</small>
         </button>
       </div>
       <div class="battle-skill-panel">
@@ -1674,6 +1679,10 @@ function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
       </div>
     </div>
   `;
+}
+
+function percentScore(score) {
+  return Math.max(0, Math.min(100, Math.round(Number.isFinite(score) ? score * 100 : 0)));
 }
 
 function renderSkillActionButtons(mode = "compact") {
@@ -1921,10 +1930,11 @@ function potionRow(entry) {
 function equipmentInventoryRow(entry) {
   const better = isBetterThanEquipped(entry);
   const hasCurrent = !!state.equipment?.[entry.slot];
+  const compare = hasCurrent ? equipmentCompareText(entry, "inline-equipment-compare") : "";
   return `<div class="item-row equip-row equipment-card ${better ? "better-equipment" : ""}">
+    ${compare ? `<div class="equipment-compare-corner">${compare}</div>` : ""}
     <div><b>${entry.name}</b>${equipmentSummary(entry)}</div>
     <div class="equipment-actions inventory-equipment-actions">
-      ${hasCurrent ? `<button type="button" onclick="showInventoryEquipmentCompare('${entry.id}')">对比</button>` : ""}
       <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
       <button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button>
     </div>
@@ -2037,7 +2047,7 @@ function equippedStateBadge() {
   return `<span class="equipped-badge">已装备</span>`;
 }
 
-function equipmentCompareText(item) {
+function equipmentCompareText(item, extraClass = "") {
   if (!item || item.kind !== "equip") return "";
   const current = state.equipment[item.slot];
   const scoreDelta = itemScore(item) - itemScore(current);
@@ -2056,7 +2066,7 @@ function equipmentCompareText(item) {
   const scoreClass = scoreDelta >= 0 ? "compare-up" : "compare-down";
   const scoreSign = scoreDelta > 0 ? "+" : "";
   return `
-    <small class="equipment-compare">
+    <small class="equipment-compare ${extraClass}">
       <span class="compare-title">装备对比</span>
       <span class="${scoreClass}">评分差 ${scoreSign}${scoreDelta}</span>
       ${statDeltas.join("")}
@@ -2172,6 +2182,16 @@ function showEvent(title, body, actionText = "确定") {
   showModal(title, body, [
     { text: actionText, action: closeModal }
   ]);
+}
+
+function showToast(message, duration = 2600) {
+  const toast = $("toast");
+  toast.innerHTML = message;
+  toast.classList.add("show");
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    toast.classList.remove("show");
+  }, duration);
 }
 
 function showConfirm(title, body, confirmText, onConfirm) {

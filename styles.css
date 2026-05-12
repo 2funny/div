@@ -666,6 +666,27 @@ h2 {
   text-align: left;
 }
 
+.battle-action-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.battle-win-rate {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid rgba(110, 168, 255, .34);
+  border-radius: 999px;
+  background: rgba(110, 168, 255, .12);
+  color: #a9d4ff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .battle-action.primary {
   border-color: rgba(240, 195, 91, .38);
   background: linear-gradient(180deg, rgba(240, 195, 91, .2), rgba(240, 195, 91, .08));
@@ -1527,6 +1548,11 @@ h2 {
   min-width: 0;
 }
 
+.equipment-card {
+  align-items: flex-end;
+  padding-top: 30px;
+}
+
 .equipment-card b,
 .equipment-name {
   display: block;
@@ -1565,7 +1591,7 @@ h2 {
 }
 
 .inventory-equipment-actions {
-  grid-template-columns: repeat(3, minmax(46px, 1fr));
+  grid-template-columns: repeat(2, minmax(48px, 1fr));
 }
 
 .inventory-equipment-actions button {
@@ -1577,6 +1603,27 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 8px;
+}
+
+.equipment-compare-corner {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  left: 8px;
+  min-width: 0;
+}
+
+.inline-equipment-compare {
+  justify-content: flex-end;
+  gap: 3px 6px;
+  margin-top: 0;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: right;
+}
+
+.inline-equipment-compare .compare-title {
+  flex: 0 0 auto;
 }
 
 .compare-title {
@@ -1962,6 +2009,32 @@ h2 {
   border-color: rgba(240, 195, 91, .55);
   background: #3a2f1b;
   color: #ffe6a8;
+}
+
+.toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  z-index: 1100;
+  width: min(420px, calc(100% - 40px));
+  padding: 14px 18px;
+  border: 1px solid rgba(240, 195, 91, .28);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(240, 195, 91, .12), rgba(27, 33, 43, .96));
+  color: #f8e8af;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1.6;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease, transform .22s ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 @keyframes impactShake {

@@ -40,7 +40,8 @@ vm.runInContext(`
   state.runes = { "火焰1": 3 };
   assert(runeEffectText("火焰1").includes("攻击"), "rune effect text should describe the stat bonus");
   const inventory = inventoryGroupMarkup();
-  assert(!inventory.includes("equipment-compare"), "inventory equipment rows should not directly show comparison deltas");
+  assert(inventory.includes("equipment-compare inline-equipment-compare"), "inventory equipment rows should directly show comparison deltas");
+  assert(inventory.includes("equipment-compare-corner"), "inventory equipment comparison should live in the row corner");
   assert(inventory.includes("对比"), "inventory equipment rows should offer a comparison button when same-slot gear is equipped");
   assert(inventory.includes('inventory-subtabs'), "inventory should use a second-level category menu");
   assert(inventory.includes('data-inventory-tab="potions"'), "inventory menu should include potions");
@@ -72,6 +73,16 @@ vm.runInContext(`
   const battleSkills = renderSkillActionButtons("battle");
   assert(battleSkills.includes("battle-skill-card"), "battle skills should render as dedicated skill cards");
   assert(battleSkills.includes("MP不足"), "battle skill cards should explain when MP is insufficient");
+  state.hp = 120;
+  state.stats = { ...CLASSES.warrior.stats };
+  state.equipment = {
+    ...emptyEquipment(),
+    weapon: { id: "old", kind: "equip", name: "Old Sword", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 }
+  };
+  state.currentEnemy = { type: "monster", name: "Slime", hp: 24, maxHp: 24, atk: 8, def: 3 };
+  const battleCommands = renderBattleCommandPanel(32);
+  assert(battleCommands.includes("battle-win-rate"), "auto battle action should show the current win rate beside the button");
+  assert(battleCommands.includes("%"), "auto battle win rate should be shown as a percentage");
   assert(ASSETS.shop.includes("merchant.svg"), "merchant map icon should use a dedicated character sprite");
 
   render = () => {};
