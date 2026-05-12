@@ -193,6 +193,7 @@ vm.runInContext(`
   };
   state.map.cells[1][1].object = { type: "shop" };
   let merchantOpened = false;
+  const realOpenMerchant = openMerchant;
   openMerchant = () => { merchantOpened = true; };
   render = () => {};
   move(-1, 0);
@@ -222,10 +223,76 @@ vm.runInContext(`
   render = () => {};
   move(-1, 0);
   assert.deepStrictEqual(state.player, { x: 2, y: 1 }, "locked chest without a key should block movement");
+  state.facing = "right";
+  move(0, 1);
+  assert.strictEqual(state.facing, "right", "vertical movement should not override an existing horizontal facing");
+  state.player = { x: 2, y: 1 };
   assert.strictEqual(state.map.cells[1][1].object?.type, "lockedChest", "blocked locked chest should remain on the map");
 
   state.keys = 1;
   move(-1, 0);
   assert.deepStrictEqual(state.player, { x: 1, y: 1 }, "locked chest with a key should allow movement after opening");
   assert.strictEqual(state.map.cells[1][1].object, null, "opened locked chest should be removed from the map");
+
+  const gateCell = { terrain: "floor", object: { type: "fenceGate" } };
+  let eventTitle = null;
+  let eventBody = null;
+  showEvent = (title, body) => { eventTitle = title; eventBody = body; };
+  state.keys = 0;
+  openFenceGate(gateCell);
+  assert.strictEqual(gateCell.object?.type, "fenceGate", "fence gate should remain closed without a key");
+  assert(eventBody.includes("钥匙守卫") && eventBody.includes("委托人"), "locked fence hint should explain key sources");
+  state.keys = 1;
+  openFenceGate(gateCell);
+  assert.strictEqual(gateCell.object, null, "fence gate should open when the player has a key");
+  assert.strictEqual(state.keys, 1, "opening the gate should reveal the chest path without spending the chest key");
+  assert(tileLabel({ seen: true, terrain: "floor", object: { type: "lockedChest" } }).includes("钥匙守卫"), "locked chest label should hint at the key guardian");
+
+  state.floor = 1;
+  state.quest = { id: "wardenErrand", floor: 1, kills: 1, target: 2, claimed: false };
+  state.quests = [];
+  const rewards = [];
+  recordQuestKill({ type: "monster", name: "Slime" }, rewards);
+  assert.strictEqual(state.quest.kills, 1, "legacy quest should not progress before being accepted into the quest list");
+
+  let questModal = null;
+  showModal = (title, body, actions) => { questModal = { title, body, actions }; };
+  openQuestNpc();
+  assert(questModal.actions.some((action) => action.text.includes("接受")), "quest NPC should offer an accept action");
+  questModal.actions.find((action) => action.text.includes("接受")).action();
+  assert.strictEqual(state.quests.length, 1, "accepting from an NPC should add an active quest to the quest list");
+  assert.strictEqual(state.quests[0].accepted, true, "accepted quest should be marked active");
+  assert.strictEqual(state.quests[0].kills, 0, "accepted quest starts with fresh tracked progress");
+
+  const acceptedRewards = [];
+  recordQuestKill({ type: "monster", name: "Slime" }, acceptedRewards);
+  assert.strictEqual(state.quests[0].kills, 1, "accepted quest kill progress should advance on monster defeat");
+  assert(acceptedRewards.some((entry) => entry.includes("1/2")), "accepted quest progress should be shown in battle rewards");
+  recordQuestKill({ type: "monster", name: "Bat" }, acceptedRewards);
+  assert.strictEqual(state.quests[0].completed, true, "quest should be marked complete when the target is met");
+  openQuestNpc();
+  questModal.actions.find((action) => action.text.includes("领取")).action();
+  assert.strictEqual(state.quests[0].claimed, true, "quest NPC should mark completed rewards as claimed");
+  assert.strictEqual(state.keys, 2, "quest NPC should reward a rune key");
+
+  const questList = renderQuestList();
+  assert(questList.includes("quest-list"), "task tab should render a quest list");
+  assert(questList.includes("已领取"), "claimed quests should remain visible in the task list");
+
+  state = {
+    floor: 1,
+    gold: 40,
+    keys: 0,
+    inventory: [],
+    quests: [],
+    log: []
+  };
+  let merchantModal = null;
+  showModal = (title, body, actions) => { merchantModal = { title, body, actions }; };
+  openMerchant = realOpenMerchant;
+  openMerchant();
+  assert(merchantModal.actions.some((action) => action.text.includes("商店")), "merchant with a task should keep a shop action");
+  assert(merchantModal.actions.some((action) => action.text.includes("任务")), "merchant with a task should offer a task action");
+  merchantModal.actions.find((action) => action.text.includes("任务")).action();
+  assert(merchantModal.actions.some((action) => action.text.includes("接受")), "merchant task action should open an accept flow");
 `, context);

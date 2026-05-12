@@ -7,6 +7,29 @@ let statDraft = null;
 
 const $ = (id) => document.getElementById(id);
 
+const QUEST_DEFS = {
+  wardenErrand: {
+    id: "wardenErrand",
+    giver: "questNpc",
+    title: "巡夜人委托",
+    giverName: "巡夜人",
+    desc: "清掉本层游荡怪物，换取打开符文锁的钥匙。",
+    target: 2,
+    rewardGold: (floor) => 30 + floor * 5,
+    rewardKeys: 1
+  },
+  merchantRoute: {
+    id: "merchantRoute",
+    giver: "shop",
+    title: "商路清理",
+    giverName: "流动商队",
+    desc: "帮商人扫清附近怪物，换取补给和金币。",
+    target: 2,
+    rewardGold: (floor) => 20 + floor * 6,
+    rewardPotion: "hp"
+  }
+};
+
 // Random and ID helpers used by map generation, loot, and item creation.
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -49,6 +72,8 @@ function startGame(classId) {
     skillPoints: 0,
     skillDust: 0,
     keys: 0,
+    quest: null,
+    quests: [],
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     inventory: [
       potion("小型生命药水", "hp", 40),
@@ -140,12 +165,14 @@ function generateFloor() {
     const mainPath = carveMainRoute(map, 1, 1, size - 2, size - 2);
     widenMainRoute(map, mainPath);
     carveSideRooms(map, mainPath, 14 + Math.floor(state.floor / 2));
+    carveStructuredRooms(map, mainPath, 5);
     placeTreasureEncounters(map, 5);
     scatter(map, "monster", 16 + Math.floor(state.floor * 1.5));
     scatter(map, "trap", state.floor >= 4 ? 5 : 3);
     scatter(map, "altar", 3);
     if (state.floor % 3 === 1) scatter(map, "shop", 1);
     if (state.floor % 3 === 2) scatter(map, "forge", 1);
+    placeQuestNpc(map);
     if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
     map[size - 2][size - 2].object = { type: "stairsDown" };
   }
@@ -256,6 +283,55 @@ function shuffledDirections() {
   return dirs.sort(() => Math.random() - .5);
 }
 
+function carveStructuredRooms(map, mainPath, count) {
+  const anchors = mainPath.filter((cell) => cell.x > 5 && cell.y > 5 && cell.x < map.length - 6 && cell.y < map.length - 6);
+  let placed = 0;
+  let attempts = 0;
+  while (placed < count && anchors.length && attempts < count * 18) {
+    attempts++;
+    const anchor = anchors[(placed * 7 + attempts) % anchors.length];
+    for (const dir of shuffledDirections()) {
+      if (carveStructuredRoom(map, anchor, dir, `room-${state.floor}-${placed}`)) {
+        placed++;
+        break;
+      }
+    }
+  }
+}
+
+function carveStructuredRoom(map, anchor, dir, roomId) {
+  const doorX = anchor.x + dir.x;
+  const doorY = anchor.y + dir.y;
+  const cx = anchor.x + dir.x * 5;
+  const cy = anchor.y + dir.y * 5;
+  const radius = 2;
+  if (cx - radius <= 0 || cy - radius <= 0 || cx + radius >= map.length - 1 || cy + radius >= map.length - 1) return false;
+  const cells = [];
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      const cell = map[y]?.[x];
+      if (!cell || cell.object || cell.mainPath) return false;
+      cells.push(cell);
+    }
+  }
+  for (let i = 1; i <= 3; i++) {
+    const cell = map[anchor.y + dir.y * i]?.[anchor.x + dir.x * i];
+    if (!cell || cell.object) return false;
+  }
+  for (const cell of cells) {
+    const edge = cell.x === cx - radius || cell.x === cx + radius || cell.y === cy - radius || cell.y === cy + radius;
+    cell.terrain = edge ? "wall" : "floor";
+    cell.roomId = roomId;
+  }
+  for (let i = 1; i <= 3; i++) {
+    const cell = map[anchor.y + dir.y * i][anchor.x + dir.x * i];
+    cell.terrain = i === 3 ? "door" : "floor";
+    cell.roomId = roomId;
+  }
+  map[doorY][doorX].terrain = "floor";
+  return true;
+}
+
 // Place monsters or map objects on empty floor cells.
 function scatter(map, type, count) {
   let placed = 0;
@@ -293,11 +369,24 @@ function placeLockedTreasureRoom(map) {
   for (const center of candidates.slice(0, 36)) {
     if (!carveRoom(map, center.x, center.y, 2)) continue;
     center.object = { type: "lockedChest" };
+    placeFenceRing(map, center.x, center.y);
     placeKeyGuardianNear(map, center.x, center.y);
     placeGuardNear(map, center.x, center.y, false);
     return true;
   }
   return false;
+}
+
+function placeFenceRing(map, x, y) {
+  const gate = choice(cardinalNeighbors(map, x, y).filter((cell) => cell.terrain === "floor" && !cell.object));
+  for (const cell of cardinalNeighbors(map, x, y)) {
+    if (cell.object) continue;
+    if (gate && cell.x === gate.x && cell.y === gate.y) {
+      cell.object = { type: "fenceGate" };
+    } else {
+      cell.terrain = "fence";
+    }
+  }
 }
 
 function placeTreasureRoom(map) {
@@ -363,12 +452,29 @@ function placeGuardNear(map, x, y, eliteChance = false) {
 
 function placeKeyGuardianNear(map, x, y) {
   const candidates = cellsWithin(map, x, y, 2)
-    .filter((cell) => cell.terrain === "floor" && !cell.object && (cell.x !== x || cell.y !== y))
+    .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x, y }) > 1)
     .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
   const guard = candidates[0];
   if (!guard) return false;
   guard.object = makeKeyGuardian();
   return true;
+}
+
+function placeQuestNpc(map) {
+  const candidates = interiorCells(map)
+    .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x: 1, y: 1 }) > 4)
+    .sort((a, b) => npcScore(map, b) - npcScore(map, a));
+  const cell = candidates.find((candidate) => cellsWithin(map, candidate.x, candidate.y, 3).some((nearby) => nearby.roomId)) || candidates[0];
+  if (!cell) return false;
+  cell.object = { type: "questNpc", questId: "wardenErrand" };
+  state.quest = state.quest || { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
+  return true;
+}
+
+function npcScore(map, cell) {
+  const roomBonus = cell.roomId ? 8 : 0;
+  const exit = { x: map.length - 2, y: map.length - 2 };
+  return roomBonus + Math.min(12, distance(cell, exit)) - floorNeighborCount(map, cell.x, cell.y);
 }
 
 function interiorCells(map) {
@@ -485,13 +591,15 @@ function updateVisibility() {
 function move(dx, dy) {
   if (state.currentEnemy) return;
   if (dx < 0) state.facing = "left";
-  if (dx > 0) state.facing = "right";
-  if (dy < 0) state.facing = "up";
-  if (dy > 0) state.facing = "down";
+  else if (dx > 0) state.facing = "right";
+  else if (!["left", "right"].includes(state.facing)) {
+    if (dy < 0) state.facing = "up";
+    if (dy > 0) state.facing = "down";
+  }
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
   const cell = state.map.cells[ny]?.[nx];
-  if (!cell || cell.terrain === "wall") {
+  if (!cell || ["wall", "fence"].includes(cell.terrain)) {
     render();
     return;
   }
@@ -534,6 +642,10 @@ function resolveCell(cell) {
     openMerchant();
   } else if (obj.type === "forge") {
     openForge();
+  } else if (obj.type === "questNpc") {
+    openQuestNpc();
+  } else if (obj.type === "fenceGate") {
+    openFenceGate(cell);
   } else if (obj.type === "stairsDown" || obj.type === "portal") {
     nextFloor();
   } else if (obj.type === "stairsUp") {
@@ -624,6 +736,131 @@ function openLockedChest(cell) {
   cell.object = null;
   log(`打开上锁宝箱，获得${loot.name}、${rune}符文和 ${gold} 金币。`);
   showEvent("打开上锁宝箱", `<p>消耗 1 把符文钥匙。</p><p>获得装备：${loot.name}<br>获得符文：${rune}<br>金币 +${gold}</p>`, "收下");
+}
+
+function openFenceGate(cell) {
+  state.keys = state.keys || 0;
+  if (state.keys <= 0) {
+    log("门栅被符文锁住了，附近守卫或委托人可能知道钥匙线索。");
+    showEvent("符文门栅", "<p>铁栅栏围住了宝箱，锁孔里有符文光。先击败钥匙守卫，或向中立委托人完成请求来获得钥匙。</p>", "知道了");
+    return;
+  }
+  cell.object = null;
+  cell.terrain = "floor";
+  log("符文钥匙照亮门栅，通往宝箱的入口打开了。");
+  showEvent("门栅打开", "<p>钥匙的光没有被消耗，真正的锁还在宝箱上。现在可以进入围栏内开箱。</p>", "继续探索");
+}
+
+function openQuestNpc() {
+  openQuestFromGiver("questNpc");
+}
+
+function ensureQuest() {
+  if (!state.quest || state.quest.floor !== state.floor) {
+    state.quest = { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
+  }
+  return state.quest;
+}
+
+function questDefinitionsForGiver(giver) {
+  return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver);
+}
+
+function ensureQuestList() {
+  state.quests = Array.isArray(state.quests) ? state.quests : [];
+  return state.quests;
+}
+
+function questRewardGold(def, floor = state.floor) {
+  return typeof def.rewardGold === "function" ? def.rewardGold(floor) : (def.rewardGold || 0);
+}
+
+function createQuestState(def, floor = state.floor) {
+  return {
+    id: def.id,
+    giver: def.giver,
+    floor,
+    kills: 0,
+    target: def.target,
+    accepted: true,
+    completed: false,
+    claimed: false
+  };
+}
+
+function questState(id, floor = state.floor) {
+  return ensureQuestList().find((quest) => quest.id === id && quest.floor === floor);
+}
+
+function acceptQuest(id) {
+  const def = QUEST_DEFS[id];
+  if (!def) return null;
+  let quest = questState(id);
+  if (!quest) {
+    quest = createQuestState(def);
+    ensureQuestList().push(quest);
+  }
+  quest.accepted = true;
+  if (id === "wardenErrand") state.quest = quest;
+  log(`接受任务：${def.title}。`);
+  render();
+  return quest;
+}
+
+function openQuestFromGiver(giver) {
+  const def = questDefinitionsForGiver(giver)[0];
+  if (!def) {
+    showEvent("暂无任务", "<p>这里暂时没有新的委托。</p>", "离开");
+    return;
+  }
+  const quest = questState(def.id);
+  const progress = quest || { ...createQuestState(def), accepted: false };
+  const remaining = Math.max(0, def.target - progress.kills);
+  const rewardGold = questRewardGold(def, progress.floor);
+  const rewardParts = [
+    def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
+    rewardGold ? `金币 +${rewardGold}` : "",
+    def.rewardPotion ? "小型生命药水 +1" : ""
+  ].filter(Boolean).join("<br>");
+  const body = `
+    <div class="quest-panel">
+      <b>${def.giverName}</b>
+      <p>${def.desc}</p>
+      <small>进度：${progress.kills}/${def.target}${remaining ? `，还差 ${remaining} 个。` : "，可以领取奖励。"}</small>
+      <div class="quest-reward">${rewardParts}</div>
+    </div>
+  `;
+  const actions = [];
+  if (!quest) {
+    actions.push({ text: "接受任务", action: () => { closeModal(); acceptQuest(def.id); } });
+  } else if (quest.completed && !quest.claimed) {
+    actions.push({ text: "领取奖励", action: () => { closeModal(); claimQuestReward(def.id); } });
+  } else {
+    actions.push({ text: quest.claimed ? "已领取" : "继续任务", action: closeModal });
+  }
+  actions.push({ text: "离开", action: closeModal });
+  showModal(def.title, body, actions);
+}
+
+function claimQuestReward(id) {
+  const def = QUEST_DEFS[id];
+  const quest = questState(id);
+  if (!def || !quest || !quest.completed || quest.claimed) return;
+  const rewardGold = questRewardGold(def, quest.floor);
+  quest.claimed = true;
+  state.keys = (state.keys || 0) + (def.rewardKeys || 0);
+  state.gold += rewardGold;
+  if (def.rewardPotion) {
+    state.inventory = state.inventory || [];
+    state.inventory.push(potion("小型生命药水", "hp", 40));
+  }
+  log(`完成任务：${def.title}。`);
+  showEvent("任务完成", `<p>${def.giverName}交付了报酬。</p><p>${[
+    def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
+    rewardGold ? `金币 +${rewardGold}` : "",
+    def.rewardPotion ? "小型生命药水 +1" : ""
+  ].filter(Boolean).join("<br>")}</p>`, "收下");
+  render();
 }
 
 // Generate equipment loot with slot, quality, stat, and rune-slot rolls.
@@ -915,6 +1152,7 @@ function winBattle(enemy) {
     `经验 +${enemy.xp}`,
     `金币 +${enemy.gold}`
   ];
+  recordQuestKill(enemy, rewards);
   rewards.push(...maybeDrop(enemy));
   const levelBefore = state.level;
   while (state.xp >= state.xpNext) levelUp();
@@ -927,6 +1165,25 @@ function winBattle(enemy) {
     showModal(`击败 ${enemy.name}`, `<p>战斗结束，你清点了这次收获。</p>${battleResultList(rewards)}`, [
       { text: "收下", action: closeModal }
     ]);
+  }
+}
+
+function recordQuestKill(enemy, rewards = []) {
+  if (!enemy || enemy.type === "boss") return;
+  for (const quest of ensureQuestList()) {
+    if (!quest.accepted || quest.claimed || quest.completed || quest.floor !== state.floor) continue;
+    const def = QUEST_DEFS[quest.id];
+    if (!def) continue;
+    quest.kills++;
+    if (quest.kills >= quest.target) {
+      quest.kills = quest.target;
+      quest.completed = true;
+      log(`${def.title}完成了，回到${def.giverName}处领取奖励。`);
+      rewards.push(`${def.title} ${quest.kills}/${quest.target}`);
+      rewards.push(`回${def.giverName}处领取奖励`);
+    } else {
+      rewards.push(`${def.title} ${quest.kills}/${quest.target}`);
+    }
   }
 }
 
@@ -1104,7 +1361,7 @@ function applyStatDraft() {
 
 function isBlockingInteraction(obj) {
   if (!obj) return false;
-  if (["shop", "forge"].includes(obj.type)) return true;
+  if (["shop", "forge", "questNpc", "fenceGate"].includes(obj.type)) return true;
   if (obj.type === "lockedChest") return (state.keys || 0) <= 0;
   return false;
 }
@@ -1278,6 +1535,29 @@ function buy(kind) {
 }
 
 function openMerchant() {
+  const hasTask = questDefinitionsForGiver("shop").length > 0;
+  if (!hasTask) {
+    openMerchantShop();
+    return;
+  }
+  showModal("流动商队", `
+    <div class="merchant-panel">
+      <div class="merchant-hero">
+        <div class="merchant-portrait">${sprite("merchant", ASSETS.shop, "商人")}</div>
+        <div class="merchant-copy">
+          <b>流动补给</b>
+          <small>商人拦住去路，既能交易，也有需要冒险者处理的路面麻烦。</small>
+        </div>
+      </div>
+    </div>
+  `, [
+    { text: "打开商店", action: openMerchantShop },
+    { text: "查看任务", action: () => openQuestFromGiver("shop") },
+    { text: "离开", action: closeModal }
+  ]);
+}
+
+function openMerchantShop() {
   showModal("流动商队", `
     <div class="merchant-panel">
       <div class="merchant-hero">
@@ -1459,22 +1739,21 @@ function renderMap() {
         cells.push(`<button class="tile unseen" type="button" aria-label="未知"></button>`);
         continue;
       }
-      const terrain = cell.terrain === "wall" ? "wall" : "floor";
+      const terrain = ["wall", "door", "fence"].includes(cell.terrain) ? cell.terrain : "floor";
       const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
       const isSelected = selectedTile?.x === cell.x && selectedTile?.y === cell.y;
-      const isAdjacent = Math.abs(cell.x - state.player.x) + Math.abs(cell.y - state.player.y) === 1;
       const showObject = shouldShowMapObject(cell);
       const tileSprite = isPlayer ? sprite(`player facing-${state.facing || "down"}`, assetForClass(state.classId), CLASSES[state.classId].name)
         : showObject ? objectSprite(cell.object) : "";
       const objectBadge = showObject ? badgeForObject(cell.object.type) : "";
       const label = tileLabel(cell, isPlayer);
-      const showHint = isPlayer || showObject || cell.terrain === "wall";
+      const showHint = isPlayer || showObject || ["wall", "door", "fence"].includes(cell.terrain);
       const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
-      const title = showHint ? ` title="${label}"` : "";
+      const title = "";
       const flags = [
         terrain,
         isPlayer ? " current" : "",
-        isAdjacent && cell.terrain !== "wall" ? " reachable" : "",
+        "",
         isSelected ? " selected" : "",
         cell.object ? ` object object-${cell.object.type}` : ""
       ].join("");
@@ -1519,7 +1798,7 @@ function renderMinimap() {
       const classes = [
         "mini-cell",
         cell.seen ? "seen" : "unknown",
-        cell.terrain === "wall" ? "mini-wall" : "mini-floor",
+        ["wall", "fence"].includes(cell.terrain) ? "mini-wall" : "mini-floor",
         cell.seen && cell.object ? `obj-${cell.object.type}` : "",
         inView ? "in-view" : "",
         isPlayer ? "mini-player" : ""
@@ -1570,6 +1849,8 @@ function minimapObjectIcon(obj) {
     altar: { cls: "altar", src: ASSETS.altar, alt: "祭坛" },
     forge: { cls: "forge", src: ASSETS.forge, alt: "合成台" },
     shop: { cls: "merchant", src: ASSETS.shop, alt: "商人" },
+    questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
+    fenceGate: { cls: "fence-gate", src: ASSETS.fenceGate, alt: "门栅" },
     trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
     portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
     stairsDown: { cls: "stairs-down", src: null, alt: "下行楼梯" },
@@ -1656,19 +1937,21 @@ function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
   const winRate = risk ? percentScore(risk.score) : null;
   return `
     <div class="battle-command-panel">
-      <div class="battle-basic-actions">
-        <button class="battle-action primary" type="button" onclick="attackEnemy('attack')">
-          <b>普通攻击</b><small>稳定造成武器伤害</small>
-        </button>
-        <button class="battle-action" type="button" onclick="attackEnemy('defend')">
-          <b>防御</b><small>本回合减少伤害</small>
-        </button>
-        <button class="battle-action auto" type="button" onclick="autoBattle()">
-          <span class="battle-action-head"><b>一键战斗</b>${risk ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
-          <small>${risk ? risk.label : "先评估胜率"}</small>
-        </button>
+      <div class="battle-basic-actions battle-command-section">
+        <div class="battle-panel-title">
+          <span>行动</span>
+          <small>本回合</small>
+        </div>
+        <div class="battle-action-grid">
+          <button class="battle-action" type="button" onclick="attackEnemy('attack')">
+            <b>普通攻击</b><small>稳定造成武器伤害</small>
+          </button>
+          <button class="battle-action" type="button" onclick="attackEnemy('defend')">
+            <b>防御</b><small>本回合减少伤害</small>
+          </button>
+        </div>
       </div>
-      <div class="battle-skill-panel">
+      <div class="battle-skill-panel battle-command-section">
         <div class="battle-panel-title">
           <span>技能</span>
           <small>MP ${Math.ceil(state.mp)}/${mpMax}</small>
@@ -1676,6 +1959,16 @@ function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
         <div class="battle-skill-grid">
           ${renderSkillActionButtons("battle")}
         </div>
+      </div>
+      <div class="battle-auto-panel battle-command-section">
+        <div class="battle-panel-title">
+          <span>战术</span>
+          ${risk ? `<small>${risk.label}</small>` : "<small>评估</small>"}
+        </div>
+        <button class="battle-action auto" type="button" onclick="autoBattle()">
+          <span class="battle-action-head"><b>一键战斗</b>${risk ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
+          <small>根据当前血量、属性和敌人强度自动结算</small>
+        </button>
       </div>
     </div>
   `;
@@ -1729,6 +2022,8 @@ function objectSprite(obj) {
     altar: ["altar", ASSETS.altar, "祭坛"],
     forge: ["forge", ASSETS.forge, "合成台"],
     shop: ["merchant", ASSETS.shop, "商人"],
+    questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
+    fenceGate: ["fence-gate", ASSETS.fenceGate, "门栅"],
     trap: ["trap", ASSETS.trap, "陷阱"],
     portal: ["portal", ASSETS.portal, "传送门"],
     stairsDown: ["stairs-down", null, "下行楼梯"],
@@ -1763,6 +2058,8 @@ function badgeForObject(type) {
     altar: "坛",
     forge: "锻",
     shop: "商",
+    questNpc: "托",
+    fenceGate: "栅",
     trap: "陷",
     portal: "门",
     stairsDown: "下",
@@ -1776,6 +2073,8 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
   if (!reveal && !cell.seen) return "未知区域";
   if (isPlayer) return `你的位置：${CLASSES[state.classId].name}`;
   if (cell.terrain === "wall") return "墙壁：无法通行";
+  if (cell.terrain === "fence") return "铁栅栏：围住宝箱，寻找门栅入口";
+  if (cell.terrain === "door") return "房间门：进入封闭房间";
   if (!cell.object) return "地面：可通行";
   if (cell.object.type === "trap") return "地面：可通行";
   const labels = {
@@ -1783,10 +2082,12 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
     elite: "精英怪：更危险，掉落更好",
     boss: "Boss：本层首领",
     chest: "宝箱：可能获得装备、符文或金币",
-    lockedChest: "上锁宝箱：需要符文钥匙，通常由附近守卫掉落",
+    lockedChest: "上锁宝箱：需要符文钥匙。钥匙可以从附近钥匙守卫、Boss或中立委托人处获得",
     altar: "符文祭坛：恢复生命和法力",
     forge: "合成台：强化装备或合成符文",
     shop: "商人：购买药水和补给",
+    questNpc: "中立委托人：完成任务获得钥匙和金币",
+    fenceGate: "符文门栅：有钥匙后可打开围栏入口",
     trap: "陷阱：触发后受到伤害",
     portal: "传送门：进入下一层",
     stairsDown: "下行楼梯：进入下一层",
@@ -1881,6 +2182,36 @@ function renderContext() {
 function renderTab() {
   if (activeTab === "inventory") renderInventory();
   if (activeTab === "skills") renderSkills();
+  if (activeTab === "quests") $("tabBody").innerHTML = renderQuestList();
+}
+
+function renderQuestList() {
+  const quests = ensureQuestList();
+  if (!quests.length) {
+    return `<section class="quest-list"><p>暂无任务。和商人或委托人交谈后，可以在这里追踪目标。</p></section>`;
+  }
+  const rows = quests.map((quest) => {
+    const def = QUEST_DEFS[quest.id] || { title: "未知任务", giverName: "未知", desc: "", rewardGold: 0 };
+    const stateText = quest.claimed ? "已领取" : quest.completed ? "可领取" : "进行中";
+    const rewardGold = questRewardGold(def, quest.floor);
+    const rewards = [
+      def.rewardKeys ? `钥匙 +${def.rewardKeys}` : "",
+      rewardGold ? `金币 +${rewardGold}` : "",
+      def.rewardPotion ? "药水 +1" : ""
+    ].filter(Boolean).join(" · ");
+    return `
+      <article class="quest-row ${quest.completed && !quest.claimed ? "ready" : ""}">
+        <div>
+          <b>${def.title}</b>
+          <small>${def.giverName} · 第 ${quest.floor} 层 · ${quest.kills}/${quest.target}</small>
+          <p>${def.desc}</p>
+          <small>${rewards}</small>
+        </div>
+        <span>${stateText}</span>
+      </article>
+    `;
+  }).join("");
+  return `<section class="quest-list">${rows}</section>`;
 }
 
 // Render inventory rows and item action buttons.
@@ -2051,6 +2382,8 @@ function equipmentCompareText(item, extraClass = "") {
   if (!item || item.kind !== "equip") return "";
   const current = state.equipment[item.slot];
   const scoreDelta = itemScore(item) - itemScore(current);
+  const direction = scoreDelta >= 0 ? "up" : "down";
+  const arrow = scoreDelta >= 0 ? "↑" : "↓";
   const statKeys = Array.from(new Set([
     ...Object.keys(current?.stats || {}),
     ...Object.keys(item.stats || {})
@@ -2067,6 +2400,10 @@ function equipmentCompareText(item, extraClass = "") {
   const scoreSign = scoreDelta > 0 ? "+" : "";
   return `
     <small class="equipment-compare ${extraClass}">
+      <span class="compare-badge compare-badge-${direction}" aria-label="${scoreDelta >= 0 ? "更好" : "更坏"}">
+        <span class="compare-arrow">${arrow}</span>
+        <span>${scoreSign}${scoreDelta}</span>
+      </span>
       <span class="compare-title">装备对比</span>
       <span class="${scoreClass}">评分差 ${scoreSign}${scoreDelta}</span>
       ${statDeltas.join("")}
@@ -2147,6 +2484,8 @@ function loadGame() {
   state.skillPoints = state.skillPoints || 0;
   state.skillDust = state.skillDust || 0;
   state.keys = state.keys || 0;
+  state.quest = state.quest || null;
+  state.quests = Array.isArray(state.quests) ? state.quests : [];
   state.floorStates = state.floorStates || {};
   state.skillLevels = state.skillLevels || {};
   for (const skill of CLASSES[state.classId].skills) {

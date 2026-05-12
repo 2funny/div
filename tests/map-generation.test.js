@@ -17,13 +17,14 @@ vm.runInContext(fs.readFileSync("js/data.js", "utf8"), context);
 vm.runInContext(fs.readFileSync("js/game.js", "utf8"), context);
 vm.runInContext(`
   function reachableFloorCount(map, start) {
+    const passable = (cell) => ["floor", "door"].includes(cell.terrain);
     const key = (cell) => cell.x + "," + cell.y;
     const visited = new Set([key(start)]);
     const queue = [start];
     while (queue.length) {
       const cell = queue.shift();
       for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
-        if (next.terrain !== "floor" || visited.has(key(next))) continue;
+        if (!passable(next) || visited.has(key(next))) continue;
         visited.add(key(next));
         queue.push(next);
       }
@@ -40,11 +41,15 @@ vm.runInContext(`
   const generated = state.map.cells;
   const generatedCells = generated.flat();
   const floorCells = generatedCells.filter((cell) => cell.terrain === "floor");
+  const passableCells = generatedCells.filter((cell) => ["floor", "door"].includes(cell.terrain));
   const mainPathCells = generatedCells.filter((cell) => cell.mainPath);
   assert(floorCells.length / generatedCells.length < .58, "generated floor should not be an open field");
   assert(floorCells.length / generatedCells.length > .24, "generated floor should still have enough playable space");
   assert(mainPathCells.length >= MAP_SIZE + 8, "generated floor should have a clear main trunk path");
-  assert.strictEqual(reachableFloorCount(generated, generated[1][1]), floorCells.length, "all playable floor cells should connect to the main route");
+  assert.strictEqual(reachableFloorCount(generated, generated[1][1]), passableCells.length, "all playable floor cells should connect to the main route");
+  assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
+  assert(generatedCells.some((cell) => cell.roomId && cell.terrain === "floor"), "generated floor should include enclosed room interiors");
+  assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
 
   state = { floor: 3 };
   const size = 17;
@@ -71,6 +76,8 @@ vm.runInContext(`
     assert.notDeepStrictEqual([chest.x, chest.y], [size - 2, size - 2], "chest should not occupy downstairs");
   }
   const lockedChest = treasure.find((cell) => cell.object?.type === "lockedChest");
+  assert(cardinalNeighbors(map, lockedChest.x, lockedChest.y).some((cell) => cell.terrain === "fence"), "locked chest should be protected by a fence ring");
+  assert(cardinalNeighbors(map, lockedChest.x, lockedChest.y).some((cell) => cell.object?.type === "fenceGate"), "locked chest fence ring should include a gate");
   const keyGuardian = cellsWithin(map, lockedChest.x, lockedChest.y, 2)
     .find((cell) => cell.object?.dropsKey);
   assert(keyGuardian, "locked chest room should have a key guardian nearby");

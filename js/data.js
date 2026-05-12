@@ -59,21 +59,25 @@ const VISION_RADIUS = 3;
 const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
   mage: "assets/dawngeon/player-mage.png",
-  ranger: "assets/dawngeon/player-ranger.png",
-  monster: "assets/dawngeon/monster.png",
-  monsterRat: "assets/dawngeon/monster-rat.svg",
-  monsterBat: "assets/dawngeon/monster-bat.svg",
-  monsterWolf: "assets/dawngeon/monster-wolf.svg",
-  elite: "assets/dawngeon/elite.png",
-  boss: "assets/dawngeon/boss.png",
+  ranger: "assets/dawngeon/player-ranger-dark.svg",
+  monster: "assets/dawngeon/monster-slime-dark.svg",
+  monsterRat: "assets/dawngeon/monster-rat-dark.svg",
+  monsterBat: "assets/dawngeon/monster-bat-dark.svg",
+  monsterWolf: "assets/dawngeon/monster-wolf-dark.svg",
+  elite: "assets/dawngeon/elite-dark.svg",
+  boss: "assets/dawngeon/boss-dark.svg",
   chest: "assets/dawngeon/chest.png",
-  altar: "assets/dawngeon/altar-rune.svg",
-  forge: "assets/dawngeon/forge.png",
-  shop: "assets/dawngeon/merchant.svg",
-  trap: "assets/dawngeon/trap-spikes.svg",
-  portal: "assets/dawngeon/portal.png",
-  stairsDown: null,
-  stairsUp: null
+  altar: "assets/dawngeon/altar-dark.svg",
+  forge: "assets/dawngeon/forge-dark.svg",
+  shop: "assets/dawngeon/merchant-dark.svg",
+  questNpc: "assets/dawngeon/quest-npc-dark.svg",
+  fenceGate: "assets/dawngeon/fence-gate-dark.svg",
+  trap: "assets/dawngeon/trap-spikes-dark.svg",
+  portal: "assets/dawngeon/portal-dark.svg",
+  stairsDown: "assets/dawngeon/stairs-down-dark.svg",
+  stairsUp: "assets/dawngeon/stairs-up-dark.svg",
+  floor: "assets/dawngeon/floor-dark.svg",
+  wall: "assets/dawngeon/wall-dark.svg"
 };
 
 const LEGEND_ITEMS = [
@@ -86,6 +90,8 @@ const LEGEND_ITEMS = [
   ["altar", "祭坛", "恢复"],
   ["forge", "合成", "强化/符文"],
   ["shop", "商人", "补给"],
+  ["questNpc", "委托", "中立委托人"],
+  ["fenceGate", "门栅", "需要钥匙打开"],
   ["trap", "陷阱", "伤害"],
   ["portal", "传送", "下一层"]
 ];

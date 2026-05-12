@@ -42,7 +42,8 @@ vm.runInContext(`
   const inventory = inventoryGroupMarkup();
   assert(inventory.includes("equipment-compare inline-equipment-compare"), "inventory equipment rows should directly show comparison deltas");
   assert(inventory.includes("equipment-compare-corner"), "inventory equipment comparison should live in the row corner");
-  assert(inventory.includes("对比"), "inventory equipment rows should offer a comparison button when same-slot gear is equipped");
+  assert(inventory.includes("compare-badge compare-badge-up"), "better equipment should show a persistent green up badge");
+  assert(inventory.includes("compare-arrow"), "equipment comparison badge should include a directional arrow mark");
   assert(inventory.includes('inventory-subtabs'), "inventory should use a second-level category menu");
   assert(inventory.includes('data-inventory-tab="potions"'), "inventory menu should include potions");
   assert(inventory.includes('data-inventory-tab="equipment"'), "inventory menu should include equipment");
@@ -81,12 +82,30 @@ vm.runInContext(`
   };
   state.currentEnemy = { type: "monster", name: "Slime", hp: 24, maxHp: 24, atk: 8, def: 3 };
   const battleCommands = renderBattleCommandPanel(32);
+  assert(battleCommands.includes("battle-auto-panel"), "auto battle should live in a separate tactics panel");
+  assert(!battleCommands.includes("battle-action primary"), "normal attack should not be styled as the recommended action");
   assert(battleCommands.includes("battle-win-rate"), "auto battle action should show the current win rate beside the button");
   assert(battleCommands.includes("%"), "auto battle win rate should be shown as a percentage");
-  assert(ASSETS.shop.includes("merchant.svg"), "merchant map icon should use a dedicated character sprite");
+  assert(ASSETS.shop.includes("merchant"), "merchant map icon should use a dedicated dungeon character sprite");
+  assert(ASSETS.questNpc && ASSETS.questNpc !== ASSETS.shop, "quest NPC should not reuse the merchant icon");
+  assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");
+  assert(ASSETS.floor && ASSETS.wall, "floor and wall should have dedicated dungeon texture assets");
+  assert.strictEqual(objectSprite({ type: "questNpc" }).includes(ASSETS.questNpc), true, "quest NPC sprite should render its own asset");
+  const downgrade = { id: "bad", kind: "equip", name: "Bad Sword", slot: "weapon", quality: "普通", stats: { atk: 1 }, runeSlots: 0, runes: [], level: 0 };
+  const worseCompare = equipmentCompareText(downgrade, "inline-equipment-compare");
+  assert(worseCompare.includes("compare-badge compare-badge-down"), "worse equipment should show a persistent red down badge");
+  assert(worseCompare.includes("↓"), "worse equipment should use a down arrow");
 
   render = () => {};
   unequipItem("weapon");
   assert.strictEqual(state.equipment.weapon, null, "unequip clears the slot");
   assert(state.inventory.some((entry) => entry.id === "old"), "unequip returns item to inventory");
 `, context);
+
+const css = fs.readFileSync("styles.css", "utf8");
+const gameSource = fs.readFileSync("js/game.js", "utf8");
+assert(!css.includes(".tile.reachable::after"), "movable tiles should not render a persistent reachable highlight dot");
+assert(!css.includes("better-equipment:hover::after"), "equipment upgrade markers should not be hover-only");
+assert(css.includes(".door::after"), "door art should include a layered dark dungeon overlay");
+assert(css.includes("bottom: 24px"), "interaction toasts should be anchored low instead of crowding the top edge");
+assert(!gameSource.includes('title="${label}"'), "map object hints should avoid native browser tooltips that crowd the upper corner");
