@@ -25,7 +25,7 @@ document.querySelectorAll("[data-move]").forEach((button) => {
   });
 });
 
-// Side panel tabs switch between inventory, equipment, and crafting.
+// Side panel tabs switch between inventory and skills.
 document.querySelectorAll("[data-tab]").forEach((button) => {
   button.addEventListener("click", () => {
     activeTab = button.dataset.tab;

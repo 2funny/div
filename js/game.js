@@ -1,5 +1,6 @@
 let state = null;
 let activeTab = "inventory";
+let activeInventoryTab = "equipment";
 let selectedTile = null;
 let battleFx = null;
 
@@ -46,14 +47,16 @@ function startGame(classId) {
     statPoints: 0,
     skillPoints: 0,
     skillDust: 0,
+    keys: 0,
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     inventory: [
       potion("小型生命药水", "hp", 40),
-      potion("小型法力药水", "mp", 25)
+      potion("小型法力药水", "mp", 25),
+      ...starterInventory(classId)
     ],
     materials: { "强化石": 1, "魔尘": 0 },
     runes: { "火焰1": 1, "守护1": 1 },
-    equipment: starterEquipment(classId),
+    equipment: emptyEquipment(),
     map: null,
     player: { x: 1, y: 1 },
     facing: "down",
@@ -84,6 +87,14 @@ function starterEquipment(classId) {
   };
 }
 
+function starterInventory(classId) {
+  return Object.values(starterEquipment(classId)).filter(Boolean);
+}
+
+function emptyEquipment() {
+  return Object.fromEntries(SLOTS.map((slot) => [slot, null]));
+}
+
 // Factory for consumable item entries.
 function potion(name, kind, amount) {
   return { id: uid(), kind: "potion", name, effect: kind, amount };
@@ -106,7 +117,7 @@ function generateFloor() {
   const map = Array.from({ length: size }, (_, y) =>
     Array.from({ length: size }, (_, x) => ({
       x, y,
-      terrain: x === 0 || y === 0 || x === size - 1 || y === size - 1 ? "wall" : "floor",
+      terrain: "wall",
       object: null,
       seen: false,
       visible: false
@@ -115,6 +126,7 @@ function generateFloor() {
 
   if (state.floor === 10) {
     const center = Math.floor(size / 2);
+    carvePath(map, 1, 1, center, center);
     for (let y = center - 3; y <= center + 3; y++) {
       for (let x = center - 3; x <= center + 3; x++) map[y][x].terrain = "floor";
     }
@@ -123,15 +135,11 @@ function generateFloor() {
     map[center - 3][center + 3].object = { type: "forge" };
     if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
   } else {
-    for (let y = 1; y < size - 1; y++) {
-      for (let x = 1; x < size - 1; x++) {
-        if ((x === 1 && y === 1) || (x === size - 2 && y === size - 2)) continue;
-        map[y][x].terrain = Math.random() < theme.wallRate ? "wall" : "floor";
-      }
-    }
-    carvePath(map, 1, 1, size - 2, size - 2);
+    const mainPath = carveMainRoute(map, 1, 1, size - 2, size - 2);
+    widenMainRoute(map, mainPath);
+    carveSideRooms(map, mainPath, 14 + Math.floor(state.floor / 2));
+    placeTreasureEncounters(map, 5);
     scatter(map, "monster", 16 + Math.floor(state.floor * 1.5));
-    scatter(map, "chest", 5);
     scatter(map, "trap", state.floor >= 4 ? 5 : 3);
     scatter(map, "altar", 3);
     if (state.floor % 3 === 1) scatter(map, "shop", 1);
@@ -142,7 +150,7 @@ function generateFloor() {
 
   state.player = { x: 1, y: 1 };
   state.facing = state.facing || "down";
-  state.map = { size, theme: theme.id, cells: map };
+  state.map = { size, theme: theme.id, cells: map, explorationVersion: 2 };
   updateVisibility();
 }
 
@@ -156,6 +164,94 @@ function carvePath(map, sx, sy, tx, ty) {
     else if (y !== ty) y += Math.sign(ty - y);
   }
   map[ty][tx].terrain = "floor";
+}
+
+function carveMainRoute(map, sx, sy, tx, ty) {
+  const path = [];
+  let x = sx;
+  let y = sy;
+  let horizontalBias = Math.random() > .5;
+  while (x !== tx || y !== ty) {
+    carveMainCell(map, x, y, path);
+    if (x !== tx && y !== ty) {
+      if (Math.random() < .22) horizontalBias = !horizontalBias;
+      if (horizontalBias) x += Math.sign(tx - x);
+      else y += Math.sign(ty - y);
+    } else if (x !== tx) {
+      x += Math.sign(tx - x);
+    } else {
+      y += Math.sign(ty - y);
+    }
+  }
+  carveMainCell(map, tx, ty, path);
+  return path;
+}
+
+function carveMainCell(map, x, y, path) {
+  const cell = map[y]?.[x];
+  if (!cell) return;
+  cell.terrain = "floor";
+  cell.mainPath = true;
+  path.push(cell);
+}
+
+function widenMainRoute(map, mainPath) {
+  for (const cell of mainPath) {
+    for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
+      if (next.x > 0 && next.y > 0 && next.x < map.length - 1 && next.y < map.length - 1) {
+        next.terrain = "floor";
+      }
+    }
+  }
+}
+
+function carveSideRooms(map, mainPath, count) {
+  const anchors = mainPath.filter((cell) => cell.x > 3 && cell.y > 3 && cell.x < map.length - 4 && cell.y < map.length - 4);
+  const trunkRooms = Math.min(8, Math.floor(count / 2), anchors.length);
+  for (let i = 0; i < trunkRooms; i++) {
+    const anchor = anchors[Math.floor((i + 1) * anchors.length / (trunkRooms + 1))];
+    carveRoom(map, anchor.x, anchor.y, 2);
+  }
+  let placed = 0;
+  let attempts = 0;
+  const branchTarget = count - trunkRooms;
+  while (placed < branchTarget && anchors.length && attempts < count * 10) {
+    attempts++;
+    const offset = Math.floor((placed + 1) * anchors.length / (branchTarget + 1));
+    const anchor = anchors[(offset + attempts) % anchors.length];
+    const dirs = shuffledDirections();
+    for (const dir of dirs) {
+      if (carveBranchRoom(map, anchor, dir)) {
+        placed++;
+        break;
+      }
+    }
+  }
+}
+
+function carveBranchRoom(map, anchor, dir) {
+  let x = anchor.x;
+  let y = anchor.y;
+  const length = rand(2, 5);
+  const corridor = [];
+  for (let i = 0; i < length; i++) {
+    x += dir.x;
+    y += dir.y;
+    if (x <= 2 || y <= 2 || x >= map.length - 3 || y >= map.length - 3) return false;
+    corridor.push(map[y][x]);
+  }
+  for (const cell of corridor) cell.terrain = "floor";
+  return carveRoom(map, x, y, 2);
+}
+
+function shuffledDirections() {
+  const dirs = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 }
+  ];
+  return dirs.sort(() => Math.random() - .5);
 }
 
 // Place monsters or map objects on empty floor cells.
@@ -175,6 +271,148 @@ function scatter(map, type, count) {
   }
 }
 
+function placeTreasureEncounters(map, count) {
+  let placed = 0;
+  if (count > 1 && placeLockedTreasureRoom(map)) placed++;
+  const roomCount = Math.min(3, count);
+  for (let i = 0; i < roomCount; i++) {
+    if (placeTreasureRoom(map)) placed++;
+  }
+  while (placed < count) {
+    if (placeDeadEndTreasure(map) || placeGuardedTreasure(map)) placed++;
+    else break;
+  }
+}
+
+function placeLockedTreasureRoom(map) {
+  const candidates = interiorCells(map)
+    .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
+    .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
+  for (const center of candidates.slice(0, 36)) {
+    if (!carveRoom(map, center.x, center.y, 2)) continue;
+    center.object = { type: "lockedChest" };
+    placeKeyGuardianNear(map, center.x, center.y);
+    placeGuardNear(map, center.x, center.y, false);
+    return true;
+  }
+  return false;
+}
+
+function placeTreasureRoom(map) {
+  const candidates = interiorCells(map)
+    .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
+    .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
+  for (const center of candidates.slice(0, 32)) {
+    if (!carveRoom(map, center.x, center.y, 2)) continue;
+    center.object = { type: "chest" };
+    placeGuardNear(map, center.x, center.y, true);
+    placeGuardNear(map, center.x, center.y, false);
+    return true;
+  }
+  return false;
+}
+
+function placeDeadEndTreasure(map) {
+  const candidates = interiorCells(map)
+    .filter((cell) => canUseTreasureCell(map, cell.x, cell.y) && floorNeighborCount(map, cell.x, cell.y) <= 1)
+    .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
+  const cell = candidates[0];
+  if (!cell) return false;
+  cell.object = { type: "chest" };
+  placeGuardNear(map, cell.x, cell.y, true);
+  return true;
+}
+
+function placeGuardedTreasure(map) {
+  const candidates = interiorCells(map)
+    .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
+    .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
+  const cell = candidates[0];
+  if (!cell) return false;
+  cell.object = { type: "chest" };
+  placeGuardNear(map, cell.x, cell.y, true);
+  return true;
+}
+
+function carveRoom(map, cx, cy, radius) {
+  if (cx - radius <= 0 || cy - radius <= 0 || cx + radius >= map.length - 1 || cy + radius >= map.length - 1) return false;
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      if (map[y][x].object) return false;
+    }
+  }
+  for (let y = cy - radius; y <= cy + radius; y++) {
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      map[y][x].terrain = "floor";
+    }
+  }
+  return true;
+}
+
+function placeGuardNear(map, x, y, eliteChance = false) {
+  const candidates = cellsWithin(map, x, y, 2)
+    .filter((cell) => cell.terrain === "floor" && !cell.object && (cell.x !== x || cell.y !== y))
+    .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
+  const guard = candidates[0];
+  if (!guard) return false;
+  guard.object = makeEnemyWithVariant(eliteChance && Math.random() < .35);
+  return true;
+}
+
+function placeKeyGuardianNear(map, x, y) {
+  const candidates = cellsWithin(map, x, y, 2)
+    .filter((cell) => cell.terrain === "floor" && !cell.object && (cell.x !== x || cell.y !== y))
+    .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
+  const guard = candidates[0];
+  if (!guard) return false;
+  guard.object = makeKeyGuardian();
+  return true;
+}
+
+function interiorCells(map) {
+  return map.flat().filter((cell) => cell.x > 0 && cell.y > 0 && cell.x < map.length - 1 && cell.y < map.length - 1);
+}
+
+function canUseTreasureCell(map, x, y) {
+  const cell = map[y]?.[x];
+  if (!cell || cell.terrain !== "floor" || cell.object) return false;
+  if ((x === 1 && y === 1) || (x === map.length - 2 && y === map.length - 2)) return false;
+  return true;
+}
+
+function treasureScore(map, cell) {
+  const start = { x: 1, y: 1 };
+  const exit = { x: map.length - 2, y: map.length - 2 };
+  return distance(cell, start) + Math.min(8, distance(cell, exit)) - floorNeighborCount(map, cell.x, cell.y);
+}
+
+function floorNeighborCount(map, x, y) {
+  return cardinalNeighbors(map, x, y).filter((cell) => cell.terrain === "floor").length;
+}
+
+function cardinalNeighbors(map, x, y) {
+  return [
+    map[y - 1]?.[x],
+    map[y + 1]?.[x],
+    map[y]?.[x - 1],
+    map[y]?.[x + 1]
+  ].filter(Boolean);
+}
+
+function cellsWithin(map, x, y, radius) {
+  const cells = [];
+  for (let yy = Math.max(1, y - radius); yy <= Math.min(map.length - 2, y + radius); yy++) {
+    for (let xx = Math.max(1, x - radius); xx <= Math.min(map.length - 2, x + radius); xx++) {
+      if (Math.abs(xx - x) + Math.abs(yy - y) <= radius) cells.push(map[yy][xx]);
+    }
+  }
+  return cells;
+}
+
+function distance(a, b) {
+  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+}
+
 function makeEnemyWithVariant(eliteOrBoss = false) {
   const enemy = makeEnemy(eliteOrBoss);
   if (enemy.type === "boss") {
@@ -188,6 +426,20 @@ function makeEnemyWithVariant(eliteOrBoss = false) {
   } else {
     enemy.variant = choice(["wolf", "slime"]);
   }
+  return enemy;
+}
+
+function makeKeyGuardian() {
+  const enemy = makeEnemyWithVariant(true);
+  enemy.type = "elite";
+  enemy.variant = "elite";
+  enemy.name = "钥匙守卫";
+  enemy.roomBoss = true;
+  enemy.dropsKey = true;
+  enemy.hp = Math.ceil(enemy.hp * 1.18);
+  enemy.maxHp = enemy.hp;
+  enemy.atk += 2;
+  enemy.gold += 12;
   return enemy;
 }
 
@@ -218,8 +470,10 @@ function makeEnemy(eliteOrBoss = false) {
 function updateVisibility() {
   for (const row of state.map.cells) {
     for (const cell of row) {
-      cell.visible = true;
-      cell.seen = true;
+      const dx = Math.abs(cell.x - state.player.x);
+      const dy = Math.abs(cell.y - state.player.y);
+      cell.visible = Math.max(dx, dy) <= VISION_RADIUS;
+      if (cell.visible) cell.seen = true;
     }
   }
 }
@@ -257,12 +511,10 @@ function resolveCell(cell) {
   }
   if (obj.type === "chest") {
     openChest(cell);
+  } else if (obj.type === "lockedChest") {
+    openLockedChest(cell);
   } else if (obj.type === "trap") {
-    const damage = rand(8, 14) + state.floor * 2;
-    state.hp = Math.max(1, state.hp - damage);
-    cell.object = null;
-    log(`触发陷阱，受到 ${damage} 点伤害。`);
-    showEvent("触发陷阱", `<p>地面机关突然弹起，你受到 ${damage} 点伤害。</p>`, "继续探索");
+    triggerTrap(cell);
   } else if (obj.type === "altar") {
     useAltar(cell);
   } else if (obj.type === "stairsDown" || obj.type === "portal") {
@@ -270,6 +522,15 @@ function resolveCell(cell) {
   } else if (obj.type === "stairsUp") {
     previousFloor();
   }
+}
+
+function triggerTrap(cell) {
+  const damage = rand(8, 14) + state.floor * 2;
+  const alerted = placeGuardNear(state.map.cells, cell.x, cell.y, state.floor >= 4);
+  state.hp = Math.max(1, state.hp - damage);
+  cell.object = null;
+  log(`触发隐藏机关，受到 ${damage} 点伤害${alerted ? "，并惊动了守卫" : ""}。`);
+  showEvent("触发机关", `<p>地面机关突然弹起，你受到 ${damage} 点伤害。</p>${alerted ? "<p>机关的响动惊动了附近守卫。</p>" : ""}`, "继续探索");
 }
 
 // Resolve chest rewards: equipment, rune, or materials/gold.
@@ -294,6 +555,25 @@ function openChest(cell) {
   }
   cell.object = null;
   showEvent("打开宝箱", `<p>${message}</p>`, "收下");
+}
+
+function openLockedChest(cell) {
+  state.keys = state.keys || 0;
+  if (state.keys <= 0) {
+    log("发现上锁宝箱，需要符文钥匙。");
+    showEvent("上锁宝箱", "<p>锁孔里有符文光纹，需要先击败钥匙守卫取得符文钥匙。</p>", "知道了");
+    return;
+  }
+  state.keys--;
+  const loot = randomEquipment();
+  const rune = choice(RUNES) + "1";
+  const gold = rand(25, 55);
+  state.inventory.push(loot);
+  state.runes[rune] = (state.runes[rune] || 0) + 1;
+  state.gold += gold;
+  cell.object = null;
+  log(`打开上锁宝箱，获得${loot.name}、${rune}符文和 ${gold} 金币。`);
+  showEvent("打开上锁宝箱", `<p>消耗 1 把符文钥匙。</p><p>获得装备：${loot.name}<br>获得符文：${rune}<br>金币 +${gold}</p>`, "收下");
 }
 
 // Generate equipment loot with slot, quality, stat, and rune-slot rolls.
@@ -556,6 +836,15 @@ function winBattle(enemy) {
 // Roll post-combat equipment and rune drops.
 function maybeDrop(enemy) {
   const drops = [];
+  if (enemy.dropsKey || enemy.type === "boss") {
+    state.keys = (state.keys || 0) + 1;
+    log(`${enemy.name}掉落了符文钥匙。`);
+    drops.push("符文钥匙 +1");
+  }
+  if (enemy.roomBoss || enemy.type === "boss") {
+    state.materials["首领印记"] = (state.materials["首领印记"] || 0) + 1;
+    drops.push("首领印记 +1");
+  }
   const dustChance = enemy.type === "boss" ? 1 : enemy.type === "elite" ? .85 : .32;
   if (Math.random() < dustChance) {
     const dust = enemy.type === "boss" ? 5 : enemy.type === "elite" ? 2 : 1;
@@ -656,10 +945,13 @@ function equipItem(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id);
   const entry = state.inventory[index];
   if (!entry || entry.kind !== "equip") return;
+  const beforeHpMax = effectiveMaxHp();
+  const beforeMpMax = effectiveMaxMp();
   const old = state.equipment[entry.slot];
   state.equipment[entry.slot] = entry;
   state.inventory.splice(index, 1);
   if (old) state.inventory.push(old);
+  adjustVitalsForMaxChange(beforeHpMax, beforeMpMax);
   log(`装备了${entry.name}。`);
   render();
 }
@@ -667,7 +959,40 @@ function equipItem(id) {
 function confirmEquipItem(id) {
   const entry = state.inventory.find((item) => item.id === id);
   if (!entry) return;
-  showConfirm("装备确认", `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>`, "装备", () => equipItem(id));
+  showConfirm("装备确认", `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>${equipmentCompareText(entry)}`, "装备", () => equipItem(id));
+}
+
+function unequipItem(slot) {
+  const eq = state.equipment[slot];
+  if (!eq) return;
+  const beforeHpMax = effectiveMaxHp();
+  const beforeMpMax = effectiveMaxMp();
+  state.equipment[slot] = null;
+  state.inventory.push(eq);
+  adjustVitalsForMaxChange(beforeHpMax, beforeMpMax);
+  log(`拆下了${eq.name}。`);
+  render();
+}
+
+function adjustVitalsForMaxChange(beforeHpMax, beforeMpMax) {
+  const hpMax = effectiveMaxHp();
+  const mpMax = effectiveMaxMp();
+  state.hp = clampVital((state.hp || 0) + hpMax - beforeHpMax, hpMax);
+  state.mp = clampVital((state.mp || 0) + mpMax - beforeMpMax, mpMax);
+}
+
+function clampVital(value, max) {
+  return Math.max(1, Math.min(max, value));
+}
+
+function canUnequipSlot(slot) {
+  return !!state.equipment[slot];
+}
+
+function confirmUnequip(slot) {
+  const eq = state.equipment[slot];
+  if (!eq) return;
+  showConfirm("拆下装备", `<p>要拆下 ${eq.name} 吗？装备会放回背包。</p>`, "拆下", () => unequipItem(slot));
 }
 
 // Use a consumable potion from the inventory.
@@ -675,8 +1000,8 @@ function useItem(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id);
   const entry = state.inventory[index];
   if (!entry || entry.kind !== "potion") return;
-  if (entry.effect === "hp") state.hp = Math.min(state.maxHp, state.hp + entry.amount);
-  if (entry.effect === "mp") state.mp = Math.min(state.maxMp, state.mp + entry.amount);
+  if (entry.effect === "hp") state.hp = Math.min(effectiveMaxHp(), state.hp + entry.amount);
+  if (entry.effect === "mp") state.mp = Math.min(effectiveMaxMp(), state.mp + entry.amount);
   state.inventory.splice(index, 1);
   log(`使用${entry.name}。`);
   render();
@@ -896,7 +1221,10 @@ function showEquipmentSlot(slot) {
   const runeText = eq.runeSlots
     ? `${eq.runes.length}/${eq.runeSlots}：${eq.runes.length ? eq.runes.join("、") : "未镶嵌"}`
     : "无";
-  showEvent(eq.name, equipmentDetailMarkup(eq, title, runeText), "关闭");
+  showModal(eq.name, equipmentDetailMarkup(eq, title, runeText), [
+    { text: "关闭", action: closeModal },
+    { text: "拆下", action: () => { closeModal(); unequipItem(slot); } }
+  ]);
 }
 
 // Render the main dungeon map tiles.
@@ -920,11 +1248,12 @@ function renderMap() {
       const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
       const isSelected = selectedTile?.x === cell.x && selectedTile?.y === cell.y;
       const isAdjacent = Math.abs(cell.x - state.player.x) + Math.abs(cell.y - state.player.y) === 1;
+      const showObject = shouldShowMapObject(cell);
       const tileSprite = isPlayer ? sprite(`player facing-${state.facing || "down"}`, assetForClass(state.classId), CLASSES[state.classId].name)
-        : cell.visible && cell.object ? objectSprite(cell.object) : "";
-      const objectBadge = cell.visible && cell.object ? badgeForObject(cell.object.type) : "";
+        : showObject ? objectSprite(cell.object) : "";
+      const objectBadge = showObject ? badgeForObject(cell.object.type) : "";
       const label = tileLabel(cell, isPlayer);
-      const showHint = isPlayer || cell.object || cell.terrain === "wall";
+      const showHint = isPlayer || showObject || cell.terrain === "wall";
       const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
       const title = showHint ? ` title="${label}"` : "";
       const flags = [
@@ -938,6 +1267,10 @@ function renderMap() {
     }
   }
   map.innerHTML = cells.join("");
+}
+
+function shouldShowMapObject(cell) {
+  return !!cell.object && cell.seen && cell.object.type !== "trap";
 }
 
 function mapViewBounds() {
@@ -956,24 +1289,78 @@ function mapViewBounds() {
 function renderMinimap() {
   const minimap = $("minimap");
   const view = mapViewBounds();
-  minimap.style.setProperty("--size", state.map.size);
-  minimap.style.setProperty("--view-x", `${view.x / state.map.size * 100}%`);
-  minimap.style.setProperty("--view-y", `${view.y / state.map.size * 100}%`);
-  minimap.style.setProperty("--view-size", `${view.size / state.map.size * 100}%`);
-  const cells = state.map.cells.flatMap((row) => row.map((cell) => {
-    const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
-    const inView = cell.x >= view.x && cell.x < view.x + view.size && cell.y >= view.y && cell.y < view.y + view.size;
-    const classes = [
-      "mini-cell",
-      cell.seen ? "seen" : "unknown",
-      cell.terrain === "wall" ? "wall" : "floor",
-      cell.object ? `obj-${cell.object.type}` : "",
-      inView ? "in-view" : "",
-      isPlayer ? "player" : ""
-    ].join(" ");
-    return `<button class="${classes}" type="button" title="${tileLabel(cell, isPlayer)}" onclick="selectMinimapTile(${cell.x},${cell.y})"></button>`;
-  })).join("");
-  minimap.innerHTML = `<div class="mini-grid">${cells}<span class="mini-view-frame"></span></div>`;
+  const overview = minimapOverviewBounds(view);
+  minimap.style.setProperty("--size", overview.size);
+  minimap.style.setProperty("--view-x", `${overview.viewX}%`);
+  minimap.style.setProperty("--view-y", `${overview.viewY}%`);
+  minimap.style.setProperty("--view-size", `${overview.viewSize}%`);
+  const cells = [];
+  for (let y = 0; y < state.map.size; y++) {
+    for (let x = 0; x < state.map.size; x++) {
+      const cell = state.map.cells[y][x];
+      const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
+      const marker = minimapMarker(cell, isPlayer);
+      const inView = cell.x >= view.x && cell.x < view.x + view.size && cell.y >= view.y && cell.y < view.y + view.size;
+      const classes = [
+        "mini-cell",
+        cell.seen ? "seen" : "unknown",
+        cell.terrain === "wall" ? "mini-wall" : "mini-floor",
+        cell.seen && cell.object ? `obj-${cell.object.type}` : "",
+        inView ? "in-view" : "",
+        isPlayer ? "mini-player" : ""
+      ].join(" ");
+      cells.push(`<button class="${classes}" type="button" title="${tileLabel(cell, isPlayer)}" onclick="selectMinimapTile(${cell.x},${cell.y})">${marker}</button>`);
+    }
+  }
+  minimap.innerHTML = `<div class="mini-grid">${cells.join("")}<span class="mini-view-frame"></span></div>`;
+}
+
+function minimapOverviewBounds(view) {
+  const size = state.map.size;
+  return {
+    size,
+    viewX: view.x / size * 100,
+    viewY: view.y / size * 100,
+    viewSize: view.size / size * 100
+  };
+}
+
+function minimapMarker(cell, isPlayer) {
+  if (isPlayer) {
+    return `<span class="mini-dot mini-player-dot" aria-label="${CLASSES[state.classId].name}"></span>`;
+  }
+  if (!cell.seen || !cell.object) return "";
+  if (cell.object.type === "trap") return "";
+  const icon = minimapObjectIcon(cell.object);
+  return `<span class="mini-dot mini-${icon.cls}" aria-label="${icon.alt}"></span>`;
+}
+
+function minimapObjectIcon(obj) {
+  if (["monster", "elite", "boss"].includes(obj.type)) {
+    const variants = {
+      slime: ["monster", ASSETS.monster, "怪物"],
+      rat: ["monster", ASSETS.monsterRat, "洞穴鼠"],
+      bat: ["monster", ASSETS.monsterBat, "矿洞蝙蝠"],
+      wolf: ["monster", ASSETS.monsterWolf, "冰霜狼"],
+      elite: ["elite", ASSETS.elite, "精英怪"],
+      boss: ["boss", ASSETS.boss, "Boss"]
+    };
+    const fallback = obj.type === "boss" ? "boss" : obj.type === "elite" ? "elite" : "slime";
+    const [cls, src, alt] = variants[obj.variant || fallback] || variants[fallback];
+    return { cls, src, alt };
+  }
+  const icons = {
+    chest: { cls: "chest", src: ASSETS.chest, alt: "宝箱" },
+    lockedChest: { cls: "locked-chest", src: ASSETS.chest, alt: "上锁宝箱" },
+    altar: { cls: "altar", src: ASSETS.altar, alt: "祭坛" },
+    forge: { cls: "forge", src: ASSETS.forge, alt: "合成台" },
+    shop: { cls: "shop", src: ASSETS.shop, alt: "商人" },
+    trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
+    portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
+    stairsDown: { cls: "stairs-down", src: null, alt: "下行楼梯" },
+    stairsUp: { cls: "stairs-up", src: null, alt: "上行楼梯" }
+  };
+  return icons[obj.type] || { cls: "unknown", src: null, alt: "未知" };
 }
 
 function selectMinimapTile(x, y) {
@@ -1091,6 +1478,7 @@ function objectSprite(obj) {
     elite: ["elite", ASSETS.elite, "精英怪"],
     boss: ["boss", ASSETS.boss, "Boss"],
     chest: ["chest", ASSETS.chest, "宝箱"],
+    lockedChest: ["locked-chest", ASSETS.chest, "上锁宝箱"],
     altar: ["altar", ASSETS.altar, "祭坛"],
     forge: ["forge", ASSETS.forge, "合成台"],
     shop: ["shop", ASSETS.shop, "商人"],
@@ -1124,6 +1512,7 @@ function badgeForObject(type) {
     elite: "精",
     boss: "王",
     chest: "箱",
+    lockedChest: "锁",
     altar: "坛",
     forge: "锻",
     shop: "商",
@@ -1136,16 +1525,18 @@ function badgeForObject(type) {
 }
 
 // Human-readable description for a map cell.
-function tileLabel(cell, isPlayer = false) {
-  if (!cell.seen) return "未知区域";
+function tileLabel(cell, isPlayer = false, reveal = false) {
+  if (!reveal && !cell.seen) return "未知区域";
   if (isPlayer) return `你的位置：${CLASSES[state.classId].name}`;
   if (cell.terrain === "wall") return "墙壁：无法通行";
   if (!cell.object) return "地面：可通行";
+  if (cell.object.type === "trap") return "地面：可通行";
   const labels = {
     monster: "普通怪物：接触后进入战斗",
     elite: "精英怪：更危险，掉落更好",
     boss: "Boss：本层首领",
     chest: "宝箱：可能获得装备、符文或金币",
+    lockedChest: "上锁宝箱：需要符文钥匙，通常由附近守卫掉落",
     altar: "符文祭坛：恢复生命和法力",
     forge: "合成台：强化装备或合成符文",
     shop: "商人：购买药水和补给",
@@ -1239,30 +1630,82 @@ function renderContext() {
 // Render the currently selected side-panel tab.
 function renderTab() {
   if (activeTab === "inventory") renderInventory();
-  if (activeTab === "equipment") renderEquipment();
-  if (activeTab === "craft") renderCraft();
   if (activeTab === "skills") renderSkills();
 }
 
 // Render inventory rows and item action buttons.
 function renderInventory() {
-  const items = [...state.inventory].sort((a, b) => itemScore(b) - itemScore(a));
-  $("tabBody").innerHTML = items.length ? items.map((entry) => {
-    if (entry.kind === "potion") {
-      return `<div class="item-row"><div>${entry.name}<small>评分 ${itemScore(entry)} · 恢复 ${entry.amount}</small></div><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div>`;
-    }
-    const better = isBetterThanEquipped(entry);
-    return `<div class="item-row equip-row equipment-card ${better ? "better-equipment" : ""}"><div><b>${entry.name}</b>${equipmentSummary(entry)}</div><button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button></div>`;
-  }).join("") : `<p>背包为空。</p>`;
+  $("tabBody").innerHTML = inventoryGroupMarkup();
+}
+
+function inventoryGroupMarkup() {
+  const potions = state.inventory
+    .filter((entry) => entry.kind === "potion")
+    .sort((a, b) => itemScore(b) - itemScore(a));
+  const equipment = state.inventory
+    .filter((entry) => entry.kind === "equip")
+    .sort((a, b) => itemScore(b) - itemScore(a));
+  const groups = {
+    potions: inventoryGroup("potions", "药剂", potions.length ? potions.map(potionRow).join("") : `<p>暂无药剂。</p>`),
+    equipment: inventoryGroup("equipment", "装备", equipment.length ? equipment.map(equipmentInventoryRow).join("") : `<p>暂无备用装备。</p>`),
+    materials: inventoryGroup("materials", "材料", materialRows()),
+    runes: inventoryGroup("runes", "符文", runeRows())
+  };
+  return `${inventorySubtabs()}${groups[activeInventoryTab] || groups.equipment}`;
+}
+
+function inventorySubtabs() {
+  const tabs = [
+    ["potions", "药剂"],
+    ["equipment", "装备"],
+    ["materials", "材料"],
+    ["runes", "符文"]
+  ];
+  return `<div class="inventory-subtabs">${tabs.map(([id, label]) => `<button type="button" data-inventory-tab="${id}" class="${activeInventoryTab === id ? "active" : ""}" onclick="selectInventoryTab('${id}')">${label}</button>`).join("")}</div>`;
+}
+
+function selectInventoryTab(tab) {
+  activeInventoryTab = tab;
+  renderInventory();
+}
+
+function inventoryGroup(type, title, body) {
+  return `<section class="inventory-group inventory-group-${type}"><h3>${title}</h3>${body}</section>`;
+}
+
+function potionRow(entry) {
+  return `<div class="item-row"><div>${entry.name}<small>评分 ${itemScore(entry)} · 恢复 ${entry.amount}</small></div><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div>`;
+}
+
+function equipmentInventoryRow(entry) {
+  const better = isBetterThanEquipped(entry);
+  return `<div class="item-row equip-row equipment-card ${better ? "better-equipment" : ""}"><div><b>${entry.name}</b>${equipmentSummary(entry)}${equipmentCompareText(entry)}</div><button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button></div>`;
+}
+
+function materialRows() {
+  const materials = Object.entries(state.materials || {}).filter(([, count]) => count > 0);
+  if ((state.keys || 0) > 0) materials.unshift(["符文钥匙", state.keys]);
+  return materials.length
+    ? materials.map(([name, count]) => `<div class="item-row"><div>${name}<small>数量 ${count}</small></div></div>`).join("")
+    : `<p>暂无材料。</p>`;
+}
+
+function runeRows() {
+  const runes = Object.entries(state.runes || {}).filter(([, count]) => count > 0);
+  return runes.length
+    ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>数量 ${count}，3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div>`).join("")
+    : `<p>暂无符文。</p>`;
 }
 
 // Render equipped items and enhancement controls.
 function renderEquipment() {
-  const slots = [...SLOTS].sort((a, b) => itemScore(state.equipment[b]) - itemScore(state.equipment[a]));
-  $("tabBody").innerHTML = slots.map((slot) => {
+  $("tabBody").innerHTML = SLOTS.map((slot) => {
     const eq = state.equipment[slot];
     const disabledReason = enhanceDisabledReason(slot);
-    return `<div class="item-row equipment-card"><div><b>${SLOT_NAMES[slot]}</b>${eq ? `<span class="equipment-name">${eq.name}</span>${equipmentSummary(eq, disabledReason ? "不可强化" : "")}` : `<small>未装备</small>`}</div><button type="button" ${disabledReason ? "disabled" : ""} title="${disabledReason || "强化"}" onclick="confirmEnhance('${slot}')">强化</button></div>`;
+    const actions = eq
+      ? `<div class="equipment-actions"><button type="button" ${disabledReason ? "disabled" : ""} title="${disabledReason || "强化"}" onclick="confirmEnhance('${slot}')">强化</button><button type="button" onclick="confirmUnequip('${slot}')">拆下</button></div>`
+      : `<button type="button" disabled>空位</button>`;
+    return `<div class="item-row equipment-card equipped-row"><div><b>${SLOT_NAMES[slot]}${eq ? equippedStateBadge() : ""}</b>${eq ? `<span class="equipment-name">${eq.name}</span>${equipmentSummary(eq, disabledReason ? "不可强化" : "")}` : `<small>未装备</small>`}</div>${actions}</div>`;
   }).join("");
 }
 
@@ -1307,6 +1750,41 @@ function equipmentSummary(eq, stateLabel = "") {
     </span>
     <small class="equipment-stats">${statsText(eq) || "无属性"}</small>
   `;
+}
+
+function equippedStateBadge() {
+  return `<span class="equipped-badge">已装备</span>`;
+}
+
+function equipmentCompareText(item) {
+  if (!item || item.kind !== "equip") return "";
+  const current = state.equipment[item.slot];
+  const scoreDelta = itemScore(item) - itemScore(current);
+  const statKeys = Array.from(new Set([
+    ...Object.keys(current?.stats || {}),
+    ...Object.keys(item.stats || {})
+  ]));
+  const statDeltas = statKeys
+    .map((key) => {
+      const delta = effectiveItemStat(item, key) - effectiveItemStat(current, key);
+      if (!delta) return "";
+      const sign = delta > 0 ? "+" : "";
+      return `<span class="${delta > 0 ? "compare-up" : "compare-down"}">${STAT_NAMES[key] || key} ${sign}${delta}</span>`;
+    })
+    .filter(Boolean);
+  const scoreClass = scoreDelta >= 0 ? "compare-up" : "compare-down";
+  const scoreSign = scoreDelta > 0 ? "+" : "";
+  return `
+    <small class="equipment-compare">
+      <span class="${scoreClass}">评分 ${scoreSign}${scoreDelta}</span>
+      ${statDeltas.join("")}
+    </small>
+  `;
+}
+
+function effectiveItemStat(item, key) {
+  if (!item) return 0;
+  return (item.stats?.[key] || 0) + (item.stats?.[key] ? item.level || 0 : 0);
 }
 
 function enhanceText(eq) {
@@ -1376,13 +1854,25 @@ function loadGame() {
   state.facing = state.facing || "down";
   state.skillPoints = state.skillPoints || 0;
   state.skillDust = state.skillDust || 0;
+  state.keys = state.keys || 0;
   state.skillLevels = state.skillLevels || {};
   for (const skill of CLASSES[state.classId].skills) {
     state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
   }
   if (!state.map?.cells?.length || state.map.size !== MAP_SIZE) generateFloor();
+  if (state.map && state.map.explorationVersion !== 2) resetExploration();
   updateVisibility();
   return true;
+}
+
+function resetExploration() {
+  for (const row of state.map.cells) {
+    for (const cell of row) {
+      cell.seen = false;
+      cell.visible = false;
+    }
+  }
+  state.map.explorationVersion = 2;
 }
 
 // Display a modal with caller-provided actions.

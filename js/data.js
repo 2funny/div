@@ -54,6 +54,7 @@ const STAT_NAMES = { atk: "攻击", mag: "法强", def: "防御", res: "抗性",
 const SAVE_KEY = "rune-dungeon-save-v1";
 const MAP_SIZE = 27;
 const MAP_VIEW_SIZE = 15;
+const VISION_RADIUS = 3;
 
 const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
@@ -65,7 +66,7 @@ const ASSETS = {
   monsterWolf: "assets/dawngeon/monster-wolf.svg",
   elite: "assets/dawngeon/elite.png",
   boss: "assets/dawngeon/boss.png",
-  chest: "assets/dawngeon/trap.png",
+  chest: "assets/dawngeon/chest.png",
   altar: "assets/dawngeon/altar-rune.svg",
   forge: "assets/dawngeon/forge.png",
   shop: "assets/dawngeon/shop.png",
@@ -81,6 +82,7 @@ const LEGEND_ITEMS = [
   ["elite", "精英", "精英怪"],
   ["boss", "Boss", "首领"],
   ["chest", "宝箱", "奖励"],
+  ["locked-chest", "锁箱", "钥匙奖励"],
   ["altar", "祭坛", "恢复"],
   ["forge", "合成", "强化/符文"],
   ["shop", "商人", "补给"],
