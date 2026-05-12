@@ -40,16 +40,62 @@ vm.runInContext(`
   state.runes = { "火焰1": 3 };
   assert(runeEffectText("火焰1").includes("攻击"), "rune effect text should describe the stat bonus");
   const inventory = inventoryGroupMarkup();
-  assert(inventory.includes("equipment-compare inline-equipment-compare"), "inventory equipment rows should directly show comparison deltas");
+  assert(inventory.includes("equipment-compare score-only-compare inline-equipment-compare"), "inventory equipment rows should show compact score-only comparison");
   assert(inventory.includes("equipment-compare-corner"), "inventory equipment comparison should live in the row corner");
   assert(inventory.includes("compare-badge compare-badge-up"), "better equipment should show a persistent green up badge");
   assert(inventory.includes("compare-arrow"), "equipment comparison badge should include a directional arrow mark");
+  assert(!inventory.includes("攻击差 +3"), "full stat deltas should stay out of compact inventory rows");
+  assert(inventory.includes("inventory-filter"), "equipment inventory should include a type filter");
+  assert(inventory.includes('<option value="weapon"'), "equipment filter should include weapon slot");
+  activeEquipmentFilter = "armor";
+  assert(!inventoryGroupMarkup().includes("New Sword"), "equipment filter should hide other slots");
+  activeEquipmentFilter = "all";
   assert(inventory.includes('inventory-subtabs'), "inventory should use a second-level category menu");
   assert(inventory.includes('data-inventory-tab="potions"'), "inventory menu should include potions");
   assert(inventory.includes('data-inventory-tab="equipment"'), "inventory menu should include equipment");
   assert(inventory.includes('data-inventory-tab="materials"'), "inventory menu should include materials");
   assert(inventory.includes('data-inventory-tab="runes"'), "inventory menu should include runes");
   assert(inventory.includes('inventory-group-equipment'), "inventory should show the active equipment group");
+  activeInventoryTab = "materials";
+  const materialsMarkup = inventoryGroupMarkup();
+  assert(materialsMarkup.includes('<span class="item-quantity">x2</span>'), "material counts should render at the row edge");
+  assert(!materialsMarkup.includes("数量 2"), "material counts should not be written into the attribute text");
+  activeInventoryTab = "runes";
+  const runesMarkup = inventoryGroupMarkup();
+  assert(runesMarkup.includes('<span class="item-quantity">x3</span>'), "rune counts should render at the row edge");
+  assert(!runesMarkup.includes("数量 3"), "rune counts should not be written into the attribute text");
+  activeInventoryTab = "equipment";
+  assert(inventory.includes("confirmDisassembleEquipment"), "inventory equipment rows should support disassembly");
+  assert(inventory.includes("confirmSellEquipment"), "inventory equipment rows should support selling");
+  render = () => {};
+  showEvent = (title, body) => { eventTitle = title; eventBody = body; };
+  let eventTitle = "";
+  let eventBody = "";
+  const junk = { id: "junk", kind: "equip", name: "Junk Ring", slot: "ring", quality: "普通", stats: { luk: 1 }, runeSlots: 0, runes: [], level: 0 };
+  state.inventory.push(junk);
+  const goldBeforeSell = state.gold || 0;
+  sellEquipment("junk");
+  assert.strictEqual(state.gold || 0, goldBeforeSell, "selling away from merchant should not grant gold");
+  assert(state.inventory.some((entry) => entry.id === "junk"), "selling away from merchant should keep equipment");
+  assert(eventTitle.includes("商人"), "selling away from merchant should explain the merchant requirement");
+  state.map = {
+    size: 3,
+    cells: [
+      [{ x: 0, y: 0, terrain: "floor", object: null }, { x: 1, y: 0, terrain: "floor", object: null }, { x: 2, y: 0, terrain: "floor", object: null }],
+      [{ x: 0, y: 1, terrain: "floor", object: null }, { x: 1, y: 1, terrain: "floor", object: null }, { x: 2, y: 1, terrain: "floor", object: { type: "shop" } }],
+      [{ x: 0, y: 2, terrain: "floor", object: null }, { x: 1, y: 2, terrain: "floor", object: null }, { x: 2, y: 2, terrain: "floor", object: null }]
+    ]
+  };
+  state.player = { x: 1, y: 1 };
+  sellEquipment("junk");
+  assert((state.gold || 0) > goldBeforeSell, "selling beside a merchant should grant gold");
+  assert(!state.inventory.some((entry) => entry.id === "junk"), "sold equipment should leave inventory");
+  const scrap = { id: "scrap", kind: "equip", name: "Scrap Armor", slot: "armor", quality: "稀有", stats: { def: 4 }, runeSlots: 1, runes: [], level: 1 };
+  state.inventory.push(scrap);
+  const dustBefore = state.materials["魔尘"] || 0;
+  disassembleEquipment("scrap");
+  assert((state.materials["魔尘"] || 0) > dustBefore, "disassembling equipment should grant material dust");
+  assert(!state.inventory.some((entry) => entry.id === "scrap"), "disassembled equipment should leave inventory");
   state.map = { size: 27, cells: [] };
   state.player = { x: 8, y: 8 };
   const mainBounds = mapViewBounds();

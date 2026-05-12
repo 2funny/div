@@ -1,5 +1,6 @@
 // Keyboard movement uses arrows or WASD while a game is active.
 document.addEventListener("keydown", (event) => {
+  initAudio();
   const modalOpen = !$("modal").classList.contains("hidden");
   if (modalOpen && event.key === " ") {
     event.preventDefault();
@@ -30,6 +31,7 @@ $("modal").addEventListener("click", (event) => {
 
 // Prevent persistent focus/caret artifacts after clicking game UI controls.
 document.addEventListener("pointerup", (event) => {
+  initAudio();
   const target = event.target.closest("button");
   if (target) target.blur();
 });
@@ -56,6 +58,10 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
 });
 
 // Top-level save/new-game controls.
+$("soundBtn").addEventListener("click", (event) => {
+  toggleAudio();
+  event.currentTarget.blur();
+});
 $("saveBtn").addEventListener("click", (event) => {
   saveGame(true);
   event.currentTarget.blur();
@@ -68,4 +74,5 @@ $("newGameBtn").addEventListener("click", (event) => {
 
 // Initial boot always stops at the title screen. The player chooses whether to continue.
 renderStartScreen();
+updateSoundButton();
 render();

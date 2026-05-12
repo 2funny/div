@@ -279,6 +279,20 @@ vm.runInContext(`
   assert(questList.includes("quest-list"), "task tab should render a quest list");
   assert(questList.includes("已领取"), "claimed quests should remain visible in the task list");
 
+  const rescueSource = { type: "questNpc", questId: "rescueRoom", npcName: "救援斥候卡尔", roomId: "room-1-0", roomName: "1号房", rescueName: "矿工托兰", target: 1 };
+  state.floor = 1;
+  state.quests = [];
+  state.map = { rooms: [{ id: "room-1-0", name: "1号房" }], cells: [[{ x: 0, y: 0, terrain: "floor", object: null, seen: true }]] };
+  state.player = { x: 0, y: 0 };
+  const rescueQuest = acceptQuest("rescueRoom", rescueSource);
+  assert.strictEqual(rescueQuest.roomName, "1号房", "rescue quests should preserve the target room label");
+  const rescueRewards = [];
+  recordQuestKill({ type: "monster", name: "Guard", roomId: "room-1-0" }, rescueRewards);
+  assert.strictEqual(rescueQuest.roomCleared, true, "rescue quest should mark the room cleared after target kills");
+  assert.strictEqual(rescueQuest.completed, false, "rescue quest should still require checking on the trapped NPC");
+  openRescueNpc({ type: "rescueNpc", npcName: "矿工托兰", roomId: "room-1-0" });
+  assert.strictEqual(rescueQuest.completed, true, "talking to the rescued NPC should complete the rescue quest");
+
   state = {
     floor: 1,
     gold: 40,

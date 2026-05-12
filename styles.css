@@ -108,6 +108,17 @@ h2 {
   gap: 8px;
 }
 
+.sound-toggle {
+  min-width: 76px;
+  border-color: rgba(128, 231, 161, .42);
+  color: #caffd7;
+}
+
+.sound-toggle.muted {
+  border-color: rgba(255,255,255,.12);
+  color: var(--muted);
+}
+
 .hidden {
   display: none !important;
 }
@@ -1540,10 +1551,10 @@ h2 {
   align-content: start;
   grid-auto-rows: max-content;
   overflow: auto;
-  flex: 0 0 392px;
-  height: 392px;
-  min-height: 392px;
-  max-height: 392px;
+  flex: 0 0 320px;
+  height: 320px;
+  min-height: 320px;
+  max-height: 320px;
 }
 
 .item-row {
@@ -1562,6 +1573,15 @@ h2 {
   display: block;
   margin-top: 3px;
   color: var(--muted);
+}
+
+.item-quantity {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #ffe6a8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .inventory-subtabs {
@@ -1615,6 +1635,28 @@ h2 {
   font-size: 13px;
 }
 
+.inventory-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(8, 11, 16, .35);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inventory-filter select {
+  min-width: 118px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  background: #10151d;
+  color: #d9e2f2;
+}
+
 .equipment-card > div {
   min-width: 0;
 }
@@ -1623,6 +1665,15 @@ h2 {
   align-items: flex-end;
   padding-top: 8px;
   min-height: 68px;
+}
+
+.equip-row {
+  align-items: center;
+  padding-right: 8px;
+}
+
+.equip-row > div:not(.equipment-actions):not(.equipment-compare-corner) {
+  flex: 1 1 auto;
 }
 
 .equipment-card b,
@@ -1678,12 +1729,16 @@ h2 {
 }
 
 .equipment-compare-corner {
-  position: absolute;
-  top: 5px;
-  right: 8px;
-  left: auto;
+  position: static;
+  order: 2;
+  flex: 0 0 auto;
   min-width: 0;
-  max-width: 58%;
+  max-width: none;
+  pointer-events: none;
+}
+
+.equip-row .inventory-equipment-actions {
+  order: 3;
 }
 
 .inline-equipment-compare {
@@ -1693,6 +1748,10 @@ h2 {
   font-size: 11px;
   line-height: 1.2;
   text-align: right;
+}
+
+.score-only-compare {
+  display: block;
 }
 
 .inline-equipment-compare .compare-title {

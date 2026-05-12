@@ -1,13 +1,27 @@
 let state = null;
 let activeTab = "inventory";
 let activeInventoryTab = "equipment";
+let activeEquipmentFilter = "all";
 let selectedTile = null;
 let battleFx = null;
 let statDraft = null;
+let audioState = null;
+let audioEnabled = localStorage.getItem("rune-dungeon-audio") !== "off";
 
 const $ = (id) => document.getElementById(id);
 
 const QUEST_DEFS = {
+  rescueRoom: {
+    id: "rescueRoom",
+    giver: "questNpc",
+    title: "房间救援",
+    giverName: "救援斥候卡尔",
+    desc: "清理指定房间的怪物，救出被困的冒险者。",
+    target: 2,
+    rewardGold: (floor) => 45 + floor * 8,
+    rewardKeys: 1,
+    type: "rescueRoom"
+  },
   wardenErrand: {
     id: "wardenErrand",
     giver: "questNpc",
@@ -51,6 +65,127 @@ function resetBattleFx(kind = "action") {
 function setBattleFx(target, data) {
   if (!battleFx) resetBattleFx();
   battleFx[target] = { ...data, seq: `${battleFx.seq}-${target}` };
+}
+
+function initAudio(playReady = false) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return null;
+  if (!audioState) {
+    const ctx = new AudioContext();
+    const master = ctx.createGain();
+    master.gain.value = audioEnabled ? .85 : 0;
+    master.connect(ctx.destination);
+    audioState = { ctx, master, music: null, ambienceTimer: null };
+  }
+  const start = () => {
+    startDungeonMusic();
+    if (playReady || !audioState.unlocked) {
+      audioState.unlocked = true;
+      playSound("ready", false);
+    }
+    updateSoundButton();
+  };
+  if (audioState.ctx.state === "suspended") audioState.ctx.resume().then(start).catch(() => updateSoundButton());
+  else start();
+  return audioState;
+}
+
+function toggleAudio() {
+  setAudioEnabled(!audioEnabled, true);
+}
+
+function setAudioEnabled(enabled, playReady = false) {
+  audioEnabled = enabled;
+  localStorage.setItem("rune-dungeon-audio", enabled ? "on" : "off");
+  if (audioState?.master) {
+    const now = audioState.ctx.currentTime;
+    audioState.master.gain.cancelScheduledValues(now);
+    audioState.master.gain.setTargetAtTime(enabled ? .85 : 0, now, .035);
+  }
+  updateSoundButton();
+  if (enabled) initAudio(playReady);
+}
+
+function updateSoundButton() {
+  const button = $("soundBtn");
+  if (!button) return;
+  button.textContent = audioEnabled ? "声音：开" : "声音：关";
+  button.setAttribute("aria-pressed", audioEnabled ? "true" : "false");
+  button.classList.toggle("muted", !audioEnabled);
+}
+
+function startDungeonMusic() {
+  if (!audioState || audioState.music) return;
+  const { ctx, master } = audioState;
+  const music = ctx.createGain();
+  music.gain.value = .055;
+  music.connect(master);
+  audioState.music = music;
+  playAmbientTone(.055);
+  scheduleDungeonAmbience();
+}
+
+function scheduleDungeonAmbience() {
+  if (!audioState?.music) return;
+  const delay = rand(3600, 6800);
+  audioState.ambienceTimer = setTimeout(() => {
+    playAmbientTone();
+    scheduleDungeonAmbience();
+  }, delay);
+}
+
+function playAmbientTone(volume = .045) {
+  if (!audioState?.music) return;
+  const { ctx, music } = audioState;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+  const notes = [55, 61.74, 73.42, 82.41, 98];
+  osc.type = "sine";
+  osc.frequency.value = choice(notes);
+  filter.type = "lowpass";
+  filter.frequency.value = 360;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(volume, now + .8);
+  gain.gain.exponentialRampToValueAtTime(.0001, now + 4.8);
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(music);
+  osc.start(now);
+  osc.stop(now + 5);
+}
+
+function playSound(kind, ensure = true) {
+  if (!audioEnabled) return;
+  const audio = ensure ? initAudio() : audioState;
+  if (!audio) return;
+  const { ctx, master } = audio;
+  const now = ctx.currentTime;
+  const gain = ctx.createGain();
+  const osc = ctx.createOscillator();
+  const tones = {
+    ready: ["sine", 523, 262, .32, .42],
+    step: ["triangle", 130, 82, .08, .2],
+    chest: ["sine", 392, 784, .34, .38],
+    hit: ["square", 170, 54, .16, .36],
+    cast: ["sawtooth", 300, 168, .24, .32],
+    altar: ["sine", 262, 524, .4, .34],
+    quest: ["triangle", 247, 370, .34, .3],
+    sell: ["triangle", 620, 410, .22, .3],
+    danger: ["sawtooth", 110, 40, .42, .32]
+  };
+  const [type, start, end, duration, volume] = tones[kind] || tones.step;
+  osc.type = type;
+  osc.frequency.setValueAtTime(start, now);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(20, end), now + duration);
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(volume, now + .015);
+  gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+  osc.connect(gain);
+  gain.connect(master);
+  osc.start(now);
+  osc.stop(now + duration + .02);
 }
 
 // Create a new persistent hero state and enter the first floor.
@@ -164,17 +299,25 @@ function generateFloor() {
   } else {
     const mainPath = carveMainRoute(map, 1, 1, size - 2, size - 2);
     widenMainRoute(map, mainPath);
-    carveSideRooms(map, mainPath, 14 + Math.floor(state.floor / 2));
-    carveStructuredRooms(map, mainPath, 5);
+    carveSideRooms(map, mainPath, 22 + state.floor);
+    carveStructuredRooms(map, mainPath, 7);
+    pruneDisconnectedFloors(map);
+    const rooms = assignRoomLabels(map);
     placeTreasureEncounters(map, 5);
-    scatter(map, "monster", 16 + Math.floor(state.floor * 1.5));
-    scatter(map, "trap", state.floor >= 4 ? 5 : 3);
-    scatter(map, "altar", 3);
-    if (state.floor % 3 === 1) scatter(map, "shop", 1);
-    if (state.floor % 3 === 2) scatter(map, "forge", 1);
-    placeQuestNpc(map);
+    scatter(map, "monster", 12 + Math.floor(state.floor * 1.2), { preferRooms: true, minObjectDistance: 2 });
+    const rescueQuest = placeRescueQuest(map, rooms);
+    scatter(map, "trap", state.floor >= 4 ? 5 : 3, { minObjectDistance: 3 });
+    scatter(map, "altar", 2, { preferRooms: true, minObjectDistance: 6 });
+    if (state.floor % 3 === 1) scatter(map, "shop", 1, { minObjectDistance: 5 });
+    if (state.floor % 3 === 2) scatter(map, "forge", 1, { minObjectDistance: 5 });
+    if (!rescueQuest) placeQuestNpc(map);
     if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
     map[size - 2][size - 2].object = { type: "stairsDown" };
+    state.map = { size, theme: theme.id, cells: map, rooms, rescueQuest, explorationVersion: 2 };
+    state.player = { x: 1, y: 1 };
+    state.facing = state.facing || "down";
+    updateVisibility();
+    return;
   }
 
   state.player = { x: 1, y: 1 };
@@ -239,7 +382,7 @@ function carveSideRooms(map, mainPath, count) {
   const trunkRooms = Math.min(8, Math.floor(count / 2), anchors.length);
   for (let i = 0; i < trunkRooms; i++) {
     const anchor = anchors[Math.floor((i + 1) * anchors.length / (trunkRooms + 1))];
-    carveRoom(map, anchor.x, anchor.y, 2);
+    carveRoom(map, anchor.x, anchor.y, 2, `side-${state.floor}-trunk-${i}`);
   }
   let placed = 0;
   let attempts = 0;
@@ -250,7 +393,7 @@ function carveSideRooms(map, mainPath, count) {
     const anchor = anchors[(offset + attempts) % anchors.length];
     const dirs = shuffledDirections();
     for (const dir of dirs) {
-      if (carveBranchRoom(map, anchor, dir)) {
+      if (carveBranchRoom(map, anchor, dir, `side-${state.floor}-branch-${placed}`)) {
         placed++;
         break;
       }
@@ -258,7 +401,7 @@ function carveSideRooms(map, mainPath, count) {
   }
 }
 
-function carveBranchRoom(map, anchor, dir) {
+function carveBranchRoom(map, anchor, dir, roomId = null) {
   let x = anchor.x;
   let y = anchor.y;
   const length = rand(2, 5);
@@ -270,7 +413,7 @@ function carveBranchRoom(map, anchor, dir) {
     corridor.push(map[y][x]);
   }
   for (const cell of corridor) cell.terrain = "floor";
-  return carveRoom(map, x, y, 2);
+  return carveRoom(map, x, y, 2, roomId);
 }
 
 function shuffledDirections() {
@@ -332,8 +475,47 @@ function carveStructuredRoom(map, anchor, dir, roomId) {
   return true;
 }
 
+function assignRoomLabels(map) {
+  const rooms = {};
+  for (const cell of map.flat()) {
+    if (!cell.roomId || cell.terrain === "wall") continue;
+    rooms[cell.roomId] = rooms[cell.roomId] || { id: cell.roomId, cells: 0 };
+    rooms[cell.roomId].cells++;
+  }
+  return Object.values(rooms)
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((room, index) => ({ ...room, name: `${index + 1}号房` }));
+}
+
+function pruneDisconnectedFloors(map) {
+  const start = map[1]?.[1];
+  if (!start) return;
+  const passable = (cell) => ["floor", "door"].includes(cell.terrain);
+  const key = (cell) => `${cell.x},${cell.y}`;
+  const visited = new Set([key(start)]);
+  const queue = [start];
+  while (queue.length) {
+    const cell = queue.shift();
+    for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
+      if (!passable(next) || visited.has(key(next))) continue;
+      visited.add(key(next));
+      queue.push(next);
+    }
+  }
+  for (const cell of map.flat()) {
+    if (!passable(cell) || visited.has(key(cell))) continue;
+    cell.terrain = "wall";
+    cell.object = null;
+    delete cell.roomId;
+  }
+}
+
+function roomName(roomId) {
+  return state?.map?.rooms?.find((room) => room.id === roomId)?.name || "未知房间";
+}
+
 // Place monsters or map objects on empty floor cells.
-function scatter(map, type, count) {
+function scatter(map, type, count, options = {}) {
   let placed = 0;
   let attempts = 0;
   const max = map.length - 2;
@@ -342,11 +524,21 @@ function scatter(map, type, count) {
     const x = rand(1, max);
     const y = rand(1, max);
     const cell = map[y][x];
-    if (cell.terrain === "floor" && !cell.object && !(x === 1 && y === 1)) {
-      cell.object = type === "monster" ? makeEnemyWithVariant(Math.random() < .14) : { type };
+    if (cell.terrain === "floor" && !cell.object && !(x === 1 && y === 1) && !isObjectCrowded(map, cell, options)) {
+      const object = type === "monster" ? makeEnemyWithVariant(Math.random() < .18) : { type };
+      if (cell.roomId) object.roomId = cell.roomId;
+      cell.object = object;
       placed++;
     }
   }
+}
+
+function isObjectCrowded(map, cell, options = {}) {
+  if (options.preferRooms && !cell.roomId && Math.random() < .72) return true;
+  const minDistance = options.minObjectDistance || 0;
+  if (!minDistance) return false;
+  return cellsWithin(map, cell.x, cell.y, minDistance)
+    .some((nearby) => nearby !== cell && nearby.object && !["stairsDown", "stairsUp"].includes(nearby.object.type));
 }
 
 function placeTreasureEncounters(map, count) {
@@ -425,7 +617,7 @@ function placeGuardedTreasure(map) {
   return true;
 }
 
-function carveRoom(map, cx, cy, radius) {
+function carveRoom(map, cx, cy, radius, roomId = null) {
   if (cx - radius <= 0 || cy - radius <= 0 || cx + radius >= map.length - 1 || cy + radius >= map.length - 1) return false;
   for (let y = cy - radius; y <= cy + radius; y++) {
     for (let x = cx - radius; x <= cx + radius; x++) {
@@ -435,6 +627,7 @@ function carveRoom(map, cx, cy, radius) {
   for (let y = cy - radius; y <= cy + radius; y++) {
     for (let x = cx - radius; x <= cx + radius; x++) {
       map[y][x].terrain = "floor";
+      if (roomId) map[y][x].roomId = roomId;
     }
   }
   return true;
@@ -447,6 +640,7 @@ function placeGuardNear(map, x, y, eliteChance = false) {
   const guard = candidates[0];
   if (!guard) return false;
   guard.object = makeEnemyWithVariant(eliteChance && Math.random() < .35);
+  if (guard.roomId) guard.object.roomId = guard.roomId;
   return true;
 }
 
@@ -457,18 +651,55 @@ function placeKeyGuardianNear(map, x, y) {
   const guard = candidates[0];
   if (!guard) return false;
   guard.object = makeKeyGuardian();
+  if (guard.roomId) guard.object.roomId = guard.roomId;
   return true;
 }
 
-function placeQuestNpc(map) {
+function placeRescueQuest(map, rooms) {
+  const room = rooms
+    .map((entry) => ({ ...entry, cells: map.flat().filter((cell) => cell.roomId === entry.id && cell.terrain === "floor" && !cell.object) }))
+    .filter((entry) => entry.cells.length >= 5)
+    .sort((a, b) => distance(roomCenter(b.cells), { x: 1, y: 1 }) - distance(roomCenter(a.cells), { x: 1, y: 1 }))[0];
+  if (!room) return null;
+  const prisoner = choice(room.cells);
+  prisoner.object = { type: "rescueNpc", npcName: "矿工托兰", questId: "rescueRoom", roomId: room.id };
+  const monsterCells = room.cells.filter((cell) => cell !== prisoner).slice(0, 3);
+  for (const cell of monsterCells.slice(0, 2 + (state.floor >= 4 ? 1 : 0))) {
+    cell.object = makeEnemyWithVariant(Math.random() < .35);
+    cell.object.roomId = room.id;
+  }
+  const giver = placeQuestNpc(map, {
+    questId: "rescueRoom",
+    npcName: "救援斥候卡尔",
+    roomId: room.id,
+    roomName: room.name,
+    rescueName: "矿工托兰",
+    target: monsterCells.filter((cell) => cell.object && ["monster", "elite"].includes(cell.object.type)).length
+  });
+  if (!giver) {
+    prisoner.object = null;
+    for (const cell of monsterCells) {
+      if (cell.object?.roomId === room.id) cell.object = null;
+    }
+    return null;
+  }
+  return giver.object;
+}
+
+function roomCenter(cells) {
+  const total = cells.reduce((sum, cell) => ({ x: sum.x + cell.x, y: sum.y + cell.y }), { x: 0, y: 0 });
+  return { x: total.x / cells.length, y: total.y / cells.length };
+}
+
+function placeQuestNpc(map, source = { questId: "wardenErrand", npcName: "巡夜人" }) {
   const candidates = interiorCells(map)
     .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x: 1, y: 1 }) > 4)
     .sort((a, b) => npcScore(map, b) - npcScore(map, a));
   const cell = candidates.find((candidate) => cellsWithin(map, candidate.x, candidate.y, 3).some((nearby) => nearby.roomId)) || candidates[0];
   if (!cell) return false;
-  cell.object = { type: "questNpc", questId: "wardenErrand" };
+  cell.object = { type: "questNpc", ...source };
   state.quest = state.quest || { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
-  return true;
+  return cell;
 }
 
 function npcScore(map, cell) {
@@ -561,15 +792,15 @@ function makeEnemy(eliteOrBoss = false) {
       ? ["矿洞蝙蝠", "诅咒矿工", "石像守卫"]
       : ["冰霜狼", "寒冰法徒", "冰晶魔像"];
   const elite = eliteOrBoss && !boss;
-  const base = 18 + floor * 8;
-  const hp = Math.round(boss ? 260 : elite ? base * 1.8 : base);
+  const base = 24 + floor * 9;
+  const hp = Math.round(boss ? 310 : elite ? base * 1.95 : base);
   return {
     type: boss ? "boss" : elite ? "elite" : "monster",
     name: boss ? "符文守王" : elite ? `精英${choice(names)}` : choice(names),
     hp,
     maxHp: hp,
-    atk: boss ? 30 : 7 + floor * 3 + (elite ? 7 : 0),
-    def: boss ? 18 : 3 + floor + (elite ? 4 : 0),
+    atk: Math.round(boss ? 36 : 8 + floor * 3.4 + (elite ? 8 : 0)),
+    def: boss ? 21 : 4 + floor + (elite ? 5 : 0),
     xp: boss ? 160 : 12 + floor * 6 + (elite ? 18 : 0),
     gold: boss ? 220 : rand(8, 16) + floor * 2 + (elite ? 18 : 0)
   };
@@ -589,6 +820,7 @@ function updateVisibility() {
 
 // Move the player by one tile and resolve the destination cell.
 function move(dx, dy) {
+  initAudio();
   if (state.currentEnemy) return;
   if (dx < 0) state.facing = "left";
   else if (dx > 0) state.facing = "right";
@@ -616,6 +848,7 @@ function move(dx, dy) {
     return;
   }
   state.player = { x: nx, y: ny };
+  playSound(cell.object ? "danger" : "step");
   selectedTile = null;
   updateVisibility();
   resolveCell(cell);
@@ -643,7 +876,9 @@ function resolveCell(cell) {
   } else if (obj.type === "forge") {
     openForge();
   } else if (obj.type === "questNpc") {
-    openQuestNpc();
+    openQuestNpc(obj);
+  } else if (obj.type === "rescueNpc") {
+    openRescueNpc(obj);
   } else if (obj.type === "fenceGate") {
     openFenceGate(cell);
   } else if (obj.type === "stairsDown" || obj.type === "portal") {
@@ -687,6 +922,7 @@ function enterBattle(enemy) {
 }
 
 function triggerTrap(cell) {
+  playSound("danger");
   const damage = rand(8, 14) + state.floor * 2;
   const alerted = placeGuardNear(state.map.cells, cell.x, cell.y, state.floor >= 4);
   state.hp = Math.max(1, state.hp - damage);
@@ -697,6 +933,7 @@ function triggerTrap(cell) {
 
 // Resolve chest rewards: equipment, rune, or materials/gold.
 function openChest(cell) {
+  playSound("chest");
   const roll = Math.random();
   let message = "";
   if (roll < .42) {
@@ -727,6 +964,7 @@ function openLockedChest(cell) {
     return;
   }
   state.keys--;
+  playSound("chest");
   const loot = randomEquipment();
   const rune = choice(RUNES) + "1";
   const gold = rand(25, 55);
@@ -751,8 +989,30 @@ function openFenceGate(cell) {
   showEvent("门栅打开", "<p>钥匙的光没有被消耗，真正的锁还在宝箱上。现在可以进入围栏内开箱。</p>", "继续探索");
 }
 
-function openQuestNpc() {
-  openQuestFromGiver("questNpc");
+function openQuestNpc(source = null) {
+  openQuestFromGiver("questNpc", source || currentQuestSource("questNpc"));
+}
+
+function currentQuestSource(type) {
+  const obj = state?.map?.cells?.[state.player?.y]?.[state.player?.x]?.object;
+  return obj?.type === type ? obj : null;
+}
+
+function questDefFromSource(giver, source = null) {
+  const id = source?.questId;
+  const base = QUEST_DEFS[id] || questDefinitionsForGiver(giver).find((quest) => quest.type !== "rescueRoom") || questDefinitionsForGiver(giver)[0];
+  if (!base) return null;
+  if (base.type !== "rescueRoom") return base;
+  return {
+    ...base,
+    title: `${source?.roomName || roomName(source?.roomId)}救援`,
+    giverName: source?.npcName || base.giverName,
+    desc: `${source?.rescueName || "被困者"}被困在${source?.roomName || roomName(source?.roomId)}。清理房间内的怪物后，与被困者交谈确认安全。`,
+    target: source?.target || base.target,
+    roomId: source?.roomId,
+    roomName: source?.roomName || roomName(source?.roomId),
+    rescueName: source?.rescueName || "被困者"
+  };
 }
 
 function ensureQuest() {
@@ -782,20 +1042,25 @@ function createQuestState(def, floor = state.floor) {
     floor,
     kills: 0,
     target: def.target,
+    roomId: def.roomId || null,
+    roomName: def.roomName || null,
+    rescueName: def.rescueName || null,
+    roomCleared: false,
+    rescued: false,
     accepted: true,
     completed: false,
     claimed: false
   };
 }
 
-function questState(id, floor = state.floor) {
-  return ensureQuestList().find((quest) => quest.id === id && quest.floor === floor);
+function questState(id, floor = state.floor, roomId = null) {
+  return ensureQuestList().find((quest) => quest.id === id && quest.floor === floor && (!roomId || quest.roomId === roomId));
 }
 
-function acceptQuest(id) {
-  const def = QUEST_DEFS[id];
+function acceptQuest(id, source = null) {
+  const def = source ? questDefFromSource(source.type || "questNpc", source) : QUEST_DEFS[id];
   if (!def) return null;
-  let quest = questState(id);
+  let quest = questState(id, state.floor, def.roomId);
   if (!quest) {
     quest = createQuestState(def);
     ensureQuestList().push(quest);
@@ -807,13 +1072,13 @@ function acceptQuest(id) {
   return quest;
 }
 
-function openQuestFromGiver(giver) {
-  const def = questDefinitionsForGiver(giver)[0];
+function openQuestFromGiver(giver, source = null) {
+  const def = questDefFromSource(giver, source);
   if (!def) {
     showEvent("暂无任务", "<p>这里暂时没有新的委托。</p>", "离开");
     return;
   }
-  const quest = questState(def.id);
+  const quest = questState(def.id, state.floor, def.roomId);
   const progress = quest || { ...createQuestState(def), accepted: false };
   const remaining = Math.max(0, def.target - progress.kills);
   const rewardGold = questRewardGold(def, progress.floor);
@@ -826,15 +1091,15 @@ function openQuestFromGiver(giver) {
     <div class="quest-panel">
       <b>${def.giverName}</b>
       <p>${def.desc}</p>
-      <small>进度：${progress.kills}/${def.target}${remaining ? `，还差 ${remaining} 个。` : "，可以领取奖励。"}</small>
+      <small>进度：${progress.kills}/${def.target}${def.roomName ? ` · ${def.roomName}` : ""}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
       <div class="quest-reward">${rewardParts}</div>
     </div>
   `;
   const actions = [];
   if (!quest) {
-    actions.push({ text: "接受任务", action: () => { closeModal(); acceptQuest(def.id); } });
+    actions.push({ text: "接受任务", action: () => { closeModal(); acceptQuest(def.id, source); } });
   } else if (quest.completed && !quest.claimed) {
-    actions.push({ text: "领取奖励", action: () => { closeModal(); claimQuestReward(def.id); } });
+    actions.push({ text: "领取奖励", action: () => { closeModal(); claimQuestReward(def.id, def.roomId); } });
   } else {
     actions.push({ text: quest.claimed ? "已领取" : "继续任务", action: closeModal });
   }
@@ -842,9 +1107,11 @@ function openQuestFromGiver(giver) {
   showModal(def.title, body, actions);
 }
 
-function claimQuestReward(id) {
-  const def = QUEST_DEFS[id];
-  const quest = questState(id);
+function claimQuestReward(id, roomId = null) {
+  const quest = questState(id, state.floor, roomId);
+  const def = quest?.id === "rescueRoom"
+    ? { ...QUEST_DEFS.rescueRoom, roomId: quest.roomId, roomName: quest.roomName, rescueName: quest.rescueName, target: quest.target, giverName: "救援斥候卡尔" }
+    : QUEST_DEFS[id];
   if (!def || !quest || !quest.completed || quest.claimed) return;
   const rewardGold = questRewardGold(def, quest.floor);
   quest.claimed = true;
@@ -860,6 +1127,26 @@ function claimQuestReward(id) {
     rewardGold ? `金币 +${rewardGold}` : "",
     def.rewardPotion ? "小型生命药水 +1" : ""
   ].filter(Boolean).join("<br>")}</p>`, "收下");
+  playSound("quest");
+  render();
+}
+
+function openRescueNpc(obj) {
+  const quest = questState("rescueRoom", state.floor, obj.roomId);
+  const name = obj.npcName || "被困者";
+  if (!quest?.accepted) {
+    showEvent(name, `<p>${name}被困在${roomName(obj.roomId)}，需要先找到救援斥候接下委托。</p>`, "知道了");
+    return;
+  }
+  if (!quest.roomCleared) {
+    showEvent(name, `<p>${name}低声提醒：房间里还有怪物。先清理${quest.roomName || roomName(obj.roomId)}。</p>`, "继续");
+    return;
+  }
+  quest.rescued = true;
+  quest.completed = true;
+  log(`${name}已经安全，回到${quest.giverName || "救援斥候卡尔"}处领取报酬。`);
+  playSound("quest");
+  showEvent("救援完成", `<p>${name}已经安全。回到救援斥候卡尔处领取报酬。</p>`, "继续");
   render();
 }
 
@@ -895,9 +1182,10 @@ function qualityBonus(quality) {
 
 // Consume an altar tile and restore part of player resources.
 function useAltar(cell) {
-  const heal = Math.floor(state.maxHp * .28);
+  playSound("altar");
+  const heal = Math.floor(state.maxHp * .24);
   state.hp = Math.min(effectiveMaxHp(), state.hp + heal);
-  state.mp = Math.min(effectiveMaxMp(), state.mp + 14);
+  state.mp = Math.min(effectiveMaxMp(), state.mp + 8);
   cell.object = null;
   log(`符文祭坛恢复了 ${heal} 点生命和少量法力。`);
   showEvent("符文祭坛", `<p>祭坛亮起微光，恢复 ${heal} 点生命和少量法力。</p>`, "继续");
@@ -910,8 +1198,8 @@ function nextFloor() {
   state.floor++;
   state.facing = "down";
   enterFloor("down");
-  state.hp = Math.min(effectiveMaxHp(), state.hp + 20);
-  state.mp = Math.min(effectiveMaxMp(), state.mp + 12);
+  state.hp = Math.min(effectiveMaxHp(), state.hp + 14);
+  state.mp = Math.min(effectiveMaxMp(), state.mp + 6);
   log(`进入第 ${state.floor} 层。`);
   saveGame(false);
   showToast(`<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`)
@@ -925,8 +1213,8 @@ function previousFloor() {
   state.facing = "up";
   enterFloor("up");
   updateVisibility();
-  state.hp = Math.min(effectiveMaxHp(), state.hp + 8);
-  state.mp = Math.min(effectiveMaxMp(), state.mp + 5);
+  state.hp = Math.min(effectiveMaxHp(), state.hp + 5);
+  state.mp = Math.min(effectiveMaxMp(), state.mp + 2);
   log(`返回第 ${state.floor} 层。`);
   saveGame(false);
   showToast(`<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`)
@@ -1012,6 +1300,7 @@ function runeEffectText(rune) {
 
 // Resolve one player combat action and then the enemy response.
 function attackEnemy(mode, skill = null) {
+  playSound(mode === "skill" ? "cast" : mode === "attack" ? "hit" : "danger");
   const enemy = state.currentEnemy;
   const t = totals();
   let result = "";
@@ -1125,8 +1414,8 @@ function upgradedSkill(skill) {
   return {
     ...skill,
     level,
-    mp: Math.max(1, skill.mp - Math.floor(level / 2)),
-    power: Number((skill.power * (1 + level * .14)).toFixed(2))
+    mp: skill.mp + Math.floor(level / 3),
+    power: Number((skill.power * (1 + level * .1)).toFixed(2))
   };
 }
 
@@ -1174,9 +1463,17 @@ function recordQuestKill(enemy, rewards = []) {
     if (!quest.accepted || quest.claimed || quest.completed || quest.floor !== state.floor) continue;
     const def = QUEST_DEFS[quest.id];
     if (!def) continue;
+    if (def.type === "rescueRoom" && enemy.roomId !== quest.roomId) continue;
     quest.kills++;
     if (quest.kills >= quest.target) {
       quest.kills = quest.target;
+      if (def.type === "rescueRoom") {
+        quest.roomCleared = true;
+        log(`${quest.roomName || roomName(quest.roomId)}已经清理，去确认${quest.rescueName || "被困者"}安全。`);
+        rewards.push(`${quest.roomName || "目标房间"}已清理`);
+        rewards.push(`去找${quest.rescueName || "被困者"}`);
+        continue;
+      }
       quest.completed = true;
       log(`${def.title}完成了，回到${def.giverName}处领取奖励。`);
       rewards.push(`${def.title} ${quest.kills}/${quest.target}`);
@@ -1361,7 +1658,7 @@ function applyStatDraft() {
 
 function isBlockingInteraction(obj) {
   if (!obj) return false;
-  if (["shop", "forge", "questNpc", "fenceGate"].includes(obj.type)) return true;
+  if (["shop", "forge", "questNpc", "rescueNpc", "fenceGate"].includes(obj.type)) return true;
   if (obj.type === "lockedChest") return (state.keys || 0) <= 0;
   return false;
 }
@@ -1386,6 +1683,70 @@ function confirmEquipItem(id) {
   const entry = state.inventory.find((item) => item.id === id);
   if (!entry) return;
   showConfirm("装备确认", `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>${equipmentCompareText(entry)}`, "装备", () => equipItem(id));
+}
+
+function equipmentSellValue(entry) {
+  return Math.max(6, Math.round(itemScore(entry) * .55 + (entry.level || 0) * 8));
+}
+
+function equipmentSalvageValue(entry) {
+  const qualityDust = { 普通: 1, 优秀: 1, 稀有: 2, 史诗: 3, 传说: 4 }[entry.quality] || 1;
+  const stones = entry.level > 0 || ["史诗", "传说"].includes(entry.quality) ? 1 : 0;
+  return { dust: qualityDust + Math.floor((entry.level || 0) / 2), stones };
+}
+
+function canSellEquipmentHere() {
+  if (!state?.map?.cells || !state.player) return false;
+  const here = state.map.cells[state.player.y]?.[state.player.x];
+  if (here?.object?.type === "shop") return true;
+  return cardinalNeighbors(state.map.cells, state.player.x, state.player.y)
+    .some((cell) => cell.object?.type === "shop");
+}
+
+function sellEquipment(id) {
+  if (!canSellEquipmentHere()) {
+    showEvent("需要商人", "<p>售出装备需要在商人身边进行。分解装备可以随时操作。</p>", "知道了");
+    return;
+  }
+  const index = state.inventory.findIndex((entry) => entry.id === id && entry.kind === "equip");
+  const entry = state.inventory[index];
+  if (!entry) return;
+  const gold = equipmentSellValue(entry);
+  state.inventory.splice(index, 1);
+  state.gold = (state.gold || 0) + gold;
+  playSound("sell");
+  log(`售出${entry.name}，获得 ${gold} 金币。`);
+  render();
+}
+
+function disassembleEquipment(id) {
+  const index = state.inventory.findIndex((entry) => entry.id === id && entry.kind === "equip");
+  const entry = state.inventory[index];
+  if (!entry) return;
+  const reward = equipmentSalvageValue(entry);
+  state.inventory.splice(index, 1);
+  state.materials["魔尘"] = (state.materials["魔尘"] || 0) + reward.dust;
+  if (reward.stones) state.materials["强化石"] = (state.materials["强化石"] || 0) + reward.stones;
+  playSound("sell");
+  log(`分解${entry.name}，获得魔尘 ${reward.dust}${reward.stones ? `、强化石 ${reward.stones}` : ""}。`);
+  render();
+}
+
+function confirmSellEquipment(id) {
+  const entry = state.inventory.find((item) => item.id === id && item.kind === "equip");
+  if (!entry) return;
+  if (!canSellEquipmentHere()) {
+    showEvent("需要商人", "<p>售出装备需要在商人身边进行。分解装备可以随时操作。</p>", "知道了");
+    return;
+  }
+  showConfirm("售出装备", `<p>售出 ${entry.name}，获得 ${equipmentSellValue(entry)} 金币。</p>`, "售出", () => sellEquipment(id));
+}
+
+function confirmDisassembleEquipment(id) {
+  const entry = state.inventory.find((item) => item.id === id && item.kind === "equip");
+  if (!entry) return;
+  const reward = equipmentSalvageValue(entry);
+  showConfirm("分解装备", `<p>分解 ${entry.name}，获得魔尘 ${reward.dust}${reward.stones ? `、强化石 ${reward.stones}` : ""}。</p>`, "分解", () => disassembleEquipment(id));
 }
 
 function unequipItem(slot) {
@@ -1747,7 +2108,7 @@ function renderMap() {
         : showObject ? objectSprite(cell.object) : "";
       const objectBadge = showObject ? badgeForObject(cell.object.type) : "";
       const label = tileLabel(cell, isPlayer);
-      const showHint = isPlayer || showObject || ["wall", "door", "fence"].includes(cell.terrain);
+      const showHint = isPlayer || showObject || ["wall", "door", "fence"].includes(cell.terrain) || (cell.roomId && cell.terrain === "door");
       const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
       const title = "";
       const flags = [
@@ -1850,6 +2211,7 @@ function minimapObjectIcon(obj) {
     forge: { cls: "forge", src: ASSETS.forge, alt: "合成台" },
     shop: { cls: "merchant", src: ASSETS.shop, alt: "商人" },
     questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
+    rescueNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "被困者" },
     fenceGate: { cls: "fence-gate", src: ASSETS.fenceGate, alt: "门栅" },
     trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
     portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
@@ -2023,6 +2385,7 @@ function objectSprite(obj) {
     forge: ["forge", ASSETS.forge, "合成台"],
     shop: ["merchant", ASSETS.shop, "商人"],
     questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
+    rescueNpc: ["quest-npc", ASSETS.questNpc, "被困者"],
     fenceGate: ["fence-gate", ASSETS.fenceGate, "门栅"],
     trap: ["trap", ASSETS.trap, "陷阱"],
     portal: ["portal", ASSETS.portal, "传送门"],
@@ -2059,6 +2422,7 @@ function badgeForObject(type) {
     forge: "锻",
     shop: "商",
     questNpc: "托",
+    rescueNpc: "救",
     fenceGate: "栅",
     trap: "陷",
     portal: "门",
@@ -2075,7 +2439,7 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
   if (cell.terrain === "wall") return "墙壁：无法通行";
   if (cell.terrain === "fence") return "铁栅栏：围住宝箱，寻找门栅入口";
   if (cell.terrain === "door") return "房间门：进入封闭房间";
-  if (!cell.object) return "地面：可通行";
+  if (!cell.object) return cell.roomId ? `${roomName(cell.roomId)}：可通行` : "地面：可通行";
   if (cell.object.type === "trap") return "地面：可通行";
   const labels = {
     monster: "普通怪物：接触后进入战斗",
@@ -2086,7 +2450,8 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
     altar: "符文祭坛：恢复生命和法力",
     forge: "合成台：强化装备或合成符文",
     shop: "商人：购买药水和补给",
-    questNpc: "中立委托人：完成任务获得钥匙和金币",
+    questNpc: cell.object.npcName ? `${cell.object.npcName}：提供${cell.object.roomName || roomName(cell.object.roomId)}相关委托` : "中立委托人：完成任务获得钥匙和金币",
+    rescueNpc: `${cell.object.npcName || "被困者"}：清理${roomName(cell.object.roomId)}后确认救援`,
     fenceGate: "符文门栅：有钥匙后可打开围栏入口",
     trap: "陷阱：触发后受到伤害",
     portal: "传送门：进入下一层",
@@ -2191,8 +2556,11 @@ function renderQuestList() {
     return `<section class="quest-list"><p>暂无任务。和商人或委托人交谈后，可以在这里追踪目标。</p></section>`;
   }
   const rows = quests.map((quest) => {
-    const def = QUEST_DEFS[quest.id] || { title: "未知任务", giverName: "未知", desc: "", rewardGold: 0 };
-    const stateText = quest.claimed ? "已领取" : quest.completed ? "可领取" : "进行中";
+    const base = QUEST_DEFS[quest.id] || { title: "未知任务", giverName: "未知", desc: "", rewardGold: 0 };
+    const def = quest.id === "rescueRoom"
+      ? { ...base, title: `${quest.roomName || "房间"}救援`, desc: `清理${quest.roomName || "目标房间"}并确认${quest.rescueName || "被困者"}安全。` }
+      : base;
+    const stateText = quest.claimed ? "已领取" : quest.completed ? "可领取" : quest.roomCleared ? "待救援" : "进行中";
     const rewardGold = questRewardGold(def, quest.floor);
     const rewards = [
       def.rewardKeys ? `钥匙 +${def.rewardKeys}` : "",
@@ -2203,7 +2571,7 @@ function renderQuestList() {
       <article class="quest-row ${quest.completed && !quest.claimed ? "ready" : ""}">
         <div>
           <b>${def.title}</b>
-          <small>${def.giverName} · 第 ${quest.floor} 层 · ${quest.kills}/${quest.target}</small>
+          <small>${def.giverName} · 第 ${quest.floor} 层${quest.roomName ? ` · ${quest.roomName}` : ""} · ${quest.kills}/${quest.target}</small>
           <p>${def.desc}</p>
           <small>${rewards}</small>
         </div>
@@ -2223,16 +2591,34 @@ function inventoryGroupMarkup() {
   const potions = state.inventory
     .filter((entry) => entry.kind === "potion")
     .sort((a, b) => itemScore(b) - itemScore(a));
-  const equipment = state.inventory
+  const allEquipment = state.inventory
     .filter((entry) => entry.kind === "equip")
     .sort((a, b) => itemScore(b) - itemScore(a));
+  const equipment = equipmentFilterRows(allEquipment);
   const groups = {
     potions: inventoryGroup("potions", "药剂", potions.length ? potions.map(potionRow).join("") : `<p>暂无药剂。</p>`),
-    equipment: inventoryGroup("equipment", "装备", equipment.length ? equipment.map(equipmentInventoryRow).join("") : `<p>暂无备用装备。</p>`),
+    equipment: inventoryGroup("equipment", "装备", `${equipmentFilterControl()}${equipment.length ? equipment.map(equipmentInventoryRow).join("") : `<p>暂无符合筛选的装备。</p>`}`),
     materials: inventoryGroup("materials", "材料", materialRows()),
     runes: inventoryGroup("runes", "符文", runeRows())
   };
   return `${inventorySubtabs()}${groups[activeInventoryTab] || groups.equipment}`;
+}
+
+function equipmentFilterRows(equipment) {
+  if (activeEquipmentFilter === "all") return equipment;
+  return equipment.filter((entry) => entry.slot === activeEquipmentFilter);
+}
+
+function equipmentFilterControl() {
+  const options = [["all", "全部"], ...SLOTS.map((slot) => [slot, SLOT_NAMES[slot]])];
+  return `
+    <label class="inventory-filter">
+      <span>类型</span>
+      <select onchange="selectEquipmentFilter(this.value)">
+        ${options.map(([value, label]) => `<option value="${value}" ${activeEquipmentFilter === value ? "selected" : ""}>${label}</option>`).join("")}
+      </select>
+    </label>
+  `;
 }
 
 function inventorySubtabs() {
@@ -2250,6 +2636,11 @@ function selectInventoryTab(tab) {
   renderInventory();
 }
 
+function selectEquipmentFilter(filter) {
+  activeEquipmentFilter = filter;
+  renderInventory();
+}
+
 function inventoryGroup(type, title, body) {
   return `<section class="inventory-group inventory-group-${type}"><h3>${title}</h3>${body}</section>`;
 }
@@ -2261,13 +2652,16 @@ function potionRow(entry) {
 function equipmentInventoryRow(entry) {
   const better = isBetterThanEquipped(entry);
   const hasCurrent = !!state.equipment?.[entry.slot];
-  const compare = hasCurrent ? equipmentCompareText(entry, "inline-equipment-compare") : "";
+  const compare = hasCurrent ? equipmentScoreBadge(entry, "inline-equipment-compare") : "";
+  const sellDisabled = canSellEquipmentHere() ? "" : `disabled title="需要在商人身边售出"`;
   return `<div class="item-row equip-row equipment-card ${better ? "better-equipment" : ""}">
     ${compare ? `<div class="equipment-compare-corner">${compare}</div>` : ""}
     <div><b>${entry.name}</b>${equipmentSummary(entry)}</div>
     <div class="equipment-actions inventory-equipment-actions">
       <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
       <button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button>
+      <button type="button" onclick="confirmDisassembleEquipment('${entry.id}')">分解</button>
+      <button type="button" ${sellDisabled} onclick="confirmSellEquipment('${entry.id}')">售出</button>
     </div>
   </div>`;
 }
@@ -2298,24 +2692,28 @@ function showInventoryEquipmentDetail(id) {
   const runeText = entry.runeSlots
     ? `${entry.runes.length}/${entry.runeSlots}：${entry.runes.length ? entry.runes.join("、") : "未镶嵌"}`
     : "无";
-  showModal(entry.name, equipmentDetailMarkup(entry, SLOT_NAMES[entry.slot], runeText), [
+  const compare = state.equipment?.[entry.slot] ? `<div class="detail-row"><b>对比</b><span>${equipmentCompareText(entry)}</span></div>` : "";
+  const actions = [
     { text: "关闭", action: closeModal },
+    { text: "分解", action: () => { closeModal(); disassembleEquipment(id); } },
     { text: "装备", action: () => { closeModal(); equipItem(id); } }
-  ]);
+  ];
+  if (canSellEquipmentHere()) actions.splice(2, 0, { text: "售出", action: () => { closeModal(); sellEquipment(id); } });
+  showModal(entry.name, equipmentDetailMarkup(entry, SLOT_NAMES[entry.slot], runeText, compare), actions);
 }
 
 function materialRows() {
   const materials = Object.entries(state.materials || {}).filter(([, count]) => count > 0);
   if ((state.keys || 0) > 0) materials.unshift(["符文钥匙", state.keys]);
   return materials.length
-    ? materials.map(([name, count]) => `<div class="item-row"><div>${name}<small>数量 ${count}</small></div></div>`).join("")
+    ? materials.map(([name, count]) => `<div class="item-row"><div>${name}</div><span class="item-quantity">x${count}</span></div>`).join("")
     : `<p>暂无材料。</p>`;
 }
 
 function runeRows() {
   const runes = Object.entries(state.runes || {}).filter(([, count]) => count > 0);
   return runes.length
-    ? runes.map(([name, count]) => `<div class="item-row rune-row"><div>${name}符文<small>${runeEffectText(name)}。数量 ${count}，3 合 1 升级；需要镶嵌到带符文槽的装备上才生效。</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div>`).join("")
+    ? runes.map(([name, count]) => `<div class="item-row rune-row"><div>${name}符文<small>${runeEffectText(name)}。3 合 1 升级；需要镶嵌到带符文槽的装备上才生效。</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("")
     : `<p>暂无符文。</p>`;
 }
 
@@ -2336,7 +2734,7 @@ function renderCraft() {
   const runes = Object.entries(state.runes).filter(([, count]) => count > 0);
   $("tabBody").innerHTML = `
     <div class="item-row"><div>材料<small>强化石 ${state.materials["强化石"] || 0}，魔尘 ${state.materials["魔尘"] || 0}</small></div></div>
-    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>数量 ${count}，3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div>`).join("") : "<p>暂无符文。</p>"}
+    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("") : "<p>暂无符文。</p>"}
   `;
 }
 
@@ -2400,14 +2798,29 @@ function equipmentCompareText(item, extraClass = "") {
   const scoreSign = scoreDelta > 0 ? "+" : "";
   return `
     <small class="equipment-compare ${extraClass}">
-      <span class="compare-badge compare-badge-${direction}" aria-label="${scoreDelta >= 0 ? "更好" : "更坏"}">
-        <span class="compare-arrow">${arrow}</span>
-        <span>${scoreSign}${scoreDelta}</span>
-      </span>
+      ${equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta)}
       <span class="compare-title">装备对比</span>
       <span class="${scoreClass}">评分差 ${scoreSign}${scoreDelta}</span>
       ${statDeltas.join("")}
     </small>
+  `;
+}
+
+function equipmentScoreBadge(item, extraClass = "") {
+  const current = state.equipment?.[item.slot];
+  const scoreDelta = itemScore(item) - itemScore(current);
+  const direction = scoreDelta >= 0 ? "up" : "down";
+  const arrow = scoreDelta >= 0 ? "↑" : "↓";
+  const scoreSign = scoreDelta > 0 ? "+" : "";
+  return `<small class="equipment-compare score-only-compare ${extraClass}">${equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta)}</small>`;
+}
+
+function equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta) {
+  return `
+    <span class="compare-badge compare-badge-${direction}" aria-label="${scoreDelta >= 0 ? "更好" : "更坏"}">
+      <span class="compare-arrow">${arrow}</span>
+      <span>${scoreSign}${scoreDelta}</span>
+    </span>
   `;
 }
 
@@ -2420,7 +2833,7 @@ function enhanceText(eq) {
   return Object.keys(eq.stats).map((key) => `${STAT_NAMES[key] || key}+${eq.level}`).join(" ");
 }
 
-function equipmentDetailMarkup(eq, slotName, runeText) {
+function equipmentDetailMarkup(eq, slotName, runeText, extraRows = "") {
   return `
     <div class="equipment-detail">
       <div class="equipment-meta">
@@ -2432,6 +2845,7 @@ function equipmentDetailMarkup(eq, slotName, runeText) {
       <div class="detail-row"><b>属性</b><span>${statsText(eq) || "无属性"}</span></div>
       ${eq.level ? `<div class="detail-row"><b>强化提升</b><span>${enhanceText(eq)}</span></div>` : ""}
       <div class="detail-row"><b>符文槽</b><span>${runeText}</span></div>
+      ${extraRows}
     </div>
   `;
 }
@@ -2542,6 +2956,7 @@ function showConfirm(title, body, confirmText, onConfirm) {
 
 // Dispatch a modal button action by index.
 function modalAction(index) {
+  initAudio();
   window._modalActions[index].action();
 }
 

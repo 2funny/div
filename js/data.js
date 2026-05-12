@@ -5,11 +5,11 @@ const CLASSES = {
     desc: "稳定耐打，适合第一次进入地牢。",
     stats: { atk: 8, mag: 2, def: 7, res: 4, spd: 4, luk: 3 },
     hp: 120,
-    mp: 32,
+    mp: 24,
     skills: [
-      { id: "heavy", name: "重斩", mp: 6, desc: "造成 170% 攻击伤害。", type: "damage", scale: "atk", power: 1.7 },
-      { id: "guard", name: "格挡", mp: 4, desc: "本回合获得护盾并反击。", type: "guard", power: 0.5 },
-      { id: "roar", name: "战吼", mp: 5, desc: "造成伤害并削弱敌人。", type: "weaken", scale: "atk", power: 1.0 }
+      { id: "heavy", name: "重斩", mp: 9, desc: "造成 150% 攻击伤害。", type: "damage", scale: "atk", power: 1.5 },
+      { id: "guard", name: "格挡", mp: 7, desc: "本回合获得护盾并反击。", type: "guard", power: 0.45 },
+      { id: "roar", name: "战吼", mp: 10, desc: "造成伤害并削弱敌人。", type: "weaken", scale: "atk", power: 0.9 }
     ]
   },
   mage: {

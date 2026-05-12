@@ -50,6 +50,12 @@ vm.runInContext(`
   assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
   assert(generatedCells.some((cell) => cell.roomId && cell.terrain === "floor"), "generated floor should include enclosed room interiors");
   assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
+  assert(state.map.rooms.length >= 5, "generated floor should label multiple rooms");
+  assert(generatedCells.some((cell) => cell.object?.type === "rescueNpc"), "generated floor should include a rescue target NPC");
+  const rescueGiver = generatedCells.find((cell) => cell.object?.questId === "rescueRoom" && cell.object?.type === "questNpc");
+  assert(rescueGiver?.object.roomName, "rescue quest giver should name the target room");
+  const rescueRoomId = rescueGiver.object.roomId;
+  assert(generatedCells.some((cell) => cell.object?.roomId === rescueRoomId && ["monster", "elite"].includes(cell.object.type)), "rescue room should start with monsters to clear");
 
   state = { floor: 3 };
   const size = 17;
