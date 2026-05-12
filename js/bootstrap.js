@@ -1,10 +1,31 @@
 // Keyboard movement uses arrows or WASD while a game is active.
 document.addEventListener("keydown", (event) => {
+  const modalOpen = !$("modal").classList.contains("hidden");
+  if (modalOpen && event.key === " ") {
+    event.preventDefault();
+    closeModal();
+    return;
+  }
   if (!state) return;
-  if (event.key === "ArrowUp" || event.key.toLowerCase() === "w") move(0, -1);
-  if (event.key === "ArrowDown" || event.key.toLowerCase() === "s") move(0, 1);
-  if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") move(-1, 0);
-  if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") move(1, 0);
+  const key = event.key.toLowerCase();
+  const movement = {
+    arrowup: [0, -1],
+    w: [0, -1],
+    arrowdown: [0, 1],
+    s: [0, 1],
+    arrowleft: [-1, 0],
+    a: [-1, 0],
+    arrowright: [1, 0],
+    d: [1, 0]
+  }[key];
+  if (movement) {
+    event.preventDefault();
+    move(movement[0], movement[1]);
+  }
+});
+
+$("modal").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeModal();
 });
 
 // Prevent persistent focus/caret artifacts after clicking game UI controls.

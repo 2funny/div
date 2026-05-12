@@ -69,7 +69,7 @@ const ASSETS = {
   chest: "assets/dawngeon/chest.png",
   altar: "assets/dawngeon/altar-rune.svg",
   forge: "assets/dawngeon/forge.png",
-  shop: "assets/dawngeon/shop.png",
+  shop: "assets/dawngeon/merchant.svg",
   trap: "assets/dawngeon/trap-spikes.svg",
   portal: "assets/dawngeon/portal.png",
   stairsDown: null,

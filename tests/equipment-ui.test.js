@@ -26,8 +26,10 @@ vm.runInContext(`
 
   const upgrade = { id: "new", kind: "equip", name: "New Sword", slot: "weapon", quality: "优秀", stats: { atk: 8 }, runeSlots: 0, runes: [], level: 0 };
   const compare = equipmentCompareText(upgrade);
-  assert(compare.includes("评分 +"), "inventory equipment should show positive score delta");
-  assert(compare.includes("攻击 +3"), "inventory equipment should compare changed stats");
+  assert(compare.includes("装备对比"), "equipment comparison should be labeled as a comparison");
+  assert(compare.includes("评分差"), "score delta should be labeled as a delta instead of item score");
+  assert(compare.includes("评分差 +"), "inventory equipment should show positive score delta");
+  assert(compare.includes("攻击差 +3"), "inventory equipment should compare changed stats");
   assert(equippedStateBadge(), "equipment rows should have an equipped badge");
   assert.strictEqual(canUnequipSlot("weapon"), true, "equipped slot can be unequipped");
   state.inventory.push(
@@ -36,7 +38,10 @@ vm.runInContext(`
   );
   state.materials = { "强化石": 2, "魔尘": 1 };
   state.runes = { "火焰1": 3 };
+  assert(runeEffectText("火焰1").includes("攻击"), "rune effect text should describe the stat bonus");
   const inventory = inventoryGroupMarkup();
+  assert(!inventory.includes("equipment-compare"), "inventory equipment rows should not directly show comparison deltas");
+  assert(inventory.includes("对比"), "inventory equipment rows should offer a comparison button when same-slot gear is equipped");
   assert(inventory.includes('inventory-subtabs'), "inventory should use a second-level category menu");
   assert(inventory.includes('data-inventory-tab="potions"'), "inventory menu should include potions");
   assert(inventory.includes('data-inventory-tab="equipment"'), "inventory menu should include equipment");
@@ -61,6 +66,13 @@ vm.runInContext(`
   updateVisibility();
   assert.strictEqual(state.map.cells[4][4].seen, true, "player cell should be explored");
   assert.strictEqual(state.map.cells[0][0].seen, false, "far cells should remain unexplored");
+
+  state.classId = "warrior";
+  state.mp = 0;
+  const battleSkills = renderSkillActionButtons("battle");
+  assert(battleSkills.includes("battle-skill-card"), "battle skills should render as dedicated skill cards");
+  assert(battleSkills.includes("MP不足"), "battle skill cards should explain when MP is insufficient");
+  assert(ASSETS.shop.includes("merchant.svg"), "merchant map icon should use a dedicated character sprite");
 
   render = () => {};
   unequipItem("weapon");
