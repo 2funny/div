@@ -238,6 +238,12 @@ vm.runInContext(`
   assert.strictEqual(modalCallCount, 0, "normal monsters should not show an encounter confirmation modal");
 
   state.currentEnemy = null;
+  const deadMonsterCell = { object: { type: "monster", name: "Old Slime", hp: 0, maxHp: 10, atk: 3, def: 1 } };
+  resolveCell(deadMonsterCell);
+  assert.strictEqual(deadMonsterCell.object, null, "defeated monsters should be cleared instead of entering battle");
+  assert.strictEqual(state.currentEnemy, null, "defeated monsters should not trigger a battle view");
+
+  state.currentEnemy = null;
   let dangerModal = null;
   closeModal = () => {};
   showModal = (title, body, actions) => { dangerModal = { title, body, actions }; };
@@ -359,6 +365,7 @@ vm.runInContext(`
   assert.strictEqual(gateCell.object, null, "fence gate should open when the player has a key");
   assert.strictEqual(state.keys, 1, "opening the gate should reveal the chest path without spending the chest key");
   assert(tileLabel({ seen: true, terrain: "floor", object: { type: "lockedChest" } }).includes("钥匙守卫"), "locked chest label should hint at the key guardian");
+  assert.strictEqual(tileLabel({ seen: true, terrain: "floor", object: null, roomId: "room-1-0" }), "地面：可通行", "empty corridor or room floor labels should not claim the selected tile is a room");
 
   state.floor = 1;
   state.quest = { id: "wardenErrand", floor: 1, kills: 1, target: 2, claimed: false };

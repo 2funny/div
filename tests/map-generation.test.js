@@ -56,9 +56,14 @@ vm.runInContext(`
   assert(distance(stairsDown, { x: 1, y: 1 }) >= 10, "downstairs should not be discoverable immediately from the starting area");
   assert(stairsDown.roomId || floorNeighborCount(generated, stairsDown.x, stairsDown.y) <= 1, "downstairs should prefer a room or route endpoint");
   assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
+  for (const door of generatedCells.filter((cell) => cell.terrain === "door")) {
+    assert(door.roomId, "room doors should belong to a labelled room");
+    assert(validRoomDoor(generated, door, door.roomId), "room doors should connect a room interior to an outside corridor through the wall");
+  }
   assert(generatedCells.some((cell) => cell.roomId && cell.terrain === "floor"), "generated floor should include enclosed room interiors");
   assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
-  assert(state.map.rooms.length >= 5, "generated floor should label multiple rooms");
+  assert(state.map.rooms.length >= 4, "generated floor should label multiple meaningful rooms");
+  assert(state.map.rooms.length <= 10, "generated floor should avoid excessive labelled filler rooms");
   assert(generatedCells.some((cell) => cell.object?.type === "rescueNpc"), "generated floor should include a rescue target NPC");
   const rescueGiver = generatedCells.find((cell) => cell.object?.questId === "rescueRoom" && cell.object?.type === "questNpc");
   assert(rescueGiver?.object.roomName, "rescue quest giver should name the target room");

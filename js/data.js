@@ -2,40 +2,49 @@ const CLASSES = {
   warrior: {
     name: "剑士",
     avatar: "剑",
-    desc: "稳定耐打，适合第一次进入地牢。",
-    stats: { atk: 8, mag: 2, def: 7, res: 4, spd: 4, luk: 3 },
-    hp: 120,
-    mp: 24,
+    role: "前排压制",
+    primary: "攻击 / 防御",
+    desc: "生命和格挡成长更高，靠近战、护盾和削弱稳扎稳打。",
+    stats: { atk: 4, mag: 1, def: 4, res: 2, spd: 2, luk: 1 },
+    hp: 46,
+    mp: 12,
+    growth: { hp: 4, mp: 1, primary: "atk", primaryEvery: 2, secondary: "def", secondaryEvery: 4 },
     skills: [
-      { id: "heavy", name: "重斩", mp: 9, desc: "造成 150% 攻击伤害。", type: "damage", scale: "atk", power: 1.5 },
-      { id: "guard", name: "格挡", mp: 7, desc: "本回合获得护盾并反击。", type: "guard", power: 0.45 },
-      { id: "roar", name: "战吼", mp: 10, desc: "造成伤害并削弱敌人。", type: "weaken", scale: "atk", power: 0.9 }
+      { id: "heavy", name: "重斩", mp: 4, desc: "造成高额攻击伤害。", type: "damage", scale: "atk", power: 1.35 },
+      { id: "guard", name: "格挡", mp: 3, desc: "本回合获得护盾并反击。", type: "guard", power: 0.45 },
+      { id: "roar", name: "战吼", mp: 5, desc: "造成伤害并削弱敌人。", type: "weaken", scale: "atk", power: 0.85 }
     ]
   },
   mage: {
     name: "法师",
     avatar: "法",
-    desc: "爆发强，能用元素控制敌人。",
-    stats: { atk: 3, mag: 10, def: 3, res: 7, spd: 4, luk: 3 },
-    hp: 82,
-    mp: 78,
+    role: "元素爆发",
+    primary: "法强 / 抗性",
+    desc: "生命较低，法力和法强成长最高，依靠燃烧、减速和护盾处理战斗。",
+    stats: { atk: 1, mag: 6, def: 1, res: 4, spd: 2, luk: 2 },
+    hp: 32,
+    mp: 30,
+    growth: { hp: 2, mp: 4, primary: "mag", primaryEvery: 2, secondary: "res", secondaryEvery: 4 },
     skills: [
-      { id: "fireball", name: "火球术", mp: 8, desc: "造成高魔法伤害并灼烧。", type: "burn", scale: "mag", power: 1.55 },
-      { id: "frost", name: "寒冰箭", mp: 7, desc: "造成伤害并减速。", type: "slow", scale: "mag", power: 1.25 },
-      { id: "shield", name: "奥术护盾", mp: 9, desc: "获得大量护盾。", type: "shield", power: 1.3 }
+      { id: "fireball", name: "火球术", mp: 5, desc: "造成高魔法伤害并灼烧。", type: "burn", scale: "mag", power: 1.45 },
+      { id: "frost", name: "寒冰箭", mp: 4, desc: "造成伤害并减速。", type: "slow", scale: "mag", power: 1.15 },
+      { id: "shield", name: "奥术护盾", mp: 5, desc: "获得大量护盾。", type: "shield", power: 1.3 }
     ]
   },
   ranger: {
     name: "游侠",
     avatar: "弓",
-    desc: "高速暴击，擅长快速解决低防敌人。",
-    stats: { atk: 7, mag: 3, def: 4, res: 4, spd: 9, luk: 7 },
-    hp: 96,
-    mp: 44,
+    role: "高速游击",
+    primary: "速度 / 幸运",
+    desc: "速度和暴击成长突出，靠连击、闪避和持续伤害换取主动权。",
+    stats: { atk: 4, mag: 1, def: 2, res: 2, spd: 6, luk: 4 },
+    hp: 38,
+    mp: 18,
+    growth: { hp: 3, mp: 2, primary: "spd", primaryEvery: 2, secondary: "luk", secondaryEvery: 4 },
     skills: [
-      { id: "double", name: "连射", mp: 6, desc: "连续攻击两次。", type: "double", scale: "atk", power: 0.92 },
-      { id: "step", name: "闪避步", mp: 5, desc: "提高闪避并准备暴击。", type: "evade", power: 1 },
-      { id: "poison", name: "毒箭", mp: 7, desc: "造成伤害并中毒。", type: "poison", scale: "atk", power: 1.15 }
+      { id: "double", name: "连射", mp: 4, desc: "连续攻击两次。", type: "double", scale: "atk", power: 0.86 },
+      { id: "step", name: "闪避步", mp: 3, desc: "提高闪避并准备暴击。", type: "evade", power: 1 },
+      { id: "poison", name: "毒箭", mp: 4, desc: "造成伤害并中毒。", type: "poison", scale: "atk", power: 1.05 }
     ]
   }
 };

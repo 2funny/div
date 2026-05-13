@@ -9,6 +9,10 @@ document.addEventListener("keydown", (event) => {
   }
   if (!state) return;
   const key = event.key.toLowerCase();
+  if (state.currentEnemy && [" ", "enter", "arrowup", "w", "arrowdown", "s", "arrowleft", "a", "arrowright", "d"].includes(key)) {
+    event.preventDefault();
+    return;
+  }
   const movement = {
     arrowup: [0, -1],
     w: [0, -1],
@@ -63,12 +67,11 @@ $("soundBtn").addEventListener("click", (event) => {
   event.currentTarget.blur();
 });
 $("saveBtn").addEventListener("click", (event) => {
-  saveGame(true);
+  openSaveSlotPicker();
   event.currentTarget.blur();
 });
-$("newGameBtn").addEventListener("click", (event) => {
-  if (state) newGamePrompt();
-  else renderClassSelect();
+$("homeBtn").addEventListener("click", (event) => {
+  returnHome();
   event.currentTarget.blur();
 });
 

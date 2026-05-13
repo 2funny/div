@@ -2,11 +2,16 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
+const storage = {};
 const context = {
   assert,
   console,
   document: { getElementById: () => ({}) },
-  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+  localStorage: {
+    getItem: (key) => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
+    setItem: (key, value) => { storage[key] = String(value); },
+    removeItem: (key) => { delete storage[key]; }
+  },
   window: { crypto: { randomUUID: () => "test-id" } }
 };
 context.window.window = context.window;
@@ -17,13 +22,33 @@ vm.runInContext(fs.readFileSync("js/data.js", "utf8"), context);
 vm.runInContext(fs.readFileSync("js/game.js", "utf8"), context);
 vm.runInContext(`
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
+  assert.strictEqual(saveSlots().length, 4, "start screen should expose multiple save slots");
+  assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
+  assert(CLASSES.warrior.hp < 60 && CLASSES.mage.hp < 40, "classes should start from a low-value baseline");
+  assert(CLASSES.warrior.role && CLASSES.mage.primary && CLASSES.ranger.growth?.primary, "classes should expose clear role, primary stat, and growth identity");
   state = {
+    classId: "warrior",
+    floor: 1,
+    level: 1,
+    hp: 40,
+    maxHp: 46,
+    mp: 10,
+    maxMp: 12,
     equipment: {
       weapon: { id: "old", kind: "equip", name: "Old Sword", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 }
     },
     inventory: [],
     log: []
   };
+  currentSaveSlot = "slot-2";
+  saveGame(false);
+  assert(localStorage.getItem(saveSlotKey("slot-2")), "saving should write the active slot instead of only a single global save");
+  assert(saveSlots().find((slot) => slot.id === "slot-2").meta, "saving should update the slot list metadata");
+  const savedState = state;
+  state = null;
+  assert.strictEqual(loadGame("slot-2"), true, "loading a selected slot should restore that save");
+  assert.strictEqual(currentSaveSlot, "slot-2", "loading a slot should make it the active save target");
+  assert.strictEqual(state.classId, savedState.classId, "loading should restore the selected slot state");
 
   const upgrade = { id: "new", kind: "equip", name: "New Sword", slot: "weapon", quality: "优秀", stats: { atk: 8 }, runeSlots: 0, runes: [], level: 0 };
   const compare = equipmentCompareText(upgrade);
@@ -122,6 +147,8 @@ vm.runInContext(`
   const battleSkills = renderSkillActionButtons("battle");
   assert(battleSkills.includes("battle-skill-card"), "battle skills should render as dedicated skill cards");
   assert(battleSkills.includes("MP不足"), "battle skill cards should explain when MP is insufficient");
+  assert(battleSkills.includes("skill-preview"), "battle skills should show direct outcome previews");
+  assert(!battleSkills.includes("倍率"), "skill UI should avoid exposing internal multiplier wording");
   state.hp = 120;
   state.stats = { ...CLASSES.warrior.stats };
   state.equipment = {
@@ -144,6 +171,10 @@ vm.runInContext(`
   assert(battleSupplies.includes("useBattlePotion"), "battle potion shortcuts should be usable directly from combat");
   assert(battleSupplies.includes("Small Potion"), "battle potion shortcuts should show potion names");
   assert(battleSupplies.includes("x2"), "battle potion shortcuts should stack duplicate potion names");
+  activeInventoryTab = "potions";
+  const potionMarkup = inventoryGroupMarkup();
+  assert(potionMarkup.includes("inventory-card"), "inventory rows should use compact card styling");
+  assert(potionMarkup.includes("item-tags"), "inventory consumables should show structured stat tags");
   assert(ASSETS.shop.includes("merchant"), "merchant map icon should use a dedicated dungeon character sprite");
   assert(ASSETS.questNpc && ASSETS.questNpc !== ASSETS.shop, "quest NPC should not reuse the merchant icon");
   assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");
@@ -167,3 +198,11 @@ assert(!css.includes("better-equipment:hover::after"), "equipment upgrade marker
 assert(css.includes(".door::after"), "door art should include a layered dark dungeon overlay");
 assert(css.includes("bottom: 24px"), "interaction toasts should be anchored low instead of crowding the top edge");
 assert(!gameSource.includes('title="${label}"'), "map object hints should avoid native browser tooltips that crowd the upper corner");
+assert(gameSource.includes("const MASTER_VOLUME = .92"), "master audio should be louder than the previous quiet mix");
+assert(gameSource.includes("function startBattleMusic"), "game audio should include a separate battle music layer");
+assert(gameSource.includes('musicMode === "battle"'), "music should switch into battle mode during encounters");
+assert(gameSource.includes("scheduleDungeonMotif"), "dungeon BGM should include an audible repeating motif instead of only low ambience");
+assert(gameSource.includes("playDungeonChord"), "dungeon BGM should play an audible entrance chord outside battle");
+assert(css.includes(".item-side"), "inventory cards should keep counts and actions in a stable right rail");
+assert(css.includes(".save-slot-grid"), "start screen should present save slots as a clear selectable grid");
+assert(css.includes(".start-hero"), "start screen should have a dedicated save hub header");
