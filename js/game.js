@@ -6,7 +6,7 @@ let selectedTile = null;
 let battleFx = null;
 let statDraft = null;
 let audioState = null;
-let audioEnabled = localStorage.getItem("rune-dungeon-audio") !== "off";
+let audioEnabled = localStorage.getItem("rune-dungeon-audio") === "on";
 
 const $ = (id) => document.getElementById(id);
 
@@ -44,7 +44,14 @@ const QUEST_DEFS = {
   }
 };
 
-// Random and ID helpers used by map generation, loot, and item creation.
+const ENEMY_AFFIXES = [
+  { id: "armored", name: "坚甲", desc: "防御提高，普通攻击效率降低" },
+  { id: "shatter", name: "破盾", desc: "防御姿态减伤降低" },
+  { id: "drain", name: "汲取", desc: "造成伤害后恢复生命" },
+  { id: "swift", name: "迅捷", desc: "更容易避开攻击" }
+];
+
+// 随机数和 ID 工具，供地图生成、掉落和物品创建复用。
 function rand(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -58,15 +65,18 @@ function uid() {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// 重置本回合战斗表现状态，用于驱动攻击、防御和治疗的短动画。
 function resetBattleFx(kind = "action") {
   battleFx = { kind, hero: null, enemy: null, center: null, seq: Date.now() };
 }
 
+// 记录指定战斗对象的表现数据，渲染层据此显示飘字和状态反馈。
 function setBattleFx(target, data) {
   if (!battleFx) resetBattleFx();
   battleFx[target] = { ...data, seq: `${battleFx.seq}-${target}` };
 }
 
+// 初始化 Web Audio 上下文，并在浏览器允许播放后启动地牢氛围声。
 function initAudio(playReady = false) {
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return null;
@@ -94,6 +104,7 @@ function toggleAudio() {
   setAudioEnabled(!audioEnabled, true);
 }
 
+// 切换全局音频开关，持久化到 localStorage 并平滑调整主音量。
 function setAudioEnabled(enabled, playReady = false) {
   audioEnabled = enabled;
   localStorage.setItem("rune-dungeon-audio", enabled ? "on" : "off");
@@ -114,6 +125,7 @@ function updateSoundButton() {
   button.classList.toggle("muted", !audioEnabled);
 }
 
+// 启动低音量循环氛围声；只创建一次，避免重复叠加音轨。
 function startDungeonMusic() {
   if (!audioState || audioState.music) return;
   const { ctx, master } = audioState;
@@ -134,6 +146,7 @@ function scheduleDungeonAmbience() {
   }, delay);
 }
 
+// 播放一段低频环境音，制造地牢背景氛围。
 function playAmbientTone(volume = .045) {
   if (!audioState?.music) return;
   const { ctx, music } = audioState;
@@ -156,6 +169,7 @@ function playAmbientTone(volume = .045) {
   osc.stop(now + 5);
 }
 
+// 播放一次短音效，按事件类型选择音色、频率和持续时间。
 function playSound(kind, ensure = true) {
   if (!audioEnabled) return;
   const audio = ensure ? initAudio() : audioState;
@@ -188,7 +202,7 @@ function playSound(kind, ensure = true) {
   osc.stop(now + duration + .02);
 }
 
-// Create a new persistent hero state and enter the first floor.
+// 创建新的角色持久化状态，并进入第一层地牢。
 function startGame(classId) {
   const cls = CLASSES[classId];
   state = {
@@ -233,7 +247,7 @@ function startGame(classId) {
   render();
 }
 
-// Build the first equipment set for the chosen class.
+// 按所选职业构造初始装备组合。
 function starterEquipment(classId) {
   const weapon = classId === "mage"
     ? item("学徒法杖", "weapon", "普通", { mag: 4 })
@@ -253,26 +267,36 @@ function starterInventory(classId) {
   return Object.values(starterEquipment(classId)).filter(Boolean);
 }
 
+// 创建空装备栏对象，所有装备槽初始都为空。
 function emptyEquipment() {
   return Object.fromEntries(SLOTS.map((slot) => [slot, null]));
 }
 
-// Factory for consumable item entries.
+// 创建消耗品物品数据。
 function potion(name, kind, amount) {
   return { id: uid(), kind: "potion", name, effect: kind, amount };
 }
 
-// Factory for equipment entries.
+// 创建可传送到已探索商人或 NPC 附近的消耗道具。
+function teleportBeacon() {
+  return { id: uid(), kind: "teleport", name: "商路信标" };
+}
+
+// 创建装备物品数据，包含部位、品质、属性、符文槽和强化等级。
 function item(name, slot, quality, stats, runeSlots = 0, runes = []) {
   return { id: uid(), kind: "equip", name, slot, quality, stats, runeSlots, runes, level: 0 };
 }
 
-// Resolve the visual and gameplay theme for a floor number.
+// 根据楼层取得视觉主题和地图生成参数。
 function themeForFloor(floor) {
-  return THEMES.find((theme) => theme.floors.includes(floor)) || THEMES[0];
+  const exact = THEMES.find((theme) => theme.floors.includes(floor));
+  if (exact) return exact;
+  if (floor >= MAX_FLOOR - 2) return THEMES[THEMES.length - 1];
+  const index = Math.min(THEMES.length - 2, Math.floor((floor - 1) / Math.ceil((MAX_FLOOR - 3) / (THEMES.length - 1))));
+  return THEMES[Math.max(0, index)];
 }
 
-// Generate a larger semi-random floor with guaranteed path to the down stairs.
+// 生成半随机大地图，并保证入口到出口一定可达。
 function generateFloor() {
   const size = MAP_SIZE;
   const theme = themeForFloor(state.floor);
@@ -286,7 +310,7 @@ function generateFloor() {
     }))
   );
 
-  if (state.floor === 10) {
+  if (isFinalFloor()) {
     const center = Math.floor(size / 2);
     carvePath(map, 1, 1, center, center);
     for (let y = center - 3; y <= center + 3; y++) {
@@ -295,7 +319,8 @@ function generateFloor() {
     map[center][center].object = makeEnemy(true);
     map[center - 3][center - 3].object = { type: "altar" };
     map[center - 3][center + 3].object = { type: "forge" };
-    if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
+    const stairs = placeFloorStairs(map, false);
+    state.map = { size, theme: theme.id, cells: map, rooms: [], stairsUp: stairs.up, stairsDown: null, explorationVersion: 2 };
   } else {
     const mainPath = carveMainRoute(map, 1, 1, size - 2, size - 2);
     widenMainRoute(map, mainPath);
@@ -304,16 +329,16 @@ function generateFloor() {
     pruneDisconnectedFloors(map);
     const rooms = assignRoomLabels(map);
     placeTreasureEncounters(map, 5);
-    scatter(map, "monster", 12 + Math.floor(state.floor * 1.2), { preferRooms: true, minObjectDistance: 2 });
+    scatter(map, "monster", 12 + Math.floor(state.floor * 1.2), { preferRooms: true, minObjectDistance: 2, rooms });
     const rescueQuest = placeRescueQuest(map, rooms);
     scatter(map, "trap", state.floor >= 4 ? 5 : 3, { minObjectDistance: 3 });
     scatter(map, "altar", 2, { preferRooms: true, minObjectDistance: 6 });
     if (state.floor % 3 === 1) scatter(map, "shop", 1, { minObjectDistance: 5 });
     if (state.floor % 3 === 2) scatter(map, "forge", 1, { minObjectDistance: 5 });
     if (!rescueQuest) placeQuestNpc(map);
-    if (state.floor > 1) map[1][1].object = { type: "stairsUp" };
-    map[size - 2][size - 2].object = { type: "stairsDown" };
-    state.map = { size, theme: theme.id, cells: map, rooms, rescueQuest, explorationVersion: 2 };
+    resolveOutdoorFeatureCrowding(map);
+    const stairs = placeFloorStairs(map, true);
+    state.map = { size, theme: theme.id, cells: map, rooms, rescueQuest, stairsUp: stairs.up, stairsDown: stairs.down, explorationVersion: 2 };
     state.player = { x: 1, y: 1 };
     state.facing = state.facing || "down";
     updateVisibility();
@@ -322,11 +347,76 @@ function generateFloor() {
 
   state.player = { x: 1, y: 1 };
   state.facing = state.facing || "down";
-  state.map = { size, theme: theme.id, cells: map, explorationVersion: 2 };
   updateVisibility();
 }
 
-// Carve a simple guaranteed route so random walls cannot soft-lock the floor.
+// 判断当前楼层是否为最终 Boss 层。
+function isFinalFloor(floor = state.floor) {
+  return floor >= MAX_FLOOR;
+}
+
+// 在当前楼层放置上下楼梯，下楼梯优先选择远处房间或路线尽头。
+function placeFloorStairs(map, includeDownstairs = true) {
+  const upCell = state.floor > 1 ? chooseStairCell(map, "up", { x: 1, y: 1 }) : null;
+  if (upCell) upCell.object = { type: "stairsUp" };
+  const downCell = includeDownstairs ? chooseStairCell(map, "down", { x: 1, y: 1 }, upCell) : null;
+  if (downCell) {
+    downCell.object = { type: "stairsDown" };
+    maybeSealDownstairs(map, downCell);
+  }
+  return {
+    up: upCell ? { x: upCell.x, y: upCell.y } : null,
+    down: downCell ? { x: downCell.x, y: downCell.y } : null
+  };
+}
+
+// 从可通行空格中选择楼梯位置，避免固定角落并控制与入口的距离。
+function chooseStairCell(map, kind, origin, otherStair = null) {
+  const minDistance = kind === "down" ? Math.max(10, Math.floor(map.length * .42)) : 4;
+  const candidates = interiorCells(map)
+    .filter((cell) => ["floor", "door"].includes(cell.terrain) && !cell.object)
+    .filter((cell) => !(cell.x === 1 && cell.y === 1))
+    .filter((cell) => kind !== "down" || !(cell.x === map.length - 2 && cell.y === map.length - 2))
+    .filter((cell) => !otherStair || distance(cell, otherStair) >= 5)
+    .filter((cell) => distance(cell, origin) >= minDistance);
+  const endpointOrRoom = kind === "down"
+    ? candidates.filter((cell) => cell.roomId || floorNeighborCount(map, cell.x, cell.y) <= 1)
+    : candidates;
+  const pool = endpointOrRoom.length ? endpointOrRoom : candidates;
+  return pool
+    .sort((a, b) => stairScore(map, b, origin, kind) - stairScore(map, a, origin, kind))[0] || null;
+}
+
+// 计算楼梯候选点分数：越远、越像房间或尽头越优先。
+function stairScore(map, cell, origin, kind) {
+  const endpoint = floorNeighborCount(map, cell.x, cell.y) <= 1 ? 28 : 0;
+  const room = cell.roomId ? 22 : 0;
+  const door = cell.terrain === "door" ? 8 : 0;
+  const mainPathPenalty = cell.mainPath && kind === "down" ? -10 : 0;
+  return distance(cell, origin) * 2 + endpoint + room + door + mainPathPenalty + Math.random();
+}
+
+// 偶尔给下楼梯添加封印，并在附近生成封印守卫作为解锁目标。
+function maybeSealDownstairs(map, stairCell) {
+  if (state.floor < 4 || state.floor >= MAX_FLOOR || state.floor % 4 !== 0) return;
+  const guardianCell = cellsWithin(map, stairCell.x, stairCell.y, 5)
+    .filter((cell) => cell !== stairCell && cell.terrain === "floor" && !cell.object)
+    .sort((a, b) => distance(a, stairCell) - distance(b, stairCell))[0];
+  if (!guardianCell) return;
+  const sealId = `seal-${state.floor}-${stairCell.x}-${stairCell.y}`;
+  const guardian = makeEnemyWithVariant(true);
+  guardian.type = "elite";
+  guardian.variant = "elite";
+  guardian.name = "封印守卫";
+  guardian.roomBoss = true;
+  guardian.sealId = sealId;
+  guardianCell.object = guardian;
+  stairCell.object.locked = true;
+  stairCell.object.sealId = sealId;
+  stairCell.object.seal = { type: "guardian", targetName: guardian.name, targetFloor: state.floor };
+}
+
+// 挖出一条简单保底路线，避免随机墙体导致楼层无法通关。
 function carvePath(map, sx, sy, tx, ty) {
   let x = sx;
   let y = sy;
@@ -359,6 +449,7 @@ function carveMainRoute(map, sx, sy, tx, ty) {
   return path;
 }
 
+// 将主路线上的格子标记为地面，并记录到主路数组。
 function carveMainCell(map, x, y, path) {
   const cell = map[y]?.[x];
   if (!cell) return;
@@ -367,6 +458,7 @@ function carveMainCell(map, x, y, path) {
   path.push(cell);
 }
 
+// 扩宽主路线，让地图不会只是一格宽的细长通道。
 function widenMainRoute(map, mainPath) {
   for (const cell of mainPath) {
     for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
@@ -377,6 +469,7 @@ function widenMainRoute(map, mainPath) {
   }
 }
 
+// 从主路线向两侧挖出分支房间，增加探索空间和遭遇点。
 function carveSideRooms(map, mainPath, count) {
   const anchors = mainPath.filter((cell) => cell.x > 3 && cell.y > 3 && cell.x < map.length - 4 && cell.y < map.length - 4);
   const trunkRooms = Math.min(8, Math.floor(count / 2), anchors.length);
@@ -401,6 +494,7 @@ function carveSideRooms(map, mainPath, count) {
   }
 }
 
+// 沿指定方向挖一段走廊，并在末端尝试生成分支房间。
 function carveBranchRoom(map, anchor, dir, roomId = null) {
   let x = anchor.x;
   let y = anchor.y;
@@ -416,6 +510,7 @@ function carveBranchRoom(map, anchor, dir, roomId = null) {
   return carveRoom(map, x, y, 2, roomId);
 }
 
+// 返回随机排序的四向方向，用于让房间分布更自然。
 function shuffledDirections() {
   const dirs = [
     { x: 1, y: 0 },
@@ -426,6 +521,7 @@ function shuffledDirections() {
   return dirs.sort(() => Math.random() - .5);
 }
 
+// 生成带门和房间编号的结构化房间，供任务和宝藏使用。
 function carveStructuredRooms(map, mainPath, count) {
   const anchors = mainPath.filter((cell) => cell.x > 5 && cell.y > 5 && cell.x < map.length - 6 && cell.y < map.length - 6);
   let placed = 0;
@@ -442,6 +538,7 @@ function carveStructuredRooms(map, mainPath, count) {
   }
 }
 
+// 在主路旁构造一个有墙、有门的封闭房间。
 function carveStructuredRoom(map, anchor, dir, roomId) {
   const doorX = anchor.x + dir.x;
   const doorY = anchor.y + dir.y;
@@ -475,6 +572,7 @@ function carveStructuredRoom(map, anchor, dir, roomId) {
   return true;
 }
 
+// 为所有房间统计可通行格子数量，并生成展示用房间名。
 function assignRoomLabels(map) {
   const rooms = {};
   for (const cell of map.flat()) {
@@ -484,9 +582,18 @@ function assignRoomLabels(map) {
   }
   return Object.values(rooms)
     .sort((a, b) => a.id.localeCompare(b.id))
-    .map((room, index) => ({ ...room, name: `${index + 1}号房` }));
+    .map((room, index) => ({ ...room, name: `${index + 1}号房`, threat: roomThreatForIndex(index) }));
 }
 
+// 给房间分配轻量威胁等级，门牌会显示对应标记。
+function roomThreatForIndex(index) {
+  if ((index + state.floor) % 7 === 0) return "sealed";
+  if ((index + state.floor) % 4 === 0) return "danger";
+  if ((index + state.floor) % 5 === 0) return "treasure";
+  return "quiet";
+}
+
+// 移除入口不可达的地面，防止随机生成出孤岛区域。
 function pruneDisconnectedFloors(map) {
   const start = map[1]?.[1];
   if (!start) return;
@@ -514,7 +621,18 @@ function roomName(roomId) {
   return state?.map?.rooms?.find((room) => room.id === roomId)?.name || "未知房间";
 }
 
-// Place monsters or map objects on empty floor cells.
+// 读取房间威胁等级。
+function roomThreat(roomId) {
+  return state?.map?.rooms?.find((room) => room.id === roomId)?.threat || "quiet";
+}
+
+// 从指定房间列表读取威胁等级，供地图生成阶段使用。
+function roomThreatFromRooms(rooms, roomId) {
+  if (!roomId) return "quiet";
+  return rooms?.find((room) => room.id === roomId)?.threat || "quiet";
+}
+
+// 在空地面上散布怪物或地图物件，并按规则控制密度。
 function scatter(map, type, count, options = {}) {
   let placed = 0;
   let attempts = 0;
@@ -525,7 +643,9 @@ function scatter(map, type, count, options = {}) {
     const y = rand(1, max);
     const cell = map[y][x];
     if (cell.terrain === "floor" && !cell.object && !(x === 1 && y === 1) && !isObjectCrowded(map, cell, options)) {
-      const object = type === "monster" ? makeEnemyWithVariant(Math.random() < .18) : { type };
+      const threat = roomThreatFromRooms(options.rooms, cell.roomId);
+      const eliteChance = ["danger", "sealed"].includes(threat) ? .36 : .18;
+      const object = type === "monster" ? makeEnemyWithVariant(Math.random() < eliteChance) : { type };
       if (cell.roomId) object.roomId = cell.roomId;
       cell.object = object;
       placed++;
@@ -541,6 +661,41 @@ function isObjectCrowded(map, cell, options = {}) {
     .some((nearby) => nearby !== cell && nearby.object && !["stairsDown", "stairsUp"].includes(nearby.object.type));
 }
 
+// 判断一个物件是否属于室外特征，用于后续调整过近的散布点。
+function isOutdoorFeature(cell) {
+  return !cell.roomId && ["monster", "elite", "chest", "lockedChest", "altar"].includes(cell.object?.type);
+}
+
+// 重新摆放过于拥挤的室外物件，避免怪物、宝箱和祭坛堆在一起。
+function resolveOutdoorFeatureCrowding(map) {
+  const kept = [];
+  for (const cell of map.flat().filter(isOutdoorFeature)) {
+    const crowded = kept.some((other) => distance(cell, other) <= 1);
+    if (!crowded) {
+      kept.push(cell);
+      continue;
+    }
+    const object = cell.object;
+    cell.object = null;
+    const target = findOutdoorFeatureSlot(map, kept);
+    if (!target) continue;
+    delete object.roomId;
+    target.object = object;
+    kept.push(target);
+  }
+}
+
+// 为被挤开的室外物件寻找新的空地位置。
+function findOutdoorFeatureSlot(map, kept) {
+  return interiorCells(map)
+    .filter((cell) => cell.terrain === "floor" && !cell.object && !cell.roomId)
+    .filter((cell) => !(cell.x === 1 && cell.y === 1) && !(cell.x === map.length - 2 && cell.y === map.length - 2))
+    .filter((cell) => kept.every((other) => distance(cell, other) > 1))
+    .filter((cell) => !cellsWithin(map, cell.x, cell.y, 1).some((nearby) => isOutdoorFeature(nearby)))
+    .sort((a, b) => floorNeighborCount(map, a.x, a.y) - floorNeighborCount(map, b.x, b.y))[0];
+}
+
+// 组合生成宝藏遭遇：上锁宝箱、守卫宝箱和死路宝箱。
 function placeTreasureEncounters(map, count) {
   let placed = 0;
   if (count > 1 && placeLockedTreasureRoom(map)) placed++;
@@ -554,12 +709,27 @@ function placeTreasureEncounters(map, count) {
   }
 }
 
+// 为没有房间编号的遭遇点生成临时区域编号。
+function encounterRoomId(cell) {
+  return cell.roomId || `encounter-${state.floor}-${cell.x}-${cell.y}`;
+}
+
+// 标记宝藏附近区域，便于任务、守卫和房间提示共享同一 roomId。
+function markEncounterArea(map, x, y, radius = 1) {
+  const id = encounterRoomId(map[y][x]);
+  for (const cell of cellsWithin(map, x, y, radius)) {
+    if (cell.terrain === "floor" || cell.terrain === "door") cell.roomId = cell.roomId || id;
+  }
+  return id;
+}
+
+// 生成带门栅、钥匙守卫和额外守卫的上锁宝藏房。
 function placeLockedTreasureRoom(map) {
   const candidates = interiorCells(map)
     .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
     .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
   for (const center of candidates.slice(0, 36)) {
-    if (!carveRoom(map, center.x, center.y, 2)) continue;
+    if (!carveRoom(map, center.x, center.y, 2, encounterRoomId(center))) continue;
     center.object = { type: "lockedChest" };
     placeFenceRing(map, center.x, center.y);
     placeKeyGuardianNear(map, center.x, center.y);
@@ -569,6 +739,7 @@ function placeLockedTreasureRoom(map) {
   return false;
 }
 
+// 在宝箱周围放置围栏，并留一个可交互门栅。
 function placeFenceRing(map, x, y) {
   const gate = choice(cardinalNeighbors(map, x, y).filter((cell) => cell.terrain === "floor" && !cell.object));
   for (const cell of cardinalNeighbors(map, x, y)) {
@@ -581,12 +752,13 @@ function placeFenceRing(map, x, y) {
   }
 }
 
+// 生成普通宝藏房，并在附近布置守卫。
 function placeTreasureRoom(map) {
   const candidates = interiorCells(map)
     .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
     .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
   for (const center of candidates.slice(0, 32)) {
-    if (!carveRoom(map, center.x, center.y, 2)) continue;
+    if (!carveRoom(map, center.x, center.y, 2, encounterRoomId(center))) continue;
     center.object = { type: "chest" };
     placeGuardNear(map, center.x, center.y, true);
     placeGuardNear(map, center.x, center.y, false);
@@ -595,28 +767,33 @@ function placeTreasureRoom(map) {
   return false;
 }
 
+// 在死路位置放置宝箱，鼓励玩家探索分支。
 function placeDeadEndTreasure(map) {
   const candidates = interiorCells(map)
     .filter((cell) => canUseTreasureCell(map, cell.x, cell.y) && floorNeighborCount(map, cell.x, cell.y) <= 1)
     .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
   const cell = candidates[0];
   if (!cell) return false;
+  markEncounterArea(map, cell.x, cell.y, 1);
   cell.object = { type: "chest" };
   placeGuardNear(map, cell.x, cell.y, true);
   return true;
 }
 
+// 在合适位置放置有守卫保护的宝箱。
 function placeGuardedTreasure(map) {
   const candidates = interiorCells(map)
     .filter((cell) => canUseTreasureCell(map, cell.x, cell.y))
     .sort((a, b) => treasureScore(map, b) - treasureScore(map, a));
   const cell = candidates[0];
   if (!cell) return false;
+  markEncounterArea(map, cell.x, cell.y, 1);
   cell.object = { type: "chest" };
   placeGuardNear(map, cell.x, cell.y, true);
   return true;
 }
 
+// 挖出指定半径的普通房间，可选择绑定 roomId。
 function carveRoom(map, cx, cy, radius, roomId = null) {
   if (cx - radius <= 0 || cy - radius <= 0 || cx + radius >= map.length - 1 || cy + radius >= map.length - 1) return false;
   for (let y = cy - radius; y <= cy + radius; y++) {
@@ -633,6 +810,7 @@ function carveRoom(map, cx, cy, radius, roomId = null) {
   return true;
 }
 
+// 在目标点附近生成守卫，精英概率由调用方控制。
 function placeGuardNear(map, x, y, eliteChance = false) {
   const candidates = cellsWithin(map, x, y, 2)
     .filter((cell) => cell.terrain === "floor" && !cell.object && (cell.x !== x || cell.y !== y))
@@ -644,6 +822,7 @@ function placeGuardNear(map, x, y, eliteChance = false) {
   return true;
 }
 
+// 在上锁宝箱附近生成必掉钥匙的精英守卫。
 function placeKeyGuardianNear(map, x, y) {
   const candidates = cellsWithin(map, x, y, 2)
     .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x, y }) > 1)
@@ -655,6 +834,7 @@ function placeKeyGuardianNear(map, x, y) {
   return true;
 }
 
+// 为某个房间生成救援任务：放置被困者、怪物和任务发布者。
 function placeRescueQuest(map, rooms) {
   const room = rooms
     .map((entry) => ({ ...entry, cells: map.flat().filter((cell) => cell.roomId === entry.id && cell.terrain === "floor" && !cell.object) }))
@@ -686,20 +866,28 @@ function placeRescueQuest(map, rooms) {
   return giver.object;
 }
 
+// 计算一组格子的中心点，用于选择远离入口的任务房。
 function roomCenter(cells) {
   const total = cells.reduce((sum, cell) => ({ x: sum.x + cell.x, y: sum.y + cell.y }), { x: 0, y: 0 });
   return { x: total.x / cells.length, y: total.y / cells.length };
 }
 
+// 在地图上放置任务 NPC，并给旧版单任务字段保留兼容默认值。
 function placeQuestNpc(map, source = { questId: "wardenErrand", npcName: "巡夜人" }) {
   const candidates = interiorCells(map)
     .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x: 1, y: 1 }) > 4)
     .sort((a, b) => npcScore(map, b) - npcScore(map, a));
   const cell = candidates.find((candidate) => cellsWithin(map, candidate.x, candidate.y, 3).some((nearby) => nearby.roomId)) || candidates[0];
   if (!cell) return false;
-  cell.object = { type: "questNpc", ...source };
+  cell.object = { type: "questNpc", targetFloor: nearbyQuestTargetFloor(), ...source };
   state.quest = state.quest || { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
   return cell;
+}
+
+// 偶尔把普通委托目标放到相邻楼层，避免跨层距离过大。
+function nearbyQuestTargetFloor(floor = state.floor) {
+  if (floor <= 1 || floor % 5 !== 0) return floor;
+  return Math.min(MAX_FLOOR - 1, floor + 1);
 }
 
 function npcScore(map, cell) {
@@ -765,14 +953,40 @@ function makeEnemyWithVariant(eliteOrBoss = false) {
   } else {
     enemy.variant = choice(["wolf", "slime"]);
   }
+  maybeApplyEnemyAffix(enemy, eliteOrBoss);
   return enemy;
+}
+
+// 给敌人附加战术词缀；精英和特殊守卫必带，普通怪中后期少量出现。
+function maybeApplyEnemyAffix(enemy, eliteOrBoss = false) {
+  if (enemy.affix) return enemy;
+  if (enemy.type === "boss") return enemy;
+  const shouldAffix = eliteOrBoss || enemy.roomBoss || (state.floor >= 6 && Math.random() < .18);
+  if (!shouldAffix) return enemy;
+  const affix = choice(ENEMY_AFFIXES);
+  enemy.affix = affix;
+  enemy.name = `${affix.name}${enemy.name}`;
+  if (affix.id === "armored") {
+    enemy.def = Math.round(enemy.def * 1.35 + 2);
+    enemy.hp = Math.round(enemy.hp * 1.08);
+    enemy.maxHp = enemy.hp;
+  }
+  if (affix.id === "shatter") enemy.atk = Math.round(enemy.atk * 1.12 + 2);
+  if (affix.id === "drain") enemy.atk = Math.round(enemy.atk * 1.06 + 1);
+  if (affix.id === "swift") enemy.def = Math.round(enemy.def * 1.08 + 1);
+  return enemy;
+}
+
+// 生成敌人词缀说明文本。
+function enemyAffixText(enemy) {
+  return enemy?.affix ? `${enemy.affix.name}：${enemy.affix.desc}` : "";
 }
 
 function makeKeyGuardian() {
   const enemy = makeEnemyWithVariant(true);
   enemy.type = "elite";
   enemy.variant = "elite";
-  enemy.name = "钥匙守卫";
+  enemy.name = enemy.affix ? `${enemy.affix.name}钥匙守卫` : "钥匙守卫";
   enemy.roomBoss = true;
   enemy.dropsKey = true;
   enemy.hp = Math.ceil(enemy.hp * 1.18);
@@ -782,31 +996,32 @@ function makeKeyGuardian() {
   return enemy;
 }
 
-// Create monster stats scaled by floor and elite/boss status.
+// 按楼层、精英和 Boss 状态生成怪物数值。
 function makeEnemy(eliteOrBoss = false) {
   const floor = state.floor;
-  const boss = floor === 10;
+  const boss = isFinalFloor(floor);
   const names = floor < 4
     ? ["史莱姆", "洞穴鼠", "骷髅兵"]
     : floor < 7
       ? ["矿洞蝙蝠", "诅咒矿工", "石像守卫"]
       : ["冰霜狼", "寒冰法徒", "冰晶魔像"];
   const elite = eliteOrBoss && !boss;
-  const base = 24 + floor * 9;
-  const hp = Math.round(boss ? 310 : elite ? base * 1.95 : base);
-  return {
+  const base = 30 + floor * 8 + Math.floor(Math.pow(floor, 1.35) * 2.2);
+  const hp = Math.round(boss ? base * 3.2 + 650 : elite ? base * 1.85 : base * (1 + floor * .012));
+  const enemy = {
     type: boss ? "boss" : elite ? "elite" : "monster",
     name: boss ? "符文守王" : elite ? `精英${choice(names)}` : choice(names),
     hp,
     maxHp: hp,
-    atk: Math.round(boss ? 36 : 8 + floor * 3.4 + (elite ? 8 : 0)),
-    def: boss ? 21 : 4 + floor + (elite ? 5 : 0),
-    xp: boss ? 160 : 12 + floor * 6 + (elite ? 18 : 0),
-    gold: boss ? 220 : rand(8, 16) + floor * 2 + (elite ? 18 : 0)
+    atk: Math.round(boss ? 58 + floor * 2.4 : 9 + floor * 2.45 + Math.floor(floor / 5) + (elite ? 9 : 0)),
+    def: Math.round(boss ? 34 + floor * .55 : 4 + floor * .72 + (elite ? 5 : 0)),
+    xp: Math.round(boss ? 520 + floor * 14 : 14 + floor * 5.2 + (elite ? 24 : 0)),
+    gold: Math.round(boss ? 720 + floor * 18 : rand(9, 18) + floor * 2.6 + (elite ? 22 : 0))
   };
+  return maybeApplyEnemyAffix(enemy, eliteOrBoss);
 }
 
-// Mark cells near the player as currently visible and permanently seen.
+// 标记玩家附近当前可见的格子，并把它们永久记为已探索。
 function updateVisibility() {
   for (const row of state.map.cells) {
     for (const cell of row) {
@@ -818,9 +1033,9 @@ function updateVisibility() {
   }
 }
 
-// Move the player by one tile and resolve the destination cell.
+// 让玩家移动一格，并处理目标格子的地形、怪物和交互物。
 function move(dx, dy) {
-  initAudio();
+  if (audioEnabled) initAudio();
   if (state.currentEnemy) return;
   if (dx < 0) state.facing = "left";
   else if (dx > 0) state.facing = "right";
@@ -855,7 +1070,7 @@ function move(dx, dy) {
   render();
 }
 
-// Trigger the object on the player's current tile.
+// 触发玩家所在格子的物件逻辑。
 function resolveCell(cell) {
   if (!cell.object) return;
   const obj = cell.object;
@@ -888,19 +1103,27 @@ function resolveCell(cell) {
   }
 }
 
+// 处理踩到敌人后的进入战斗或危险确认流程。
 function handleEnemyEncounter(enemy) {
   log(`遭遇${enemy.name}。`);
-  if (enemy.type === "monster") {
+  if (!isDangerousEnemy(enemy)) {
     enterBattle(enemy);
     return;
   }
   promptDangerousEnemy(enemy);
 }
 
+// 根据敌人类型和战力评估判断是否需要先弹出危险确认。
 function isDangerousEnemy(obj) {
-  return ["elite", "boss"].includes(obj?.type);
+  if (!obj) return false;
+  if (obj.type === "boss") return true;
+  if (obj.roomBoss || obj.dropsKey) return true;
+  if (obj.type !== "elite") return false;
+  const risk = state?.hp && state?.stats ? battleRisk(obj) : null;
+  return risk ? risk.score < .42 : false;
 }
 
+// 对危险敌人展示确认弹窗，避免玩家误触进入高风险战斗。
 function promptDangerousEnemy(enemy, destination = null) {
   const title = enemy.type === "boss" ? "危险首领" : "危险精英";
   showModal(title, `<p>${enemy.name}散发出危险气息。</p><p>确认进入战斗后将无法移动，建议先检查生命、法力和药水。</p>`, [
@@ -916,22 +1139,33 @@ function promptDangerousEnemy(enemy, destination = null) {
   ]);
 }
 
+// 将敌人设置为当前战斗目标，并切换到战斗视图。
 function enterBattle(enemy) {
   state.currentEnemy = enemy;
   render();
 }
 
+// 触发陷阱伤害，并可能惊动附近守卫进入战斗。
 function triggerTrap(cell) {
   playSound("danger");
   const damage = rand(8, 14) + state.floor * 2;
   const alerted = placeGuardNear(state.map.cells, cell.x, cell.y, state.floor >= 4);
   state.hp = Math.max(1, state.hp - damage);
   cell.object = null;
+  const guard = alerted ? nearestGuardForTrap(state.map.cells, cell.x, cell.y) : null;
+  if (guard) enterBattle(guard.object);
   log(`触发隐藏机关，受到 ${damage} 点伤害${alerted ? "，并惊动了守卫" : ""}。`);
   showEvent("触发机关", `<p>地面机关突然弹起，你受到 ${damage} 点伤害。</p>${alerted ? "<p>机关的响动惊动了附近守卫。</p>" : ""}`, "继续探索");
 }
 
-// Resolve chest rewards: equipment, rune, or materials/gold.
+// 查找陷阱附近最近的守卫，用于机关警报后的追击。
+function nearestGuardForTrap(map, x, y) {
+  return cellsWithin(map, x, y, 2)
+    .filter((nearby) => ["monster", "elite"].includes(nearby.object?.type))
+    .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }))[0] || null;
+}
+
+// 结算普通宝箱奖励：装备、符文或材料金币。
 function openChest(cell) {
   playSound("chest");
   const roll = Math.random();
@@ -976,6 +1210,7 @@ function openLockedChest(cell) {
   showEvent("打开上锁宝箱", `<p>消耗 1 把符文钥匙。</p><p>获得装备：${loot.name}<br>获得符文：${rune}<br>金币 +${gold}</p>`, "收下");
 }
 
+// 使用符文钥匙打开围住宝箱的门栅。
 function openFenceGate(cell) {
   state.keys = state.keys || 0;
   if (state.keys <= 0) {
@@ -989,20 +1224,23 @@ function openFenceGate(cell) {
   showEvent("门栅打开", "<p>钥匙的光没有被消耗，真正的锁还在宝箱上。现在可以进入围栏内开箱。</p>", "继续探索");
 }
 
+// 打开当前位置的委托人交互。
 function openQuestNpc(source = null) {
   openQuestFromGiver("questNpc", source || currentQuestSource("questNpc"));
 }
 
+// 读取当前格子上的任务来源物件，供任务弹窗生成动态文案。
 function currentQuestSource(type) {
   const obj = state?.map?.cells?.[state.player?.y]?.[state.player?.x]?.object;
   return obj?.type === type ? obj : null;
 }
 
+// 根据 NPC 或商人来源合成任务定义，救援任务会补入房间信息。
 function questDefFromSource(giver, source = null) {
   const id = source?.questId;
   const base = QUEST_DEFS[id] || questDefinitionsForGiver(giver).find((quest) => quest.type !== "rescueRoom") || questDefinitionsForGiver(giver)[0];
   if (!base) return null;
-  if (base.type !== "rescueRoom") return base;
+  if (base.type !== "rescueRoom") return { ...base, targetFloor: source?.targetFloor || state.floor };
   return {
     ...base,
     title: `${source?.roomName || roomName(source?.roomId)}救援`,
@@ -1011,10 +1249,12 @@ function questDefFromSource(giver, source = null) {
     target: source?.target || base.target,
     roomId: source?.roomId,
     roomName: source?.roomName || roomName(source?.roomId),
-    rescueName: source?.rescueName || "被困者"
+    rescueName: source?.rescueName || "被困者",
+    targetFloor: source?.targetFloor || state.floor
   };
 }
 
+// 确保旧版单任务字段存在，兼容早期存档结构。
 function ensureQuest() {
   if (!state.quest || state.quest.floor !== state.floor) {
     state.quest = { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
@@ -1022,24 +1262,29 @@ function ensureQuest() {
   return state.quest;
 }
 
+// 获取某类任务发布者可提供的任务定义。
 function questDefinitionsForGiver(giver) {
   return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver);
 }
 
+// 确保新版多任务列表存在，兼容旧存档。
 function ensureQuestList() {
   state.quests = Array.isArray(state.quests) ? state.quests : [];
   return state.quests;
 }
 
+// 计算任务金币奖励，兼容固定值和按楼层动态计算两种写法。
 function questRewardGold(def, floor = state.floor) {
   return typeof def.rewardGold === "function" ? def.rewardGold(floor) : (def.rewardGold || 0);
 }
 
+// 根据任务定义创建当前楼层的任务进度状态。
 function createQuestState(def, floor = state.floor) {
   return {
     id: def.id,
     giver: def.giver,
     floor,
+    targetFloor: def.targetFloor || floor,
     kills: 0,
     target: def.target,
     roomId: def.roomId || null,
@@ -1053,10 +1298,12 @@ function createQuestState(def, floor = state.floor) {
   };
 }
 
+// 从任务列表中查找指定楼层、房间的任务状态。
 function questState(id, floor = state.floor, roomId = null) {
   return ensureQuestList().find((quest) => quest.id === id && quest.floor === floor && (!roomId || quest.roomId === roomId));
 }
 
+// 接受任务并写入任务列表，旧版巡夜人任务同步到 state.quest。
 function acceptQuest(id, source = null) {
   const def = source ? questDefFromSource(source.type || "questNpc", source) : QUEST_DEFS[id];
   if (!def) return null;
@@ -1072,6 +1319,7 @@ function acceptQuest(id, source = null) {
   return quest;
 }
 
+// 打开任务发布者弹窗，展示任务进度、奖励和可执行操作。
 function openQuestFromGiver(giver, source = null) {
   const def = questDefFromSource(giver, source);
   if (!def) {
@@ -1091,7 +1339,7 @@ function openQuestFromGiver(giver, source = null) {
     <div class="quest-panel">
       <b>${def.giverName}</b>
       <p>${def.desc}</p>
-      <small>进度：${progress.kills}/${def.target}${def.roomName ? ` · ${def.roomName}` : ""}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
+      <small>进度：${progress.kills}/${def.target}${def.targetFloor && def.targetFloor !== progress.floor ? ` · 目标第 ${def.targetFloor} 层` : ""}${def.roomName ? ` · ${def.roomName}` : ""}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
       <div class="quest-reward">${rewardParts}</div>
     </div>
   `;
@@ -1107,6 +1355,7 @@ function openQuestFromGiver(giver, source = null) {
   showModal(def.title, body, actions);
 }
 
+// 发放任务奖励，并把任务标记为已领取。
 function claimQuestReward(id, roomId = null) {
   const quest = questState(id, state.floor, roomId);
   const def = quest?.id === "rescueRoom"
@@ -1131,6 +1380,7 @@ function claimQuestReward(id, roomId = null) {
   render();
 }
 
+// 与救援目标对话，按房间清理状态推进救援任务。
 function openRescueNpc(obj) {
   const quest = questState("rescueRoom", state.floor, obj.roomId);
   const name = obj.npcName || "被困者";
@@ -1150,7 +1400,7 @@ function openRescueNpc(obj) {
   render();
 }
 
-// Generate equipment loot with slot, quality, stat, and rune-slot rolls.
+// 随机生成装备掉落，包含部位、品质、属性和符文槽数量。
 function randomEquipment() {
   const slot = choice(SLOTS);
   const quality = qualityRoll();
@@ -1165,7 +1415,7 @@ function randomEquipment() {
   return item(`${quality}${prefix}${SLOT_NAMES[slot]}`, slot, quality, stats, quality === "普通" ? 0 : quality === "优秀" ? 1 : 2);
 }
 
-// Roll item quality, lightly affected by luck.
+// 抽取装备品质，幸运值和楼层会略微提高高品质概率。
 function qualityRoll() {
   const r = Math.random() + state.stats.luk * .004 + Math.min(.12, state.floor * .012);
   if (r > .96) return "传说";
@@ -1175,12 +1425,12 @@ function qualityRoll() {
   return "普通";
 }
 
-// Convert item quality into its base stat budget.
+// 把装备品质转换成基础属性预算。
 function qualityBonus(quality) {
   return { 普通: 3, 优秀: 5, 稀有: 8, 史诗: 11, 传说: 15 }[quality];
 }
 
-// Consume an altar tile and restore part of player resources.
+// 消耗祭坛格子，恢复玩家部分生命和法力。
 function useAltar(cell) {
   playSound("altar");
   const heal = Math.floor(state.maxHp * .24);
@@ -1191,9 +1441,14 @@ function useAltar(cell) {
   showEvent("符文祭坛", `<p>祭坛亮起微光，恢复 ${heal} 点生命和少量法力。</p>`, "继续");
 }
 
-// Advance to the next floor and refresh a small amount of resources.
+// 进入下一层，并恢复少量资源。
 function nextFloor() {
-  if (state.floor >= 10) return;
+  if (state.floor >= MAX_FLOOR) return;
+  const stair = currentStairsDown();
+  if (stair?.locked) {
+    showEvent("楼梯封印", `<p>下行楼梯被符文封住了。</p><p>解除条件：击败第 ${stair.seal?.targetFloor || state.floor} 层的${stair.seal?.targetName || "封印守卫"}。</p>`, "继续探索");
+    return;
+  }
   saveCurrentFloor();
   state.floor++;
   state.facing = "down";
@@ -1203,9 +1458,15 @@ function nextFloor() {
   log(`进入第 ${state.floor} 层。`);
   saveGame(false);
   showToast(`<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`)
-  // showEvent("进入下一层", `<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`, "继续探索");
 }
 
+// 获取玩家当前脚下的下行楼梯对象。
+function currentStairsDown() {
+  const cell = state?.map?.cells?.[state.player?.y]?.[state.player?.x];
+  return cell?.object?.type === "stairsDown" ? cell.object : null;
+}
+
+// 返回上一层，并从楼层缓存恢复地图状态。
 function previousFloor() {
   if (state.floor <= 1) return;
   saveCurrentFloor();
@@ -1218,9 +1479,9 @@ function previousFloor() {
   log(`返回第 ${state.floor} 层。`);
   saveGame(false);
   showToast(`<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`)
-  // showEvent("返回上一层", `<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`, "继续探索");
 }
 
+// 保存当前楼层地图、玩家位置和朝向，供上下楼后恢复。
 function saveCurrentFloor() {
   if (!state?.map) return;
   state.floorStates = state.floorStates || {};
@@ -1231,29 +1492,40 @@ function saveCurrentFloor() {
   };
 }
 
+// 进入指定楼层：优先读取缓存，没有缓存时重新生成。
 function enterFloor(direction) {
   state.floorStates = state.floorStates || {};
   const saved = state.floorStates[state.floor];
   if (saved?.map) {
     state.map = cloneFloorMap(saved.map);
-    const size = state.map.size;
-    state.player = direction === "up" ? { x: size - 2, y: size - 2 } : { x: 1, y: 1 };
+    state.player = entryPositionForDirection(direction);
     updateVisibility();
     return;
   }
   generateFloor();
-  if (direction === "up") {
-    const size = state.map.size;
-    state.player = { x: size - 2, y: size - 2 };
-    updateVisibility();
-  }
+  state.player = entryPositionForDirection(direction);
+  updateVisibility();
 }
 
+// 深拷贝楼层地图，避免缓存和当前地图互相引用。
 function cloneFloorMap(map) {
   return JSON.parse(JSON.stringify(map));
 }
 
-// Combine base attributes, equipment, upgrades, and runes.
+// 根据上下楼方向选择玩家进入楼层时的出生点。
+function entryPositionForDirection(direction) {
+  const target = direction === "up" ? state.map?.stairsDown : state.map?.stairsUp;
+  const fallback = direction === "up" ? findMapObject("stairsDown") : findMapObject("stairsUp");
+  const cell = target || fallback || { x: 1, y: 1 };
+  return { x: cell.x, y: cell.y };
+}
+
+// 在当前地图中查找指定物件所在位置。
+function findMapObject(type) {
+  return state?.map?.cells?.flat().find((cell) => cell.object?.type === type) || null;
+}
+
+// 汇总基础属性、装备属性、强化等级和符文效果。
 function totals() {
   const total = { ...state.stats, hp: 0, mp: 0 };
   for (const eq of Object.values(state.equipment)) {
@@ -1264,17 +1536,17 @@ function totals() {
   return total;
 }
 
-// Current maximum HP after equipment bonuses.
+// 计算装备加成后的当前生命上限。
 function effectiveMaxHp() {
   return state.maxHp + (totals().hp || 0);
 }
 
-// Current maximum MP after equipment bonuses.
+// 计算装备加成后的当前法力上限。
 function effectiveMaxMp() {
   return state.maxMp + (totals().mp || 0);
 }
 
-// Apply rune bonuses into the derived stat object.
+// 把符文效果写入汇总属性对象。
 function applyRune(total, rune) {
   const level = Number(rune.match(/\d+$/)?.[0] || 1);
   const value = 2 * level;
@@ -1298,7 +1570,7 @@ function runeEffectText(rune) {
   return "镶嵌到装备后生效";
 }
 
-// Resolve one player combat action and then the enemy response.
+// 结算玩家一次战斗行动，然后触发敌人回合或胜利流程。
 function attackEnemy(mode, skill = null) {
   playSound(mode === "skill" ? "cast" : mode === "attack" ? "hit" : "danger");
   const enemy = state.currentEnemy;
@@ -1306,7 +1578,7 @@ function attackEnemy(mode, skill = null) {
   let result = "";
   resetBattleFx(mode);
   if (mode === "attack") {
-    result = dealDamage(enemy, Math.max(2, t.atk - enemy.def * .35), "普通攻击");
+    result = dealDamage(enemy, Math.max(2, t.atk * .92 + t.spd * .12 - enemy.def * .45), "普通攻击");
   } else if (mode === "skill") {
     skill = upgradedSkill(skill);
     if (state.mp < skill.mp) {
@@ -1332,8 +1604,37 @@ function attackEnemy(mode, skill = null) {
   render();
 }
 
-// Apply damage with critical chance and return a combat log line.
+// 战斗中使用药水，喝药后敌人会立刻行动。
+function useBattlePotion(id) {
+  const enemy = state.currentEnemy;
+  if (!enemy) {
+    useItem(id);
+    return;
+  }
+  const index = state.inventory.findIndex((entry) => entry.id === id);
+  const entry = state.inventory[index];
+  if (!entry || entry.kind !== "potion") return;
+  const isHp = entry.effect === "hp";
+  const before = isHp ? state.hp : state.mp;
+  if (isHp) state.hp = Math.min(effectiveMaxHp(), state.hp + entry.amount);
+  else state.mp = Math.min(effectiveMaxMp(), state.mp + entry.amount);
+  const after = isHp ? state.hp : state.mp;
+  state.inventory.splice(index, 1);
+  playSound("altar");
+  resetBattleFx("item");
+  setBattleFx("hero", { type: "shield", text: `+${Math.max(0, Math.round(after - before))}`, label: entry.name });
+  setBattleFx("center", { type: "guard", text: "补给行动" });
+  log(`战斗中使用${entry.name}，恢复 ${Math.max(0, Math.round(after - before))} 点${isHp ? "生命" : "法力"}。`);
+  enemyTurn(enemy);
+  render();
+}
+
+// 计算暴击并扣除敌人生命，同时返回战斗日志文本。
 function dealDamage(enemy, amount, label) {
+  if (enemy.affix?.id === "swift" && Math.random() < .12) {
+    setBattleFx("enemy", { type: "evade", text: "闪避", label });
+    return `${enemy.name}借迅捷身法避开了${label}。`;
+  }
   const crit = Math.random() < (0.06 + totals().luk * .008);
   const damage = Math.max(1, Math.round(amount * (crit ? 1.7 : 1)));
   enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
@@ -1341,7 +1642,7 @@ function dealDamage(enemy, amount, label) {
   return `${label}${crit ? "暴击" : ""}，造成 ${damage} 点伤害。`;
 }
 
-// Execute class skill effects such as shield, poison, burn, or double shot.
+// 执行职业技能效果，例如护盾、中毒、灼烧或连射。
 function castSkill(enemy, skill, t) {
   if (skill.type === "guard") {
     state._guard = 12 + t.def;
@@ -1380,22 +1681,27 @@ function castSkill(enemy, skill, t) {
   return text;
 }
 
-// Resolve one enemy attack turn, including dodge and guard mitigation.
+// 结算敌人攻击回合，包含闪避、防御减伤和死亡检测。
 function enemyTurn(enemy) {
   const t = totals();
-  const dodge = Math.random() < (t.spd * .006 + (state._evade ? .35 : .04));
+  const dodge = Math.random() < (t.spd * .006 + (state._evade ? .35 : 0));
   state._evade = false;
   if (dodge) {
     setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
     log(`${enemy.name}的攻击落空。`);
     return;
   }
-  let damage = Math.max(1, Math.round(enemy.atk - t.def * .42));
+  let damage = Math.max(1, Math.round(enemy.atk * 1.08 - t.def * .36 - t.res * .08));
   if (state._guard) {
-    damage = Math.max(0, damage - state._guard);
+    const guard = enemy.affix?.id === "shatter" ? Math.ceil(state._guard * .45) : state._guard;
+    damage = Math.max(0, damage - guard);
     state._guard = 0;
   }
   state.hp -= damage;
+  if (enemy.affix?.id === "drain" && damage > 0) {
+    const heal = Math.max(1, Math.round(damage * .22));
+    enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
+  }
   setBattleFx("hero", { type: "hit", text: `-${damage}`, label: enemy.name });
   log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
   if (state.hp <= 0) death();
@@ -1429,7 +1735,7 @@ function canUpgradeSkill(skillId) {
   return (state.skillPoints || 0) >= cost.points && (state.skillDust || 0) >= cost.dust;
 }
 
-// Finish combat, award rewards, clear the enemy tile, and check boss win.
+// 完成战斗结算：发放奖励、清除敌人格子，并检查 Boss 通关。
 function winBattle(enemy) {
   state.gold += enemy.gold;
   state.xp += enemy.xp;
@@ -1442,12 +1748,13 @@ function winBattle(enemy) {
     `金币 +${enemy.gold}`
   ];
   recordQuestKill(enemy, rewards);
+  completeStairSeal(enemy, rewards);
   rewards.push(...maybeDrop(enemy));
   const levelBefore = state.level;
   while (state.xp >= state.xpNext) levelUp();
   if (state.level > levelBefore) rewards.push(`等级提升到 Lv.${state.level}`);
   if (enemy.type === "boss") {
-    showModal("通关", `<p>符文守王倒下了，地牢深处的王座重新安静下来。第一版到这里通关。</p>${battleResultList(rewards)}`, [
+    showModal("通关", `<p>第 ${MAX_FLOOR} 层的符文守王倒下了，地牢深处的王座重新安静下来。</p>${battleResultList(rewards)}`, [
       { text: "继续整理装备", action: closeModal }
     ]);
   } else {
@@ -1457,10 +1764,23 @@ function winBattle(enemy) {
   }
 }
 
+// 击败封印守卫后解除当前楼层下行楼梯封印。
+function completeStairSeal(enemy, rewards = []) {
+  if (!enemy?.sealId || !state?.map?.cells) return false;
+  const stairCell = state.map.cells.flat()
+    .find((cell) => cell.object?.type === "stairsDown" && cell.object?.sealId === enemy.sealId);
+  if (!stairCell?.object?.locked) return false;
+  stairCell.object.locked = false;
+  stairCell.object.seal.completed = true;
+  log("下行楼梯的符文封印解除了。");
+  rewards.push("下行楼梯封印已解除");
+  return true;
+}
+
 function recordQuestKill(enemy, rewards = []) {
   if (!enemy || enemy.type === "boss") return;
   for (const quest of ensureQuestList()) {
-    if (!quest.accepted || quest.claimed || quest.completed || quest.floor !== state.floor) continue;
+    if (!quest.accepted || quest.claimed || quest.completed || (quest.targetFloor || quest.floor) !== state.floor) continue;
     const def = QUEST_DEFS[quest.id];
     if (!def) continue;
     if (def.type === "rescueRoom" && enemy.roomId !== quest.roomId) continue;
@@ -1484,7 +1804,7 @@ function recordQuestKill(enemy, rewards = []) {
   }
 }
 
-// Roll post-combat equipment and rune drops.
+// 抽取战斗后的钥匙、材料、技能尘、装备和符文掉落。
 function maybeDrop(enemy) {
   const drops = [];
   if (enemy.dropsKey || enemy.type === "boss") {
@@ -1524,7 +1844,7 @@ function battleResultList(rewards) {
   return `<ul class="reward-list">${rewards.map((reward) => `<li>${reward}</li>`).join("")}</ul>`;
 }
 
-// Increase level, grant stat point, and refresh resources.
+// 提升等级，发放属性点和技能点，并刷新生命法力。
 function levelUp() {
   state.xp -= state.xpNext;
   state.level++;
@@ -1538,7 +1858,7 @@ function levelUp() {
   log(`升级到 Lv.${state.level}，获得 1 点属性点和 1 点技能点。`);
 }
 
-// Handle defeat without deleting the save: reset to floor entrance with penalty.
+// 处理战败：不删除存档，扣除少量金币并回到本层入口。
 function death() {
   state.hp = Math.ceil(effectiveMaxHp() * .55);
   state.mp = Math.ceil(effectiveMaxMp() * .45);
@@ -1548,15 +1868,15 @@ function death() {
   log("你被击倒，被传送回本层入口，损失了少量金币。");
 }
 
-// Fast-resolve lower-risk battles using the same combat actions.
+// 对低风险战斗执行一键结算，实际仍复用普通攻击/技能流程。
 function autoBattle() {
   const enemy = state.currentEnemy;
-  const risk = battleRisk(enemy);
-  if (risk.score < .55) {
-    showEvent("一键战斗评估", `<p>${enemy.name} 当前评估为${risk.label}，胜率约 ${Math.round(risk.score * 100)}%。风险过高，建议手动战斗。</p>`, "知道了");
+  const policy = autoBattlePolicy(enemy);
+  if (!policy.allowed) {
+    showEvent("一键战斗评估", `<p>${enemy.name} 当前评估为${policy.label}，胜率约 ${Math.round(policy.score * 100)}%。${policy.reason}，建议手动战斗。</p>`, "知道了");
     return;
   }
-  showModal("一键战斗评估", `<p>${enemy.name} 当前评估为${risk.label}，胜率约 ${Math.round(risk.score * 100)}%。</p>`, [
+  showModal("一键战斗评估", `<p>${enemy.name} 当前评估为${policy.label}，胜率约 ${Math.round(policy.score * 100)}%。</p><p>自动战斗只会尝试 3 回合，生命或法力跌破安全线会中止。</p>`, [
     { text: "取消", action: closeModal },
     { text: "开始一键战斗", action: () => { closeModal(); executeAutoBattle(); } }
   ]);
@@ -1564,24 +1884,58 @@ function autoBattle() {
 
 function executeAutoBattle() {
   let rounds = 0;
-  while (state.currentEnemy && state.hp > 0 && rounds < 30) {
+  while (state.currentEnemy && state.hp > 0 && rounds < 3 && autoBattlePolicy(state.currentEnemy).allowed) {
     const bestSkill = CLASSES[state.classId].skills.find((skill) => state.mp >= upgradedSkill(skill).mp && skill.type !== "evade");
     attackEnemy(bestSkill ? "skill" : "attack", bestSkill || null);
     rounds++;
   }
 }
 
-// Estimate battle risk from player and enemy power.
+// 一键战斗准入策略：只允许资源充足时清理低风险普通怪。
+function autoBattlePolicy(enemy) {
+  if (!enemy) return { allowed: false, score: 0, label: "未知", reason: "没有可结算的敌人" };
+  const risk = battleRisk(enemy);
+  const hpMax = safeEffectiveMaxHp();
+  const mpMax = safeEffectiveMaxMp();
+  if (enemy.type !== "monster" || enemy.roomBoss) {
+    return { ...risk, allowed: false, reason: "精英、首领和守卫需要手动处理" };
+  }
+  if (enemy.affix) {
+    return { ...risk, allowed: false, reason: "带词缀敌人需要手动判断" };
+  }
+  if (state.hp / hpMax < .65) {
+    return { ...risk, allowed: false, reason: "生命低于安全线" };
+  }
+  if (state.mp / mpMax < .3) {
+    return { ...risk, allowed: false, reason: "法力低于安全线" };
+  }
+  if (risk.score < .78) {
+    return { ...risk, allowed: false, reason: "胜率没有达到安全扫荡线" };
+  }
+  return { ...risk, allowed: true, reason: "风险较低" };
+}
+
+// 兼容测试和老存档中缺少装备结构的场景，安全获取生命上限。
+function safeEffectiveMaxHp() {
+  return state.equipment ? effectiveMaxHp() : state.maxHp;
+}
+
+// 兼容测试和老存档中缺少装备结构的场景，安全获取法力上限。
+function safeEffectiveMaxMp() {
+  return state.equipment ? effectiveMaxMp() : state.maxMp;
+}
+
+// 根据玩家和敌人的综合强度估算战斗风险。
 function battleRisk(enemy) {
   const t = totals();
   const heroPower = state.hp + state.mp * .35 + t.atk * 7 + t.mag * 6 + t.def * 6 + t.spd * 4;
-  const enemyPower = enemy.hp + enemy.atk * 10 + enemy.def * 7;
+  const enemyPower = enemy.hp * 1.08 + enemy.atk * 12 + enemy.def * 8;
   const score = heroPower / (heroPower + enemyPower);
   const label = score >= .75 ? "碾压" : score >= .64 ? "优势" : score >= .55 ? "均势" : score >= .42 ? "危险" : "致命";
   return { score, label };
 }
 
-// Spend one pending stat point on a base attribute.
+// 消耗一个待分配属性点并提升指定基础属性。
 function addStat(key) {
   if (state.statPoints <= 0) return;
   state.stats[key]++;
@@ -1656,6 +2010,7 @@ function applyStatDraft() {
   render();
 }
 
+// 判断当前物件是否会阻挡移动，必须先交互才能继续。
 function isBlockingInteraction(obj) {
   if (!obj) return false;
   if (["shop", "forge", "questNpc", "rescueNpc", "fenceGate"].includes(obj.type)) return true;
@@ -1663,7 +2018,7 @@ function isBlockingInteraction(obj) {
   return false;
 }
 
-// Equip an inventory item and return the old item to the bag.
+// 装备背包中的物品，并把原装备放回背包。
 function equipItem(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id);
   const entry = state.inventory[index];
@@ -1685,16 +2040,19 @@ function confirmEquipItem(id) {
   showConfirm("装备确认", `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>${equipmentCompareText(entry)}`, "装备", () => equipItem(id));
 }
 
+// 计算装备出售价格，评分和强化等级越高价格越高。
 function equipmentSellValue(entry) {
   return Math.max(6, Math.round(itemScore(entry) * .55 + (entry.level || 0) * 8));
 }
 
+// 计算装备分解收益，用于产出魔尘和少量强化石。
 function equipmentSalvageValue(entry) {
   const qualityDust = { 普通: 1, 优秀: 1, 稀有: 2, 史诗: 3, 传说: 4 }[entry.quality] || 1;
   const stones = entry.level > 0 || ["史诗", "传说"].includes(entry.quality) ? 1 : 0;
   return { dust: qualityDust + Math.floor((entry.level || 0) / 2), stones };
 }
 
+// 判断玩家是否位于商人身边，出售装备必须满足该条件。
 function canSellEquipmentHere() {
   if (!state?.map?.cells || !state.player) return false;
   const here = state.map.cells[state.player.y]?.[state.player.x];
@@ -1703,6 +2061,7 @@ function canSellEquipmentHere() {
     .some((cell) => cell.object?.type === "shop");
 }
 
+// 出售背包装备，只有在商人附近才允许执行。
 function sellEquipment(id) {
   if (!canSellEquipmentHere()) {
     showEvent("需要商人", "<p>售出装备需要在商人身边进行。分解装备可以随时操作。</p>", "知道了");
@@ -1719,6 +2078,7 @@ function sellEquipment(id) {
   render();
 }
 
+// 分解背包装备，随时可执行并产出强化/技能相关材料。
 function disassembleEquipment(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id && entry.kind === "equip");
   const entry = state.inventory[index];
@@ -1749,6 +2109,7 @@ function confirmDisassembleEquipment(id) {
   showConfirm("分解装备", `<p>分解 ${entry.name}，获得魔尘 ${reward.dust}${reward.stones ? `、强化石 ${reward.stones}` : ""}。</p>`, "分解", () => disassembleEquipment(id));
 }
 
+// 拆下指定槽位装备，并同步修正生命法力上限变化。
 function unequipItem(slot) {
   const eq = state.equipment[slot];
   if (!eq) return;
@@ -1761,6 +2122,7 @@ function unequipItem(slot) {
   render();
 }
 
+// 装备变化后按上限差值调整当前生命和法力，避免异常溢出。
 function adjustVitalsForMaxChange(beforeHpMax, beforeMpMax) {
   const hpMax = effectiveMaxHp();
   const mpMax = effectiveMaxMp();
@@ -1782,11 +2144,16 @@ function confirmUnequip(slot) {
   showConfirm("拆下装备", `<p>要拆下 ${eq.name} 吗？装备会放回背包。</p>`, "拆下", () => unequipItem(slot));
 }
 
-// Use a consumable potion from the inventory.
+// 使用背包中的消耗品药水。
 function useItem(id) {
   const index = state.inventory.findIndex((entry) => entry.id === id);
   const entry = state.inventory[index];
-  if (!entry || entry.kind !== "potion") return;
+  if (!entry) return;
+  if (entry.kind === "teleport") {
+    openTeleportBeacon(id);
+    return;
+  }
+  if (entry.kind !== "potion") return;
   if (entry.effect === "hp") state.hp = Math.min(effectiveMaxHp(), state.hp + entry.amount);
   if (entry.effect === "mp") state.mp = Math.min(effectiveMaxMp(), state.mp + entry.amount);
   state.inventory.splice(index, 1);
@@ -1797,10 +2164,99 @@ function useItem(id) {
 function confirmUseItem(id) {
   const entry = state.inventory.find((item) => item.id === id);
   if (!entry) return;
+  if (entry.kind === "teleport") {
+    openTeleportBeacon(id);
+    return;
+  }
   showConfirm("使用确认", `<p>要使用 ${entry.name} 吗？</p><p>效果：恢复 ${entry.amount} 点${entry.effect === "hp" ? "生命" : "法力"}。</p>`, "使用", () => useItem(id));
 }
 
-// Combine three same-type runes into the next tier.
+// 打开商路信标传送列表，只显示已探索楼层中的商人、NPC 和合成台。
+function openTeleportBeacon(id) {
+  const targets = knownTeleportTargets();
+  if (!targets.length) {
+    showEvent("商路信标", "<p>暂时没有可传送目标。探索到商人、委托人或合成台后再使用。</p>", "知道了");
+    return;
+  }
+  window._teleportTargets = targets;
+  showModal("商路信标", `
+    <div class="quest-list">
+      ${targets.slice(0, 8).map((target, index) => `<article class="quest-row"><div><b>${target.label}</b><small>第 ${target.floor} 层 · ${target.roomName || "已探索区域"}</small></div><button type="button" onclick="teleportAction('${id}', ${index})">传送</button></article>`).join("")}
+    </div>
+  `, [
+    { text: "取消", action: closeModal }
+  ]);
+}
+
+// 收集当前楼层和楼层缓存中可作为传送目标的已探索设施。
+function knownTeleportTargets() {
+  const targets = [];
+  const addFromMap = (floor, map) => {
+    if (!map?.cells) return;
+    for (const cell of map.cells.flat()) {
+      if (!cell.seen || !["shop", "questNpc", "rescueNpc", "forge"].includes(cell.object?.type)) continue;
+      const landing = landingNear(map, cell.x, cell.y);
+      if (!landing) continue;
+      targets.push({
+        floor: Number(floor),
+        x: cell.x,
+        y: cell.y,
+        landing,
+        label: teleportTargetLabel(cell.object),
+        roomName: cell.roomId ? roomNameFromMap(map, cell.roomId) : ""
+      });
+    }
+  };
+  addFromMap(state.floor, state.map);
+  for (const [floor, saved] of Object.entries(state.floorStates || {})) addFromMap(floor, saved.map);
+  return targets.sort((a, b) => Math.abs(a.floor - state.floor) - Math.abs(b.floor - state.floor));
+}
+
+// 为传送目标寻找可落脚的相邻格，避免直接站到阻挡型 NPC 或设施上。
+function landingNear(map, x, y) {
+  const origin = map.cells[y]?.[x];
+  const candidates = [origin, ...cardinalNeighbors(map.cells, x, y)];
+  return candidates.find((cell) => cell && ["floor", "door"].includes(cell.terrain) && !isBlockingInteraction(cell.object)) || null;
+}
+
+// 生成传送目标展示名。
+function teleportTargetLabel(obj) {
+  if (obj.type === "shop") return "商人";
+  if (obj.type === "forge") return "合成台";
+  return obj.npcName || (obj.type === "rescueNpc" ? "被困者" : "委托人");
+}
+
+// 从指定地图对象中查找房间名，避免跨楼层读取当前 state.map。
+function roomNameFromMap(map, roomId) {
+  return map?.rooms?.find((room) => room.id === roomId)?.name || "未知房间";
+}
+
+// 弹窗按钮回调：按下标执行传送。
+function teleportAction(id, index) {
+  teleportToTarget(id, window._teleportTargets?.[index]);
+}
+
+// 消耗商路信标并传送到目标楼层的目标附近。
+function teleportToTarget(id, target) {
+  if (!target) return;
+  const index = state.inventory.findIndex((entry) => entry.id === id && entry.kind === "teleport");
+  if (index < 0) return;
+  saveCurrentFloor();
+  if (target.floor !== state.floor) {
+    const saved = state.floorStates?.[target.floor];
+    if (!saved?.map) return;
+    state.floor = target.floor;
+    state.map = cloneFloorMap(saved.map);
+  }
+  state.player = { ...target.landing };
+  state.inventory.splice(index, 1);
+  updateVisibility();
+  log(`商路信标将你传送到第 ${state.floor} 层的${target.label}附近。`);
+  closeModal();
+  render();
+}
+
+// 将三个同名同级符文合成为下一级符文。
 function craftRune(name) {
   if ((state.runes[name] || 0) < 3) return;
   const level = Number(name.slice(-1));
@@ -1819,7 +2275,7 @@ function confirmCraftRune(name) {
   showConfirm("合成确认", `<p>消耗 3 个 ${name}，合成 1 个 ${base + (level + 1)} 符文。</p>`, "合成", () => craftRune(name));
 }
 
-// Upgrade an equipped item with gold and strengthening material.
+// 消耗金币和强化石强化已装备物品。
 function enhance(slot) {
   const eq = state.equipment[slot];
   if (!canEnhance(slot)) return;
@@ -1849,6 +2305,7 @@ function enhanceDisabledReason(slot) {
   return "";
 }
 
+// 消耗技能点和技能尘提升指定技能等级。
 function upgradeSkill(skillId) {
   if (!canUpgradeSkill(skillId)) return;
   const cost = skillUpgradeCost(skillId);
@@ -1876,7 +2333,7 @@ function confirmUpgradeSkill(skillId) {
   );
 }
 
-// Buy basic consumables from the merchant tile.
+// 在商人处购买基础消耗品。
 function buy(kind) {
   let bought = false;
   if (kind === "hp" && state.gold >= 25) {
@@ -1891,10 +2348,17 @@ function buy(kind) {
     log("购买小型法力药水。");
     bought = true;
   }
+  if (kind === "beacon" && state.gold >= 80) {
+    state.gold -= 80;
+    state.inventory.push(teleportBeacon());
+    log("购买商路信标。");
+    bought = true;
+  }
   if (!bought) log("金币不足，交易没有完成。");
   render();
 }
 
+// 打开商人主弹窗，商人既能交易也可能提供任务。
 function openMerchant() {
   const hasTask = questDefinitionsForGiver("shop").length > 0;
   if (!hasTask) {
@@ -1918,7 +2382,9 @@ function openMerchant() {
   ]);
 }
 
+// 打开商店商品和装备分解列表。
 function openMerchantShop() {
+  const salvageRows = merchantSalvageRows();
   showModal("流动商队", `
     <div class="merchant-panel">
       <div class="merchant-hero">
@@ -1931,6 +2397,11 @@ function openMerchantShop() {
       <div class="merchant-goods">
         <button type="button" onclick="confirmBuy('hp')"><span>小型生命药水</span><small>恢复 40 HP · 25 金币</small></button>
         <button type="button" onclick="confirmBuy('mp')"><span>小型法力药水</span><small>恢复 25 MP · 25 金币</small></button>
+        <button type="button" onclick="confirmBuy('beacon')"><span>商路信标</span><small>传送到已探索设施 · 80 金币</small></button>
+      </div>
+      <div class="merchant-salvage-list">
+        <b>装备分解</b>
+        ${salvageRows}
       </div>
     </div>
   `, [
@@ -1938,6 +2409,17 @@ function openMerchantShop() {
   ]);
 }
 
+function merchantSalvageRows() {
+  const equipment = (state.inventory || []).filter((entry) => entry.kind === "equip");
+  if (!equipment.length) return `<p>暂无可分解装备。</p>`;
+  return equipment.map((entry) => {
+    const reward = equipmentSalvageValue(entry);
+    const rewardText = `魔尘 ${reward.dust}${reward.stones ? ` · 强化石 ${reward.stones}` : ""}`;
+    return `<div class="merchant-salvage-row"><span>${entry.name}<small>${rewardText}</small></span><button type="button" onclick="confirmDisassembleEquipment('${entry.id}')">分解</button></div>`;
+  }).join("");
+}
+
+// 打开合成台弹窗，集中展示可强化装备和缺失材料原因。
 function openForge() {
   const rows = SLOTS.map((slot) => {
     const eq = state.equipment[slot];
@@ -1960,7 +2442,7 @@ function openForge() {
   ]);
 }
 
-// Render the initial class selection cards.
+// 渲染开始界面，提供继续存档和新游戏入口。
 function renderStartScreen() {
   const hasSave = !!localStorage.getItem(SAVE_KEY);
   $("classSelect").innerHTML = `
@@ -1979,6 +2461,7 @@ function continueSavedGame() {
   if (loadGame()) render();
 }
 
+// 渲染职业选择卡片，玩家选择后会创建新角色状态。
 function renderClassSelect() {
   $("classSelect").innerHTML = Object.entries(CLASSES).map(([id, cls]) => `
     <article class="class-card">
@@ -1990,7 +2473,7 @@ function renderClassSelect() {
   `).join("");
 }
 
-// Render the full UI from current state and persist the snapshot.
+// 根据当前状态渲染完整 UI，并把快照持久化到 localStorage。
 function render() {
   if (!state) {
     $("classSelect").classList.remove("hidden");
@@ -2016,11 +2499,16 @@ function render() {
 }
 
 function confirmBuy(kind) {
-  const name = kind === "hp" ? "小型生命药水" : "小型法力药水";
-  showConfirm("购买确认", `<p>花费 25 金币购买 ${name}。</p>`, "购买", () => buy(kind));
+  const goods = {
+    hp: ["小型生命药水", 25],
+    mp: ["小型法力药水", 25],
+    beacon: ["商路信标", 80]
+  };
+  const [name, price] = goods[kind] || goods.hp;
+  showConfirm("购买确认", `<p>花费 ${price} 金币购买 ${name}。</p>`, "购买", () => buy(kind));
 }
 
-// Render player portrait, bars, stats, and stat-point controls.
+// 渲染玩家头像、资源条、属性和纸娃娃装备入口。
 function renderHero() {
   const cls = CLASSES[state.classId];
   const t = totals();
@@ -2067,6 +2555,7 @@ function renderPaperdoll() {
   `;
 }
 
+// 打开纸娃娃指定装备槽位详情。
 function showEquipmentSlot(slot) {
   const eq = state.equipment[slot];
   const title = SLOT_NAMES[slot] || "装备";
@@ -2083,7 +2572,7 @@ function showEquipmentSlot(slot) {
   ]);
 }
 
-// Render the main dungeon map tiles.
+// 渲染主地牢地图视野范围内的格子。
 function renderMap() {
   const theme = themeForFloor(state.floor);
   $("floorText").textContent = `第 ${state.floor} 层`;
@@ -2107,8 +2596,10 @@ function renderMap() {
       const tileSprite = isPlayer ? sprite(`player facing-${state.facing || "down"}`, assetForClass(state.classId), CLASSES[state.classId].name)
         : showObject ? objectSprite(cell.object) : "";
       const objectBadge = showObject ? badgeForObject(cell.object.type) : "";
+      const roomLabel = roomDoorLabel(cell);
+      const roomBadge = roomLabel ? `<span class="room-label">${roomLabel}</span>` : "";
       const label = tileLabel(cell, isPlayer);
-      const showHint = isPlayer || showObject || ["wall", "door", "fence"].includes(cell.terrain) || (cell.roomId && cell.terrain === "door");
+      const showHint = isPlayer || showObject || ["wall", "door", "fence"].includes(cell.terrain) || roomLabel;
       const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
       const title = "";
       const flags = [
@@ -2118,10 +2609,17 @@ function renderMap() {
         isSelected ? " selected" : "",
         cell.object ? ` object object-${cell.object.type}` : ""
       ].join("");
-      cells.push(`<button class="tile ${flags}" type="button"${title} aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${hint}</button>`);
+      cells.push(`<button class="tile ${flags}" type="button"${title} aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${roomBadge}${hint}</button>`);
     }
   }
   map.innerHTML = cells.join("");
+}
+
+// 门格显示紧凑房间编号，帮助玩家辨认任务目标房间。
+function roomDoorLabel(cell) {
+  if (cell.terrain !== "door" || !cell.roomId) return "";
+  const marker = { danger: "险", sealed: "封", treasure: "宝" }[roomThreat(cell.roomId)] || "";
+  return `${roomName(cell.roomId).replace(/房$/, "")}${marker}`;
 }
 
 function shouldShowMapObject(cell) {
@@ -2140,7 +2638,7 @@ function mapViewBounds() {
   };
 }
 
-// Render compact floor overview in the top-right minimap.
+// 渲染右上角小地图概览和当前视野框。
 function renderMinimap() {
   const minimap = $("minimap");
   const view = mapViewBounds();
@@ -2226,7 +2724,7 @@ function selectMinimapTile(x, y) {
   render();
 }
 
-// Render always-visible icon meanings under the map.
+// 渲染地图下方始终可见的图例说明。
 function renderLegend() {
   const legendItems = LEGEND_ITEMS
     .filter(([type]) => type !== "portal")
@@ -2245,7 +2743,7 @@ function renderLegend() {
   }).join("");
 }
 
-// Swap the center map area into a focused battle board while an enemy is active.
+// 有当前敌人时，把中间地图区域切换成战斗面板。
 function renderBattleView() {
   const enemy = state.currentEnemy;
   const mapWrap = document.querySelector(".map-wrap");
@@ -2286,6 +2784,7 @@ function renderBattleView() {
         <div class="battle-sprite">${objectSprite(enemy)}</div>
         ${combatantFxMarkup("enemy")}
         <h2>${enemy.name}</h2>
+        ${enemy.affix ? `<small class="enemy-affix">${enemyAffixText(enemy)}</small>` : ""}
         <div class="battle-meter enemy"><span style="width:${enemyPct}%"></span><b>${Math.max(0, Math.round(enemy.hp))}/${enemy.maxHp} HP</b></div>
         <p>攻击 ${enemy.atk} · 防御 ${enemy.def}</p>
       </div>
@@ -2294,9 +2793,10 @@ function renderBattleView() {
   `;
 }
 
+// 渲染战斗命令面板：普通行动、技能、补给和一键战斗。
 function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
-  const risk = state.currentEnemy ? battleRisk(state.currentEnemy) : null;
-  const winRate = risk ? percentScore(risk.score) : null;
+  const policy = state.currentEnemy ? autoBattlePolicy(state.currentEnemy) : null;
+  const winRate = policy ? percentScore(policy.score) : null;
   return `
     <div class="battle-command-panel">
       <div class="battle-basic-actions battle-command-section">
@@ -2322,14 +2822,23 @@ function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
           ${renderSkillActionButtons("battle")}
         </div>
       </div>
+      <div class="battle-consumable-panel battle-command-section">
+        <div class="battle-panel-title">
+          <b>补给</b>
+          <small>喝药会消耗本回合行动</small>
+        </div>
+        <div class="battle-consumable-grid">
+          ${renderBattlePotionButtons()}
+        </div>
+      </div>
       <div class="battle-auto-panel battle-command-section">
         <div class="battle-panel-title">
           <span>战术</span>
-          ${risk ? `<small>${risk.label}</small>` : "<small>评估</small>"}
+          ${policy ? `<small>${policy.label}</small>` : "<small>评估</small>"}
         </div>
-        <button class="battle-action auto" type="button" onclick="autoBattle()">
-          <span class="battle-action-head"><b>一键战斗</b>${risk ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
-          <small>根据当前血量、属性和敌人强度自动结算</small>
+        <button class="battle-action auto" type="button" ${policy?.allowed ? "" : "disabled"} onclick="autoBattle()">
+          <span class="battle-action-head"><b>一键战斗</b>${policy ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
+          <small>${policy?.allowed ? "低风险普通怪可自动结算 3 回合" : policy?.reason || "需要评估"}</small>
         </button>
       </div>
     </div>
@@ -2340,6 +2849,33 @@ function percentScore(score) {
   return Math.max(0, Math.min(100, Math.round(Number.isFinite(score) ? score * 100 : 0)));
 }
 
+function battlePotionGroups() {
+  const groups = new Map();
+  for (const entry of state.inventory || []) {
+    if (entry.kind !== "potion") continue;
+    const key = `${entry.name}|${entry.effect}|${entry.amount}`;
+    const group = groups.get(key) || { ...entry, count: 0 };
+    group.count += 1;
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+// 把背包药水按名称和效果分组，生成战斗中可用的补给按钮。
+function renderBattlePotionButtons() {
+  const potions = battlePotionGroups();
+  if (!potions.length) return `<p class="battle-empty-supplies">暂无药剂</p>`;
+  return potions.slice(0, 4).map((entry) => {
+    const isHp = entry.effect === "hp";
+    const cap = isHp ? effectiveMaxHp() : effectiveMaxMp();
+    const current = isHp ? state.hp : state.mp;
+    const disabled = current >= cap ? "disabled" : "";
+    const effectText = `${isHp ? "HP" : "MP"} +${entry.amount}`;
+    return `<button class="battle-consumable" type="button" ${disabled} onclick="useBattlePotion('${entry.id}')"><b>${entry.name}</b><span>${effectText}</span><small>x${entry.count}</small></button>`;
+  }).join("");
+}
+
+// 根据当前模式生成技能按钮，战斗模式会展示更完整的资源信息。
 function renderSkillActionButtons(mode = "compact") {
   return CLASSES[state.classId].skills.map((skill) => {
     const upgraded = upgradedSkill(skill);
@@ -2372,7 +2908,7 @@ function centerFxMarkup() {
   return `<span class="center-fx center-fx-${fx.type}">${fx.text}</span>`;
 }
 
-// Convert a map object into its sprite markup.
+// 将地图物件转换成对应的精灵 HTML。
 function objectSprite(obj) {
   if (["monster", "elite", "boss"].includes(obj.type)) return enemySprite(obj);
   const map = {
@@ -2410,7 +2946,7 @@ function enemySprite(enemy) {
   return sprite(cls, src, alt);
 }
 
-// Add short visual labels to map objects.
+// 为地图物件添加短标签，帮助小尺寸格子快速识别对象。
 function badgeForObject(type) {
   const labels = {
     monster: "怪",
@@ -2432,7 +2968,7 @@ function badgeForObject(type) {
   return labels[type] ? `<span class="tile-badge badge-${type}">${labels[type]}</span>` : "";
 }
 
-// Human-readable description for a map cell.
+// 生成地图格子的可读描述，用于 aria-label 和选中格提示。
 function tileLabel(cell, isPlayer = false, reveal = false) {
   if (!reveal && !cell.seen) return "未知区域";
   if (isPlayer) return `你的位置：${CLASSES[state.classId].name}`;
@@ -2443,7 +2979,7 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
   if (cell.object.type === "trap") return "地面：可通行";
   const labels = {
     monster: "普通怪物：接触后进入战斗",
-    elite: "精英怪：更危险，掉落更好",
+    elite: `精英怪：更危险，掉落更好${cell.object.affix ? `；${enemyAffixText(cell.object)}` : ""}`,
     boss: "Boss：本层首领",
     chest: "宝箱：可能获得装备、符文或金币",
     lockedChest: "上锁宝箱：需要符文钥匙。钥匙可以从附近钥匙守卫、Boss或中立委托人处获得",
@@ -2455,13 +2991,13 @@ function tileLabel(cell, isPlayer = false, reveal = false) {
     fenceGate: "符文门栅：有钥匙后可打开围栏入口",
     trap: "陷阱：触发后受到伤害",
     portal: "传送门：进入下一层",
-    stairsDown: "下行楼梯：进入下一层",
+    stairsDown: cell.object.locked ? `封印楼梯：击败${cell.object.seal?.targetName || "封印守卫"}后才能进入下一层` : "下行楼梯：进入下一层",
     stairsUp: "上行楼梯：返回上一层"
   };
   return labels[cell.object.type] || "未知物体";
 }
 
-// Description of the most recently selected map tile.
+// 返回最近选中地图格子的描述文本。
 function selectedTileText() {
   if (!selectedTile || !state?.map) return "";
   const cell = state.map.cells[selectedTile.y]?.[selectedTile.x];
@@ -2470,19 +3006,19 @@ function selectedTileText() {
   return tileLabel(cell, isPlayer);
 }
 
-// Resolve the player sprite for the chosen class.
+// 根据职业选择玩家精灵资源。
 function assetForClass(classId) {
   if (classId === "mage") return ASSETS.mage;
   if (classId === "ranger") return ASSETS.ranger;
   return ASSETS.warrior;
 }
 
-// Shared image markup helper for map and panel sprites.
+// 生成地图和面板共用的图片 HTML。
 function imageTag(src, alt) {
   return `<img src="${src}" alt="${alt}" draggable="false">`;
 }
 
-// Wrap an image with object-specific classes for styling.
+// 用对象专属 class 包装图片，方便 CSS 统一控制尺寸和动画。
 function sprite(cls, src, alt) {
   return `<span class="sprite ${cls}">${imageTag(src, alt)}</span>`;
 }
@@ -2497,7 +3033,7 @@ function iconClassForType(type) {
   return type;
 }
 
-// Select a tile, moving if it is adjacent to the player.
+// 选中地图格子；如果格子相邻，则直接尝试移动。
 function clickTile(x, y) {
   selectedTile = { x, y };
   const dx = x - state.player.x;
@@ -2506,7 +3042,7 @@ function clickTile(x, y) {
   else render();
 }
 
-// Render context-sensitive actions: battle, shop, forge, or movement help.
+// 渲染右侧上下文操作区：战斗、商店、合成台或移动提示。
 function renderContext() {
   const enemy = state.currentEnemy;
   if (enemy) {
@@ -2543,7 +3079,7 @@ function renderContext() {
   }
 }
 
-// Render the currently selected side-panel tab.
+// 渲染当前侧边栏标签页。
 function renderTab() {
   if (activeTab === "inventory") renderInventory();
   if (activeTab === "skills") renderSkills();
@@ -2571,7 +3107,7 @@ function renderQuestList() {
       <article class="quest-row ${quest.completed && !quest.claimed ? "ready" : ""}">
         <div>
           <b>${def.title}</b>
-          <small>${def.giverName} · 第 ${quest.floor} 层${quest.roomName ? ` · ${quest.roomName}` : ""} · ${quest.kills}/${quest.target}</small>
+          <small>${def.giverName} · 第 ${quest.floor} 层${quest.targetFloor && quest.targetFloor !== quest.floor ? ` · 目标第 ${quest.targetFloor} 层` : ""}${quest.roomName ? ` · ${quest.roomName}` : ""} · ${quest.kills}/${quest.target}</small>
           <p>${def.desc}</p>
           <small>${rewards}</small>
         </div>
@@ -2582,14 +3118,14 @@ function renderQuestList() {
   return `<section class="quest-list">${rows}</section>`;
 }
 
-// Render inventory rows and item action buttons.
+// 渲染背包列表和物品操作按钮。
 function renderInventory() {
   $("tabBody").innerHTML = inventoryGroupMarkup();
 }
 
 function inventoryGroupMarkup() {
   const potions = state.inventory
-    .filter((entry) => entry.kind === "potion")
+    .filter((entry) => ["potion", "teleport"].includes(entry.kind))
     .sort((a, b) => itemScore(b) - itemScore(a));
   const allEquipment = state.inventory
     .filter((entry) => entry.kind === "equip")
@@ -2646,6 +3182,9 @@ function inventoryGroup(type, title, body) {
 }
 
 function potionRow(entry) {
+  if (entry.kind === "teleport") {
+    return `<div class="item-row"><div>${entry.name}<small>传送到已探索楼层的商人、委托人或合成台附近</small></div><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div>`;
+  }
   return `<div class="item-row"><div>${entry.name}<small>评分 ${itemScore(entry)} · 恢复 ${entry.amount}</small></div><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div>`;
 }
 
@@ -2660,7 +3199,6 @@ function equipmentInventoryRow(entry) {
     <div class="equipment-actions inventory-equipment-actions">
       <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
       <button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button>
-      <button type="button" onclick="confirmDisassembleEquipment('${entry.id}')">分解</button>
       <button type="button" ${sellDisabled} onclick="confirmSellEquipment('${entry.id}')">售出</button>
     </div>
   </div>`;
@@ -2695,7 +3233,6 @@ function showInventoryEquipmentDetail(id) {
   const compare = state.equipment?.[entry.slot] ? `<div class="detail-row"><b>对比</b><span>${equipmentCompareText(entry)}</span></div>` : "";
   const actions = [
     { text: "关闭", action: closeModal },
-    { text: "分解", action: () => { closeModal(); disassembleEquipment(id); } },
     { text: "装备", action: () => { closeModal(); equipItem(id); } }
   ];
   if (canSellEquipmentHere()) actions.splice(2, 0, { text: "售出", action: () => { closeModal(); sellEquipment(id); } });
@@ -2713,11 +3250,11 @@ function materialRows() {
 function runeRows() {
   const runes = Object.entries(state.runes || {}).filter(([, count]) => count > 0);
   return runes.length
-    ? runes.map(([name, count]) => `<div class="item-row rune-row"><div>${name}符文<small>${runeEffectText(name)}。3 合 1 升级；需要镶嵌到带符文槽的装备上才生效。</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("")
+    ? runes.map(([name, count]) => `<div class="item-row rune-row"><div>${name}符文<small>${runeEffectText(name)}。3 合 1 升级；需要镶嵌到带符文槽的装备上才生效。</small></div><span class="item-quantity">x${count}</span><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div>`).join("")
     : `<p>暂无符文。</p>`;
 }
 
-// Render equipped items and enhancement controls.
+// 渲染已装备物品和强化控制。
 function renderEquipment() {
   $("tabBody").innerHTML = SLOTS.map((slot) => {
     const eq = state.equipment[slot];
@@ -2729,7 +3266,7 @@ function renderEquipment() {
   }).join("");
 }
 
-// Render materials, rune inventory, and rune-combine controls.
+// 渲染材料、符文库存和符文合成控制。
 function renderCraft() {
   const runes = Object.entries(state.runes).filter(([, count]) => count > 0);
   $("tabBody").innerHTML = `
@@ -2738,6 +3275,7 @@ function renderCraft() {
   `;
 }
 
+// 渲染职业技能列表和技能升级按钮。
 function renderSkills() {
   const skills = CLASSES[state.classId].skills;
   $("tabBody").innerHTML = `
@@ -2751,7 +3289,7 @@ function renderSkills() {
   `;
 }
 
-// Format an equipment stat summary.
+// 格式化装备属性摘要。
 function statsText(eq) {
   return Object.entries(eq.stats).map(([key, value]) => {
     const enhance = eq.level ? `(+${eq.level})` : "";
@@ -2759,6 +3297,7 @@ function statsText(eq) {
   }).join(" ");
 }
 
+// 生成装备列表中复用的评分、部位、品质和属性摘要。
 function equipmentSummary(eq, stateLabel = "") {
   return `
     <span class="equipment-meta">
@@ -2776,6 +3315,7 @@ function equippedStateBadge() {
   return `<span class="equipped-badge">已装备</span>`;
 }
 
+// 生成候选装备与当前装备的详细对比文本。
 function equipmentCompareText(item, extraClass = "") {
   if (!item || item.kind !== "equip") return "";
   const current = state.equipment[item.slot];
@@ -2850,9 +3390,11 @@ function equipmentDetailMarkup(eq, slotName, runeText, extraRows = "") {
   `;
 }
 
+// 根据属性权重、品质、符文槽和强化等级估算物品评分。
 function itemScore(item) {
   if (!item) return 0;
   if (item.kind === "potion") return item.amount || 0;
+  if (item.kind === "teleport") return 35;
   if (item.kind !== "equip") return 0;
   const weights = { atk: 11, mag: 11, def: 9, res: 8, spd: 8, luk: 7, hp: 1.2, mp: 1.1 };
   const statScore = Object.entries(item.stats).reduce((sum, [key, value]) => {
@@ -2868,18 +3410,18 @@ function isBetterThanEquipped(item) {
   return itemScore(item) > itemScore(state.equipment[item.slot]);
 }
 
-// Render newest adventure log entries.
+// 渲染最新的冒险日志。
 function renderLog() {
   $("log").innerHTML = state.log.map((entry) => `<div>${entry}</div>`).join("");
 }
 
-// Add one message to the bounded adventure log.
+// 追加一条冒险日志，并限制日志长度。
 function log(text) {
   state.log.unshift(text);
   state.log = state.log.slice(0, 80);
 }
 
-// Save the complete game state into localStorage.
+// 将完整游戏状态保存到 localStorage。
 function saveGame(show = true) {
   if (!state) return;
   localStorage.setItem(SAVE_KEY, JSON.stringify(state));
@@ -2889,7 +3431,7 @@ function saveGame(show = true) {
   }
 }
 
-// Restore saved state from localStorage if available.
+// 从 localStorage 恢复存档，并补齐新版字段的默认值。
 function loadGame() {
   const raw = localStorage.getItem(SAVE_KEY);
   if (!raw) return false;
@@ -2911,6 +3453,7 @@ function loadGame() {
   return true;
 }
 
+// 重置探索可见性，用于老存档升级到新版视野逻辑。
 function resetExploration() {
   for (const row of state.map.cells) {
     for (const cell of row) {
@@ -2921,7 +3464,7 @@ function resetExploration() {
   state.map.explorationVersion = 2;
 }
 
-// Display a modal with caller-provided actions.
+// 显示弹窗，并使用调用方传入的按钮动作。
 function showModal(title, body, actions) {
   $("modalTitle").textContent = title;
   $("modalBody").innerHTML = body;
@@ -2930,13 +3473,14 @@ function showModal(title, body, actions) {
   $("modal").classList.remove("hidden");
 }
 
-// Show an attention-grabbing map event message.
+// 显示地图事件弹窗，只有一个确认按钮。
 function showEvent(title, body, actionText = "确定") {
   showModal(title, body, [
     { text: actionText, action: closeModal }
   ]);
 }
 
+// 显示短暂浮层提示，用于上下楼等不需要阻断操作的事件。
 function showToast(message, duration = 2600) {
   const toast = $("toast");
   toast.innerHTML = message;
@@ -2947,6 +3491,7 @@ function showToast(message, duration = 2600) {
   }, duration);
 }
 
+// 显示二次确认弹窗，并在确认后执行回调。
 function showConfirm(title, body, confirmText, onConfirm) {
   showModal(title, body, [
     { text: "取消", action: closeModal },
@@ -2954,20 +3499,20 @@ function showConfirm(title, body, confirmText, onConfirm) {
   ]);
 }
 
-// Dispatch a modal button action by index.
+// 根据按钮下标派发当前弹窗动作。
 function modalAction(index) {
   initAudio();
   window._modalActions[index].action();
 }
 
-// Hide the current modal.
+// 关闭当前弹窗，并清理临时弹窗状态。
 function closeModal() {
   $("modal").classList.add("hidden");
   window._modalActions = [];
   statDraft = null;
 }
 
-// Confirm before clearing localStorage and returning to class select.
+// 清除存档并返回职业选择前，先向玩家二次确认。
 function newGamePrompt() {
   showModal("新游戏", "<p>这会覆盖当前浏览器存档。确定要重新开始吗？</p>", [
     { text: "取消", action: closeModal },

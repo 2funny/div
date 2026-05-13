@@ -637,6 +637,14 @@ h2 {
   background: linear-gradient(90deg, #b486ff, #e86464);
 }
 
+.enemy-affix {
+  display: block;
+  min-height: 18px;
+  color: #f5d37a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .battle-meter b {
   position: absolute;
   inset: 0;
@@ -1187,6 +1195,22 @@ h2 {
   white-space: normal;
   pointer-events: none;
   box-shadow: 0 8px 22px rgba(0,0,0,.35);
+}
+
+.room-label {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  z-index: 5;
+  min-width: 18px;
+  padding: 1px 3px;
+  border: 1px solid rgba(240, 195, 91, .45);
+  border-radius: 4px;
+  background: rgba(16, 19, 25, .86);
+  color: #f5d37a;
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: 800;
 }
 
 .tile:hover .tile-hint,
@@ -2063,6 +2087,29 @@ h2 {
   padding: 8px 10px;
 }
 
+.merchant-salvage-list {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(240, 195, 91, .22);
+}
+
+.merchant-salvage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.merchant-salvage-row span,
+.merchant-salvage-row small {
+  display: block;
+}
+
+.merchant-salvage-row small {
+  color: var(--muted);
+}
+
 .quest-panel,
 .quest-list {
   display: grid;
@@ -2353,4 +2400,43 @@ h2 {
   .log {
     min-height: 220px;
   }
+}
+.battle-consumable-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.battle-consumable {
+  min-height: 84px;
+  border: 1px solid rgba(125, 216, 255, .28);
+  border-radius: 8px;
+  background: rgba(20, 27, 36, .72);
+  color: #edf7ff;
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  text-align: left;
+  padding: 10px 12px;
+}
+
+.battle-consumable b,
+.battle-consumable span,
+.battle-consumable small {
+  display: block;
+}
+
+.battle-consumable span {
+  color: #9de6c9;
+  font-weight: 700;
+}
+
+.battle-consumable small,
+.battle-empty-supplies {
+  color: rgba(231, 241, 255, .68);
+}
+
+.battle-consumable:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }

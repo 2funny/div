@@ -16,6 +16,7 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync("js/data.js", "utf8"), context);
 vm.runInContext(fs.readFileSync("js/game.js", "utf8"), context);
 vm.runInContext(`
+  assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
   state = {
     equipment: {
       weapon: { id: "old", kind: "equip", name: "Old Sword", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 }
@@ -63,9 +64,10 @@ vm.runInContext(`
   activeInventoryTab = "runes";
   const runesMarkup = inventoryGroupMarkup();
   assert(runesMarkup.includes('<span class="item-quantity">x3</span>'), "rune counts should render at the row edge");
+  assert(runesMarkup.indexOf('<span class="item-quantity">x3</span>') < runesMarkup.indexOf("confirmCraftRune"), "rune counts should sit before the craft action");
   assert(!runesMarkup.includes("数量 3"), "rune counts should not be written into the attribute text");
   activeInventoryTab = "equipment";
-  assert(inventory.includes("confirmDisassembleEquipment"), "inventory equipment rows should support disassembly");
+  assert(!inventory.includes("confirmDisassembleEquipment"), "inventory equipment rows should not keep a persistent disassemble action");
   assert(inventory.includes("confirmSellEquipment"), "inventory equipment rows should support selling");
   render = () => {};
   showEvent = (title, body) => { eventTitle = title; eventBody = body; };
@@ -132,6 +134,16 @@ vm.runInContext(`
   assert(!battleCommands.includes("battle-action primary"), "normal attack should not be styled as the recommended action");
   assert(battleCommands.includes("battle-win-rate"), "auto battle action should show the current win rate beside the button");
   assert(battleCommands.includes("%"), "auto battle win rate should be shown as a percentage");
+  state.inventory = [
+    potion("Small Potion", "hp", 40),
+    potion("Small Potion", "hp", 40),
+    potion("Small Mana", "mp", 25)
+  ];
+  const battleSupplies = renderBattleCommandPanel(32);
+  assert(battleSupplies.includes("battle-consumable-panel"), "battle commands should include a dedicated consumable panel");
+  assert(battleSupplies.includes("useBattlePotion"), "battle potion shortcuts should be usable directly from combat");
+  assert(battleSupplies.includes("Small Potion"), "battle potion shortcuts should show potion names");
+  assert(battleSupplies.includes("x2"), "battle potion shortcuts should stack duplicate potion names");
   assert(ASSETS.shop.includes("merchant"), "merchant map icon should use a dedicated dungeon character sprite");
   assert(ASSETS.questNpc && ASSETS.questNpc !== ASSETS.shop, "quest NPC should not reuse the merchant icon");
   assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");

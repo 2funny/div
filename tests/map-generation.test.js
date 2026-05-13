@@ -43,10 +43,18 @@ vm.runInContext(`
   const floorCells = generatedCells.filter((cell) => cell.terrain === "floor");
   const passableCells = generatedCells.filter((cell) => ["floor", "door"].includes(cell.terrain));
   const mainPathCells = generatedCells.filter((cell) => cell.mainPath);
+  const stairsDown = generatedCells.find((cell) => cell.object?.type === "stairsDown");
+  const stairsUp = generatedCells.find((cell) => cell.object?.type === "stairsUp");
   assert(floorCells.length / generatedCells.length < .58, "generated floor should not be an open field");
   assert(floorCells.length / generatedCells.length > .24, "generated floor should still have enough playable space");
   assert(mainPathCells.length >= MAP_SIZE + 8, "generated floor should have a clear main trunk path");
   assert.strictEqual(reachableFloorCount(generated, generated[1][1]), passableCells.length, "all playable floor cells should connect to the main route");
+  assert(stairsDown, "generated floor should include a downstairs tile before the final floor");
+  assert(stairsUp, "generated floors after the first should include an upstairs tile");
+  assert.notDeepStrictEqual([stairsDown.x, stairsDown.y], [MAP_SIZE - 2, MAP_SIZE - 2], "downstairs should not be fixed in the lower-right corner");
+  assert.notDeepStrictEqual([stairsUp.x, stairsUp.y], [1, 1], "upstairs should not be fixed in the upper-left corner");
+  assert(distance(stairsDown, { x: 1, y: 1 }) >= 10, "downstairs should not be discoverable immediately from the starting area");
+  assert(stairsDown.roomId || floorNeighborCount(generated, stairsDown.x, stairsDown.y) <= 1, "downstairs should prefer a room or route endpoint");
   assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
   assert(generatedCells.some((cell) => cell.roomId && cell.terrain === "floor"), "generated floor should include enclosed room interiors");
   assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
@@ -56,6 +64,13 @@ vm.runInContext(`
   assert(rescueGiver?.object.roomName, "rescue quest giver should name the target room");
   const rescueRoomId = rescueGiver.object.roomId;
   assert(generatedCells.some((cell) => cell.object?.roomId === rescueRoomId && ["monster", "elite"].includes(cell.object.type)), "rescue room should start with monsters to clear");
+  const outdoorFeatureTypes = new Set(["monster", "elite", "chest", "lockedChest", "altar"]);
+  const outdoorFeatures = generatedCells.filter((cell) => !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));
+  for (const feature of outdoorFeatures) {
+    const crowdedNeighbor = cellsWithin(generated, feature.x, feature.y, 1)
+      .some((cell) => cell !== feature && !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));
+    assert.strictEqual(crowdedNeighbor, false, "outdoor monsters, treasure, and altars should not pile up next to each other");
+  }
 
   state = { floor: 3 };
   const size = 17;
@@ -88,4 +103,14 @@ vm.runInContext(`
     .find((cell) => cell.object?.dropsKey);
   assert(keyGuardian, "locked chest room should have a key guardian nearby");
   assert.strictEqual(keyGuardian.object.roomBoss, true, "key guardian should be marked as a room boss");
+
+  state = {
+    floor: MAX_FLOOR,
+    facing: "down",
+    player: { x: 1, y: 1 }
+  };
+  generateFloor();
+  const finalCells = state.map.cells.flat();
+  assert(finalCells.some((cell) => cell.object?.type === "boss"), "final floor should contain the final boss");
+  assert(!finalCells.some((cell) => cell.object?.type === "stairsDown"), "final floor should not contain downstairs");
 `, context);
