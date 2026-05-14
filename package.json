@@ -1,0 +1,16 @@
+{
+  "name": "rune-dungeon",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:test-harness": "vite build --config vite.test.config.ts",
+    "preview": "vite preview",
+    "test": "npm run build:test-harness && node tests/map-generation.test.js && node tests/equipment-ui.test.js && node tests/gameplay-behavior.test.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

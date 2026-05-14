@@ -1,4 +1,6 @@
-const CLASSES = {
+import type { PlayerClass, SlotKey, StatKey } from "./types";
+
+export const CLASSES: Record<string, PlayerClass> = {
   warrior: {
     name: "剑士",
     avatar: "剑",
@@ -49,24 +51,26 @@ const CLASSES = {
   }
 };
 
-const THEMES = [
+export const THEMES = [
   { id: "moss", name: "苔石入口", floors: [1, 2, 3], wallRate: 0.17, colorClass: "moss" },
   { id: "mine", name: "幽暗矿道", floors: [4, 5, 6], wallRate: 0.22, colorClass: "mine" },
   { id: "frost", name: "寒霜回廊", floors: [7, 8, 9], wallRate: 0.19, colorClass: "frost" },
   { id: "throne", name: "符文王座", floors: [10], wallRate: 0.05, colorClass: "throne" }
 ];
 
-const RUNES = ["火焰", "寒冰", "雷霆", "吸血", "守护", "迅捷"];
-const SLOTS = ["weapon", "armor", "boots", "ring", "amulet"];
-const SLOT_NAMES = { weapon: "武器", armor: "护甲", boots: "鞋子", ring: "戒指", amulet: "护符" };
-const STAT_NAMES = { atk: "攻击", mag: "法强", def: "防御", res: "抗性", spd: "速度", luk: "幸运" };
-const SAVE_KEY = "rune-dungeon-save-v1";
-const MAX_FLOOR = 66;
-const MAP_SIZE = 27;
-const MAP_VIEW_SIZE = 15;
-const VISION_RADIUS = 3;
+export const RUNES = ["火焰", "寒冰", "雷霆", "吸血", "守护", "迅捷"];
+export const SLOTS: SlotKey[] = ["weapon", "armor", "boots", "ring", "amulet"];
+export const SLOT_NAMES: Record<SlotKey, string> = { weapon: "武器", armor: "护甲", boots: "鞋子", ring: "戒指", amulet: "护符" };
+export const STAT_NAMES: Record<StatKey, string> = { atk: "攻击", mag: "法强", def: "防御", res: "抗性", spd: "速度", luk: "幸运" };
+export const SAVE_KEY = "rune-dungeon-save-v1";
+export const DEFAULT_CLASS_ID = "warrior";
+export const MASTER_VOLUME = 0.92;
+export const MAX_FLOOR = 66;
+export const MAP_SIZE = 27;
+export const MAP_VIEW_SIZE = 15;
+export const VISION_RADIUS = 3;
 
-const ASSETS = {
+export const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
   mage: "assets/dawngeon/player-mage.png",
   ranger: "assets/dawngeon/player-ranger-dark.svg",
@@ -90,7 +94,7 @@ const ASSETS = {
   wall: "assets/dawngeon/wall-dark.svg"
 };
 
-const LEGEND_ITEMS = [
+export const LEGEND_ITEMS = [
   ["player", "你", "当前位置"],
   ["monster", "怪", "普通怪"],
   ["elite", "精英", "精英怪"],

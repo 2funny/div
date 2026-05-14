@@ -1,450 +1,79 @@
-let state = null;
+// @ts-nocheck
+import {
+  ASSETS,
+  CLASSES,
+  LEGEND_ITEMS,
+  MAP_SIZE,
+  MAP_VIEW_SIZE,
+  DEFAULT_CLASS_ID,
+  MAX_FLOOR,
+  RUNES,
+  SAVE_KEY,
+  SLOT_NAMES,
+  SLOTS,
+  STAT_NAMES,
+  THEMES,
+  VISION_RADIUS
+} from "./data";
+import { ENEMY_AFFIXES } from "./enemies";
+import { QUEST_DEFS } from "./quests";
+import { choice, rand, uid } from "./random";
+import {
+  SAVE_SLOT_LIMIT,
+  saveSlotKey,
+  saveSlotLabel,
+  formatSaveTime,
+  readSaveIndex,
+  writeSaveIndex
+} from "./save";
+import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
+import { emptyEquipment, item, potion, starterEquipment, starterInventory, teleportBeacon } from "./inventory";
+import { cardinalNeighbors, cellsWithin, distance, floorNeighborCount, validRoomDoor } from "./map";
+import { requiredById } from "../ui/dom";
+import { createAudioRuntime } from "./audioRuntime";
+import { createModalRuntime } from "./modalRuntime";
+import type { GameState } from "./types";
+
+let state: GameState | null = null;
 let activeTab = "inventory";
 let activeInventoryTab = "equipment";
 let activeEquipmentFilter = "all";
 let selectedTile = null;
-let battleFx = null;
 let statDraft = null;
-let audioState = null;
-let audioEnabled = localStorage.getItem("rune-dungeon-audio") === "on";
 let battleInputLockedUntil = 0;
 let currentSaveSlot = localStorage.getItem(`${SAVE_KEY}-current`) || "slot-1";
 let pendingSaveSlot = currentSaveSlot;
 
-const MASTER_VOLUME = .92;
-const SAVE_INDEX_KEY = `${SAVE_KEY}-index-v2`;
-const SAVE_SLOT_LIMIT = 4;
-const DEFAULT_CLASS_ID = "warrior";
 
-const $ = (id) => document.getElementById(id);
+const $ = requiredById;
 
-const QUEST_DEFS = {
-  rescueRoom: {
-    id: "rescueRoom",
-    giver: "questNpc",
-    title: "房间救援",
-    giverName: "救援斥候卡尔",
-    desc: "清理指定房间的怪物，救出被困的冒险者。",
-    target: 2,
-    rewardGold: (floor) => 18 + floor * 4,
-    rewardKeys: 1,
-    type: "rescueRoom"
-  },
-  wardenErrand: {
-    id: "wardenErrand",
-    giver: "questNpc",
-    title: "巡夜人委托",
-    giverName: "巡夜人",
-    desc: "清掉本层游荡怪物，换取打开符文锁的钥匙。",
-    target: 2,
-    rewardGold: (floor) => 14 + floor * 3,
-    rewardKeys: 1
-  },
-  merchantRoute: {
-    id: "merchantRoute",
-    giver: "shop",
-    title: "商路清理",
-    giverName: "流动商队",
-    desc: "帮商人扫清附近怪物，换取补给和金币。",
-    target: 2,
-    rewardGold: (floor) => 10 + floor * 3,
-    rewardPotion: "hp"
-  }
-};
+const audioRuntime = createAudioRuntime({
+  $,
+  getState: () => state,
+  isDefeatedEnemy
+});
+const {
+  initAudio,
+  playSound,
+  syncMusicToGame,
+  toggleAudio,
+  updateSoundButton
+} = audioRuntime;
 
-const ENEMY_AFFIXES = [
-  { id: "armored", name: "坚甲", desc: "防御提高，普通攻击效率降低" },
-  { id: "shatter", name: "破盾", desc: "防御姿态减伤降低" },
-  { id: "drain", name: "汲取", desc: "造成伤害后恢复生命" },
-  { id: "swift", name: "迅捷", desc: "更容易避开攻击" }
-];
-
-// 随机数和 ID 工具，供地图生成、掉落和物品创建复用。
-function rand(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function choice(list) {
-  return list[rand(0, list.length - 1)];
-}
-
-function uid() {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-// 重置本回合战斗表现状态，用于驱动攻击、防御和治疗的短动画。
-function resetBattleFx(kind = "action") {
-  battleFx = { kind, hero: null, enemy: null, center: null, seq: Date.now() };
-}
-
-// 记录指定战斗对象的表现数据，渲染层据此显示飘字和状态反馈。
-function setBattleFx(target, data) {
-  if (!battleFx) resetBattleFx();
-  battleFx[target] = { ...data, seq: `${battleFx.seq}-${target}` };
-}
+const {
+  closeModal,
+  modalAction,
+  showConfirm,
+  showEvent,
+  showModal,
+  showToast
+} = createModalRuntime({
+  $,
+  initAudio,
+  resetStatDraft: () => { statDraft = null; }
+});
 
 // 初始化 Web Audio 上下文，并在浏览器允许播放后启动地牢氛围声。
-function initAudio(playReady = false) {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return null;
-  if (!audioState) {
-    const ctx = new AudioContext();
-    const master = ctx.createGain();
-    master.gain.value = audioEnabled ? MASTER_VOLUME : 0;
-    master.connect(ctx.destination);
-    audioState = { ctx, master, music: null, drone: null, battlePulse: null, ambienceTimer: null, musicTimer: null, musicStep: 0, musicMode: null };
-  }
-  const start = () => {
-    syncMusicToGame();
-    if (playReady || !audioState.unlocked) {
-      audioState.unlocked = true;
-      playSound("ready", false);
-    }
-    updateSoundButton();
-  };
-  if (audioState.ctx.state === "suspended") audioState.ctx.resume().then(start).catch(() => updateSoundButton());
-  else start();
-  return audioState;
-}
-
-function toggleAudio() {
-  setAudioEnabled(!audioEnabled, true);
-}
-
-// 切换全局音频开关，持久化到 localStorage 并平滑调整主音量。
-function setAudioEnabled(enabled, playReady = false) {
-  audioEnabled = enabled;
-  localStorage.setItem("rune-dungeon-audio", enabled ? "on" : "off");
-  if (audioState?.master) {
-    const now = audioState.ctx.currentTime;
-    audioState.master.gain.cancelScheduledValues(now);
-    audioState.master.gain.setTargetAtTime(enabled ? MASTER_VOLUME : 0, now, .035);
-  }
-  updateSoundButton();
-  if (enabled) initAudio(playReady);
-}
-
-function updateSoundButton() {
-  const button = $("soundBtn");
-  if (!button) return;
-  button.textContent = audioEnabled ? "声音：开" : "声音：关";
-  button.setAttribute("aria-pressed", audioEnabled ? "true" : "false");
-  button.classList.toggle("muted", !audioEnabled);
-}
-
-// 启动低音量循环氛围声；只创建一次，避免重复叠加音轨。
-function syncMusicToGame() {
-  if (!audioState) return;
-  if (!state) stopMusicLayer();
-  else if (state.currentEnemy && !isDefeatedEnemy(state.currentEnemy)) startBattleMusic();
-  else startDungeonMusic();
-}
-
-function stopMusicLayer() {
-  if (!audioState) return;
-  if (audioState.ambienceTimer) clearTimeout(audioState.ambienceTimer);
-  if (audioState.musicTimer) clearTimeout(audioState.musicTimer);
-  audioState.ambienceTimer = null;
-  audioState.musicTimer = null;
-  if (audioState.drone) {
-    audioState.drone.low.stop();
-    audioState.drone.high.stop();
-    audioState.drone = null;
-  }
-  if (audioState.battlePulse) {
-    audioState.battlePulse.low.stop();
-    audioState.battlePulse.mid.stop();
-    audioState.battlePulse.tick.stop();
-    audioState.battlePulse = null;
-  }
-  if (audioState.music) {
-    const { ctx, music } = audioState;
-    const now = ctx.currentTime;
-    music.gain.cancelScheduledValues(now);
-    music.gain.setTargetAtTime(0, now, .04);
-    setTimeout(() => music.disconnect(), 220);
-    audioState.music = null;
-  }
-  audioState.musicMode = null;
-}
-
-function startDungeonMusic() {
-  if (!audioState || audioState.musicMode === "dungeon") return;
-  stopMusicLayer();
-  const { ctx, master } = audioState;
-  const music = ctx.createGain();
-  music.gain.value = .2;
-  music.connect(master);
-  audioState.music = music;
-  audioState.musicMode = "dungeon";
-  audioState.musicStep = 0;
-  startDungeonDrone();
-  playAmbientTone(.1);
-  playDungeonChord();
-  scheduleDungeonMotif();
-  scheduleDungeonAmbience();
-}
-
-function startDungeonDrone() {
-  if (!audioState?.music || audioState.drone) return;
-  const { ctx, music } = audioState;
-  const drone = ctx.createGain();
-  const low = ctx.createOscillator();
-  const high = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  drone.gain.value = .075;
-  low.type = "sine";
-  high.type = "triangle";
-  low.frequency.value = 55;
-  high.frequency.value = 82.41;
-  filter.type = "lowpass";
-  filter.frequency.value = 260;
-  low.connect(filter);
-  high.connect(filter);
-  filter.connect(drone);
-  drone.connect(music);
-  low.start();
-  high.start();
-  audioState.drone = { drone, low, high, filter };
-}
-
-function scheduleDungeonAmbience() {
-  if (!audioState?.music || audioState.musicMode !== "dungeon") return;
-  const delay = rand(3600, 6800);
-  audioState.ambienceTimer = setTimeout(() => {
-    playAmbientTone();
-    scheduleDungeonAmbience();
-  }, delay);
-}
-
-function scheduleDungeonMotif() {
-  if (!audioState?.music || audioState.musicMode !== "dungeon") return;
-  const phrases = [
-    [293.66, 349.23, 392, 329.63, 293.66, 261.63],
-    [329.63, 392, 440, 392, 349.23, 293.66],
-    [261.63, 293.66, 349.23, 392, 329.63, 246.94],
-    [293.66, 329.63, 392, 440, 392, 349.23]
-  ];
-  const phrase = phrases[audioState.musicStep % phrases.length];
-  const bass = [73.42, 82.41, 98, 110][audioState.musicStep % 4];
-  phrase.forEach((note, index) => {
-    const delay = index * .24;
-    playMusicNote(note, index % 3 === 2 ? .36 : .24, .12, "triangle", 1500, delay);
-    if (index === 1 || index === 4) playMusicNote(note * 1.5, .18, .045, "sine", 2100, delay + .08);
-  });
-  playMusicNote(bass, 1.4, .07, "sine", 520, .02);
-  if (audioState.musicStep % 2 === 0) playDungeonChord();
-  audioState.musicStep++;
-  audioState.musicTimer = setTimeout(scheduleDungeonMotif, 1780);
-}
-
-// 播放一段低频环境音，制造地牢背景氛围。
-function playAmbientTone(volume = .045) {
-  if (!audioState?.music || audioState.musicMode !== "dungeon") return;
-  const { ctx, music } = audioState;
-  const now = ctx.currentTime;
-  const osc = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  const gain = ctx.createGain();
-  const notes = [55, 61.74, 73.42, 82.41, 98];
-  osc.type = "sine";
-  osc.frequency.value = choice(notes);
-  filter.type = "lowpass";
-  filter.frequency.value = 360;
-  gain.gain.setValueAtTime(0, now);
-  gain.gain.linearRampToValueAtTime(volume, now + .8);
-  gain.gain.exponentialRampToValueAtTime(.0001, now + 4.8);
-  osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(music);
-  osc.start(now);
-  osc.stop(now + 5);
-}
-
-function playDungeonChord() {
-  if (!audioState?.music || audioState.musicMode !== "dungeon") return;
-  [146.83, 220, 293.66].forEach((note, index) => {
-    playMusicNote(note, .52, index ? .075 : .1, index ? "triangle" : "sine", 1100, index * .07);
-  });
-}
-
-function playMusicNote(frequency, duration, volume, type = "sine", filterFrequency = 1200, delay = 0) {
-  if (!audioState?.music) return;
-  const { ctx, music } = audioState;
-  const now = ctx.currentTime + delay;
-  const osc = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  const gain = ctx.createGain();
-  osc.type = type;
-  osc.frequency.value = frequency;
-  filter.type = "lowpass";
-  filter.frequency.value = filterFrequency;
-  gain.gain.setValueAtTime(.0001, now);
-  gain.gain.linearRampToValueAtTime(volume, now + .025);
-  gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
-  osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(music);
-  osc.start(now);
-  osc.stop(now + duration + .02);
-}
-
-function startBattleMusic() {
-  if (!audioState || audioState.musicMode === "battle") return;
-  stopMusicLayer();
-  const { ctx, master } = audioState;
-  const music = ctx.createGain();
-  const pulse = ctx.createGain();
-  const low = ctx.createOscillator();
-  const mid = ctx.createOscillator();
-  const tick = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  const tickFilter = ctx.createBiquadFilter();
-  const now = ctx.currentTime;
-  music.gain.value = .16;
-  pulse.gain.setValueAtTime(.0001, now);
-  pulse.gain.linearRampToValueAtTime(.06, now + .08);
-  low.type = "triangle";
-  mid.type = "square";
-  tick.type = "triangle";
-  low.frequency.value = 73.42;
-  mid.frequency.value = 146.83;
-  tick.frequency.value = 220;
-  filter.type = "lowpass";
-  filter.frequency.value = 560;
-  tickFilter.type = "bandpass";
-  tickFilter.frequency.value = 1050;
-  low.connect(filter);
-  mid.connect(filter);
-  filter.connect(pulse);
-  tick.connect(tickFilter);
-  tickFilter.connect(pulse);
-  pulse.connect(music);
-  music.connect(master);
-  low.start();
-  mid.start();
-  tick.start();
-  audioState.music = music;
-  audioState.musicMode = "battle";
-  audioState.musicStep = 0;
-  audioState.battlePulse = { low, mid, tick, pulse };
-  scheduleBattlePulse();
-}
-
-function scheduleBattlePulse() {
-  if (!audioState?.battlePulse || audioState.musicMode !== "battle") return;
-  const { ctx, battlePulse } = audioState;
-  const now = ctx.currentTime;
-  const phrases = [
-    [293.66, 349.23, 392, 329.63, 261.63, 293.66, 440, 392],
-    [329.63, 392, 440, 392, 349.23, 293.66, 261.63, 293.66]
-  ];
-  const phraseIndex = audioState.musicStep % phrases.length;
-  const phrase = phrases[phraseIndex];
-  const bass = phraseIndex ? 82.41 : 73.42;
-  const rhythm = [
-    { delay: 0, duration: .28, strong: true },
-    { delay: .3, duration: .16 },
-    { delay: .5, duration: .34, strong: true, echo: true },
-    { delay: .88, duration: .18 },
-    { delay: 1.1, duration: .24 },
-    { delay: 1.42, duration: .16 },
-    { delay: 1.62, duration: .4, strong: true, echo: true },
-    { delay: 2.12, duration: .28 }
-  ];
-  battlePulse.pulse.gain.cancelScheduledValues(now);
-  battlePulse.pulse.gain.setValueAtTime(.018, now);
-  [0, .5, 1.1, 1.62].forEach((delay, index) => {
-    const hitAt = now + delay;
-    battlePulse.pulse.gain.linearRampToValueAtTime(index === 0 || index === 3 ? .105 : .072, hitAt + .055);
-    battlePulse.pulse.gain.exponentialRampToValueAtTime(.022, hitAt + .42);
-  });
-  phrase.forEach((note, index) => {
-    const beat = rhythm[index];
-    playMusicNote(note, beat.duration, beat.strong ? .1 : .068, beat.strong ? "square" : "triangle", 1480, beat.delay);
-    if (beat.echo) playMusicNote(note / 2, .42, .052, "triangle", 720, beat.delay + .08);
-  });
-  playMusicNote(bass, 1.14, .082, "triangle", 520, .02);
-  playMusicNote(bass * 2, .36, .052, "square", 850, 1.1);
-  audioState.musicStep++;
-  audioState.ambienceTimer = setTimeout(scheduleBattlePulse, 2500);
-}
-
-// 播放一次短音效，参考 SFXR/Bfxr 一类开源游戏音效的短包络合成方式。
-function playSound(kind, ensure = true) {
-  if (!audioEnabled) return;
-  const audio = ensure ? initAudio() : audioState;
-  if (!audio) return;
-  const profile = soundProfile(kind);
-  const { ctx, master } = audio;
-  const now = ctx.currentTime;
-  playToneLayer(ctx, master, now, profile);
-  if (profile.harmonic) playToneLayer(ctx, master, now + (profile.harmonicDelay || 0), profile.harmonic);
-  if (profile.noise) playNoiseLayer(ctx, master, now, profile.noise);
-}
-
-function soundProfile(kind) {
-  const profiles = {
-    ready: { type: "sine", start: 392, end: 659, duration: .2, volume: .16, attack: .014, filter: 1700, harmonic: { type: "sine", start: 523, end: 784, duration: .14, volume: .07, attack: .012, filter: 2100 }, harmonicDelay: .06 },
-    step: { type: "triangle", start: 104, end: 72, duration: .07, volume: .16, attack: .004, filter: 560, harmonic: { type: "sine", start: 160, end: 112, duration: .045, volume: .05, attack: .003, filter: 980 } },
-    encounter: { type: "sine", start: 165, end: 123, duration: .18, volume: .1, attack: .018, filter: 650 },
-    attack: { type: "triangle", start: 185, end: 132, duration: .07, volume: .09, attack: .004, filter: 820 },
-    hurt: { type: "sine", start: 110, end: 78, duration: .1, volume: .095, attack: .004, filter: 520 },
-    guard: { type: "sine", start: 123, end: 98, duration: .12, volume: .082, attack: .012, filter: 480 },
-    spell: { type: "sine", start: 392, end: 587, duration: .2, volume: .105, attack: .03, filter: 1500, harmonic: { type: "sine", start: 523, end: 784, duration: .14, volume: .052, attack: .024, filter: 1900 }, harmonicDelay: .05 },
-    chest: { type: "sine", start: 523, end: 1046, duration: .28, volume: .24, attack: .01, filter: 2600, harmonic: { type: "triangle", start: 784, end: 1318, duration: .2, volume: .14, attack: .012, filter: 3200 }, harmonicDelay: .06 },
-    hit: { type: "triangle", start: 170, end: 82, duration: .1, volume: .095, attack: .004, filter: 760 },
-    cast: { type: "sine", start: 294, end: 587, duration: .2, volume: .105, attack: .024, filter: 1600 },
-    altar: { type: "sine", start: 330, end: 660, duration: .38, volume: .15, attack: .04, filter: 2100, harmonic: { type: "sine", start: 495, end: 990, duration: .32, volume: .08, attack: .04, filter: 2600 }, harmonicDelay: .08 },
-    quest: { type: "sine", start: 349, end: 698, duration: .2, volume: .12, attack: .018, filter: 1900, harmonic: { type: "sine", start: 523, end: 784, duration: .16, volume: .06, attack: .018, filter: 2300 }, harmonicDelay: .07 },
-    sell: { type: "sine", start: 659, end: 880, duration: .11, volume: .11, attack: .01, filter: 2400, harmonic: { type: "sine", start: 880, end: 1175, duration: .09, volume: .055, attack: .008, filter: 3000 }, harmonicDelay: .05 },
-    danger: { type: "sine", start: 146, end: 73, duration: .26, volume: .12, attack: .02, filter: 620 }
-  };
-  return profiles[kind] || profiles.step;
-}
-
-function playToneLayer(ctx, output, startAt, profile) {
-  const osc = ctx.createOscillator();
-  const filter = ctx.createBiquadFilter();
-  const gain = ctx.createGain();
-  const endAt = startAt + profile.duration;
-  osc.type = profile.type;
-  osc.frequency.setValueAtTime(profile.start, startAt);
-  osc.frequency.exponentialRampToValueAtTime(Math.max(20, profile.end), endAt);
-  filter.type = "lowpass";
-  filter.frequency.setValueAtTime(profile.filter || 1400, startAt);
-  gain.gain.setValueAtTime(.0001, startAt);
-  gain.gain.linearRampToValueAtTime(profile.volume, startAt + (profile.attack || .01));
-  gain.gain.exponentialRampToValueAtTime(.0001, endAt);
-  osc.connect(filter);
-  filter.connect(gain);
-  gain.connect(output);
-  osc.start(startAt);
-  osc.stop(endAt + .02);
-}
-
-function playNoiseLayer(ctx, output, startAt, profile) {
-  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * profile.duration), ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-  const source = ctx.createBufferSource();
-  const filter = ctx.createBiquadFilter();
-  const gain = ctx.createGain();
-  source.buffer = buffer;
-  filter.type = "lowpass";
-  filter.frequency.value = profile.filter || 900;
-  gain.gain.setValueAtTime(.0001, startAt);
-  gain.gain.linearRampToValueAtTime(profile.volume, startAt + .006);
-  gain.gain.exponentialRampToValueAtTime(.0001, startAt + profile.duration);
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(output);
-  source.start(startAt);
-  source.stop(startAt + profile.duration + .02);
-}
-
-// 创建新的角色持久化状态，并进入第一层地牢。
 function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot-1") {
   currentSaveSlot = slotId;
   pendingSaveSlot = slotId;
@@ -493,46 +122,6 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
 }
 
 // 按所选职业构造初始装备组合。
-function starterEquipment(classId) {
-  const weapon = classId === "mage"
-    ? item("学徒法杖", "weapon", "普通", { mag: 2 })
-    : classId === "ranger"
-      ? item("短弓", "weapon", "普通", { atk: 2, spd: 1 })
-      : item("铁剑", "weapon", "普通", { atk: 2 });
-  return {
-    weapon,
-    armor: item("旧皮甲", "armor", "普通", { def: 1, hp: 4 }),
-    boots: null,
-    ring: null,
-    amulet: null
-  };
-}
-
-function starterInventory(classId) {
-  return Object.values(starterEquipment(classId)).filter(Boolean);
-}
-
-// 创建空装备栏对象，所有装备槽初始都为空。
-function emptyEquipment() {
-  return Object.fromEntries(SLOTS.map((slot) => [slot, null]));
-}
-
-// 创建消耗品物品数据。
-function potion(name, kind, amount) {
-  return { id: uid(), kind: "potion", name, effect: kind, amount };
-}
-
-// 创建可传送到已探索商人或 NPC 附近的消耗道具。
-function teleportBeacon() {
-  return { id: uid(), kind: "teleport", name: "商路信标" };
-}
-
-// 创建装备物品数据，包含部位、品质、属性、符文槽和强化等级。
-function item(name, slot, quality, stats, runeSlots = 0, runes = []) {
-  return { id: uid(), kind: "equip", name, slot, quality, stats, runeSlots, runes, level: 0 };
-}
-
-// 根据楼层取得视觉主题和地图生成参数。
 function themeForFloor(floor) {
   const exact = THEMES.find((theme) => theme.floors.includes(floor));
   if (exact) return exact;
@@ -880,14 +469,6 @@ function normalizeRoomDoors(map) {
       candidate.roomId = roomId;
     }
   }
-}
-
-function validRoomDoor(map, door, roomId) {
-  const neighbors = cardinalNeighbors(map, door.x, door.y);
-  const roomFloorCount = neighbors.filter((cell) => cell.roomId === roomId && cell.terrain === "floor").length;
-  const outsideFloorCount = neighbors.filter((cell) => !cell.roomId && cell.terrain === "floor").length;
-  const wallCount = neighbors.filter((cell) => cell.terrain === "wall").length;
-  return roomFloorCount >= 1 && outsideFloorCount >= 1 && wallCount >= 1;
 }
 
 function expandOpenSpace(map, targetRatio) {
@@ -1323,33 +904,6 @@ function treasureScore(map, cell) {
   return distance(cell, start) + Math.min(8, distance(cell, exit)) - floorNeighborCount(map, cell.x, cell.y);
 }
 
-function floorNeighborCount(map, x, y) {
-  return cardinalNeighbors(map, x, y).filter((cell) => cell.terrain === "floor").length;
-}
-
-function cardinalNeighbors(map, x, y) {
-  return [
-    map[y - 1]?.[x],
-    map[y + 1]?.[x],
-    map[y]?.[x - 1],
-    map[y]?.[x + 1]
-  ].filter(Boolean);
-}
-
-function cellsWithin(map, x, y, radius) {
-  const cells = [];
-  for (let yy = Math.max(1, y - radius); yy <= Math.min(map.length - 2, y + radius); yy++) {
-    for (let xx = Math.max(1, x - radius); xx <= Math.min(map.length - 2, x + radius); xx++) {
-      if (Math.abs(xx - x) + Math.abs(yy - y) <= radius) cells.push(map[yy][xx]);
-    }
-  }
-  return cells;
-}
-
-function distance(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-}
-
 function makeEnemyWithVariant(eliteOrBoss = false) {
   const enemy = makeEnemy(eliteOrBoss);
   if (enemy.type === "boss") {
@@ -1444,7 +998,7 @@ function updateVisibility() {
 
 // 让玩家移动一格，并处理目标格子的地形、怪物和交互物。
 function move(dx, dy) {
-  if (audioEnabled) initAudio();
+  if (getAudioEnabled()) initAudio();
   if (state.currentEnemy) return;
   if (dx < 0) state.facing = "left";
   else if (dx > 0) state.facing = "right";
@@ -1568,7 +1122,7 @@ function enterBattle(enemy) {
   }
   state.currentEnemy = enemy;
   syncMusicToGame();
-  battleFx = null;
+  clearBattleFx();
   state._guard = 0;
   state._evade = false;
   battleInputLockedUntil = Date.now() + 350;
@@ -2926,39 +2480,18 @@ function openForge() {
 }
 
 // 渲染开始界面，提供继续存档和新游戏入口。
-function saveSlotKey(slotId) {
-  return `${SAVE_KEY}-${slotId}`;
-}
-
-function saveSlotLabel(slotId) {
-  const number = Number(String(slotId).replace("slot-", "")) || 1;
-  return `存档 ${number}`;
-}
-
 function saveSlots() {
   migrateLegacySave();
-  const index = saveIndex();
+  const index = readSaveIndex();
   return Array.from({ length: SAVE_SLOT_LIMIT }, (_, i) => {
     const id = `slot-${i + 1}`;
     return { id, label: saveSlotLabel(id), meta: index[id] || null };
   });
 }
 
-function saveIndex() {
-  try {
-    return JSON.parse(localStorage.getItem(SAVE_INDEX_KEY) || "{}") || {};
-  } catch {
-    return {};
-  }
-}
-
-function writeSaveIndex(index) {
-  localStorage.setItem(SAVE_INDEX_KEY, JSON.stringify(index));
-}
-
 function migrateLegacySave() {
   const raw = localStorage.getItem(SAVE_KEY);
-  const index = saveIndex();
+  const index = readSaveIndex();
   if (!raw || index["slot-1"] || localStorage.getItem(saveSlotKey("slot-1"))) return;
   try {
     const legacy = JSON.parse(raw);
@@ -2988,14 +2521,14 @@ function saveMetaFromState(snapshot) {
 }
 
 function updateSaveSlotMeta(slotId, snapshot) {
-  const index = saveIndex();
+  const index = readSaveIndex();
   index[slotId] = saveMetaFromState(snapshot);
   writeSaveIndex(index);
 }
 
 function deleteSaveSlot(slotId) {
   localStorage.removeItem(saveSlotKey(slotId));
-  const index = saveIndex();
+  const index = readSaveIndex();
   delete index[slotId];
   writeSaveIndex(index);
   if (currentSaveSlot === slotId) {
@@ -3003,13 +2536,6 @@ function deleteSaveSlot(slotId) {
     pendingSaveSlot = currentSaveSlot;
     localStorage.setItem(`${SAVE_KEY}-current`, currentSaveSlot);
   }
-}
-
-function formatSaveTime(value) {
-  if (!value) return "未保存";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "时间未知";
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function renderStartScreen() {
@@ -3583,19 +3109,19 @@ function renderSkillActionButtons(mode = "compact") {
 }
 
 function battleFxClass(target) {
-  const fx = battleFx?.[target];
+  const fx = getBattleFx()?.[target];
   if (!fx) return "";
   return `fx-${fx.type}`;
 }
 
 function combatantFxMarkup(target) {
-  const fx = battleFx?.[target];
+  const fx = getBattleFx()?.[target];
   if (!fx) return "";
   return `<span class="combat-fx combat-fx-${fx.type}" style="--fx-key:${fx.seq}"><b>${fx.text}</b><small>${fx.label}</small></span>`;
 }
 
 function centerFxMarkup() {
-  const fx = battleFx?.center;
+  const fx = getBattleFx()?.center;
   if (!fx) return "";
   return `<span class="center-fx center-fx-${fx.type}">${fx.text}</span>`;
 }
@@ -4218,53 +3744,6 @@ function resetExploration() {
 }
 
 // 显示弹窗，并使用调用方传入的按钮动作。
-function showModal(title, body, actions) {
-  $("modalTitle").textContent = title;
-  $("modalBody").innerHTML = body;
-  $("modalActions").innerHTML = actions.map((action, index) => `<button type="button" onclick="modalAction(${index})">${action.text}</button>`).join("");
-  window._modalActions = actions;
-  $("modal").classList.remove("hidden");
-}
-
-// 显示地图事件弹窗，只有一个确认按钮。
-function showEvent(title, body, actionText = "确定") {
-  showModal(title, body, [
-    { text: actionText, action: closeModal }
-  ]);
-}
-
-// 显示短暂浮层提示，用于上下楼等不需要阻断操作的事件。
-function showToast(message, duration = 2600) {
-  const toast = $("toast");
-  toast.innerHTML = message;
-  toast.classList.add("show");
-  clearTimeout(window._toastTimer);
-  window._toastTimer = setTimeout(() => {
-    toast.classList.remove("show");
-  }, duration);
-}
-
-// 显示二次确认弹窗，并在确认后执行回调。
-function showConfirm(title, body, confirmText, onConfirm) {
-  showModal(title, body, [
-    { text: "取消", action: closeModal },
-    { text: confirmText, action: () => { closeModal(); onConfirm(); } }
-  ]);
-}
-
-// 根据按钮下标派发当前弹窗动作。
-function modalAction(index) {
-  initAudio();
-  window._modalActions[index].action();
-}
-
-// 关闭当前弹窗，并清理临时弹窗状态。
-function closeModal() {
-  $("modal").classList.add("hidden");
-  window._modalActions = [];
-  statDraft = null;
-}
-
 function returnHome() {
   if (state) saveGame(false);
   state = null;
@@ -4279,4 +3758,321 @@ function newGamePrompt() {
     { text: "继续当前", action: closeModal },
     { text: "存档列表", action: returnHome }
   ]);
+}
+
+export function getState() {
+  return state;
+}
+
+export function setState(nextState) {
+  state = nextState;
+}
+
+export function getAudioEnabled() {
+  return audioRuntime.getAudioEnabled();
+}
+
+export function setAudioEnabledForRuntime(enabled) {
+  audioRuntime.setAudioEnabledForRuntime(enabled);
+}
+
+export function getCurrentSaveSlot() {
+  return currentSaveSlot;
+}
+
+export function setCurrentSaveSlot(slotId) {
+  currentSaveSlot = slotId;
+  pendingSaveSlot = slotId;
+}
+
+export function getActiveInventoryTab() {
+  return activeInventoryTab;
+}
+
+export function setActiveInventoryTab(tab) {
+  activeInventoryTab = tab;
+}
+
+export function getActiveEquipmentFilter() {
+  return activeEquipmentFilter;
+}
+
+export function setActiveEquipmentFilter(filter) {
+  activeEquipmentFilter = filter;
+}
+
+export function setActiveTab(tab) {
+  activeTab = tab;
+}
+
+const runtimeApi = {
+  addStat,
+  applyClassLevelGrowth,
+  attackEnemy,
+  autoBattle,
+  buy,
+  cardinalNeighbors,
+  canUnequipSlot,
+  cellsWithin,
+  clickTile,
+  closeModal,
+  completeStairSeal,
+  confirmAddStat,
+  confirmBuy,
+  confirmCraftRune,
+  confirmDeleteSaveSlot,
+  confirmDisassembleEquipment,
+  confirmEnhance,
+  confirmEquipItem,
+  confirmSellEquipment,
+  confirmUnequip,
+  confirmUpgradeSkill,
+  confirmUseItem,
+  continueSavedGame,
+  craftRune,
+  deleteSaveSlot,
+  disassembleEquipment,
+  distance,
+  effectiveMaxHp,
+  effectiveMaxMp,
+  emptyEquipment,
+  enhance,
+  enterBattle,
+  enterFloor,
+  enemyAffixText,
+  equipmentCompareText,
+  equippedStateBadge,
+  equipItem,
+  exposeRuntime,
+  floorNeighborCount,
+  generateFloor,
+  getActiveEquipmentFilter,
+  getActiveInventoryTab,
+  getAudioEnabled,
+  getCurrentSaveSlot,
+  getState,
+  initAudio,
+  inventoryGroupMarkup,
+  isDefeatedEnemy,
+  item,
+  levelUp,
+  loadGame,
+  makeEnemy,
+  makeEnemyWithVariant,
+  maybeDrop,
+  modalAction,
+  move,
+  nextFloor,
+  newGameInSlot,
+  newGamePrompt,
+  openForge,
+  openFenceGate,
+  openLockedChest,
+  openMerchant,
+  openMerchantShop,
+  openQuestNpc,
+  openRescueNpc,
+  openSaveSlotPicker,
+  openStatAllocator,
+  placeTreasureEncounters,
+  potion,
+  recordQuestKill,
+  render,
+  renderBattleView,
+  renderBattleCommandPanel,
+  renderClassSelect,
+  renderContext,
+  renderContinueSlots,
+  renderCraft,
+  renderEquipment,
+  renderHero,
+  renderInventory,
+  renderLegend,
+  renderLog,
+  renderMap,
+  renderMinimap,
+  renderPaperdoll,
+  renderQuestList,
+  renderSkills,
+  renderSkillActionButtons,
+  renderStartScreen,
+  renderTab,
+  resolveCell,
+  returnHome,
+  roomDoorLabel,
+  runeEffectText,
+  saveCurrentFloor,
+  saveGame,
+  saveGameToSlot,
+  saveSlots,
+  saveSlotCard,
+  sellEquipment,
+  setActiveTab,
+  setActiveEquipmentFilter,
+  setActiveInventoryTab,
+  setAudioEnabledForRuntime,
+  setCurrentSaveSlot,
+  setState,
+  showConfirm,
+  showEquipmentSlot,
+  showEvent,
+  showInventoryEquipmentCompare,
+  showInventoryEquipmentDetail,
+  showModal,
+  showToast,
+  startGame,
+  startNewGame,
+  starterEquipment,
+  starterInventory,
+  shouldShowMapObject,
+  tileLabel,
+  toggleAudio,
+  teleportToTarget,
+  triggerTrap,
+  unequipItem,
+  updateSoundButton,
+  updateVisibility,
+  upgradeSkill,
+  useBattlePotion,
+  useItem,
+  validRoomDoor,
+  knownTeleportTargets,
+  mapViewBounds,
+  minimapOverviewBounds,
+  objectSprite
+};
+
+export {
+  addStat,
+  applyClassLevelGrowth,
+  attackEnemy,
+  acceptQuest,
+  autoBattle,
+  autoBattlePolicy,
+  buy,
+  cardinalNeighbors,
+  canUnequipSlot,
+  cellsWithin,
+  clickTile,
+  closeModal,
+  completeStairSeal,
+  confirmAddStat,
+  confirmBuy,
+  confirmCraftRune,
+  confirmDeleteSaveSlot,
+  confirmDisassembleEquipment,
+  confirmEnhance,
+  confirmEquipItem,
+  confirmSellEquipment,
+  confirmUnequip,
+  confirmUpgradeSkill,
+  confirmUseItem,
+  continueSavedGame,
+  craftRune,
+  deleteSaveSlot,
+  disassembleEquipment,
+  distance,
+  effectiveMaxHp,
+  effectiveMaxMp,
+  emptyEquipment,
+  enhance,
+  enterBattle,
+  enterFloor,
+  enemyAffixText,
+  equipmentCompareText,
+  equippedStateBadge,
+  equipItem,
+  floorNeighborCount,
+  generateFloor,
+  inventoryGroupMarkup,
+  initAudio,
+  isDefeatedEnemy,
+  item,
+  knownTeleportTargets,
+  levelUp,
+  loadGame,
+  makeEnemy,
+  makeEnemyWithVariant,
+  maybeDrop,
+  mapViewBounds,
+  modalAction,
+  move,
+  minimapOverviewBounds,
+  nextFloor,
+  newGameInSlot,
+  newGamePrompt,
+  objectSprite,
+  openFenceGate,
+  openForge,
+  openLockedChest,
+  openMerchant,
+  openMerchantShop,
+  openQuestNpc,
+  openRescueNpc,
+  openSaveSlotPicker,
+  openStatAllocator,
+  placeTreasureEncounters,
+  potion,
+  recordQuestKill,
+  render,
+  renderBattleCommandPanel,
+  renderBattleView,
+  renderClassSelect,
+  renderContext,
+  renderContinueSlots,
+  renderCraft,
+  renderEquipment,
+  renderHero,
+  renderInventory,
+  renderLegend,
+  renderLog,
+  renderMap,
+  renderMinimap,
+  renderPaperdoll,
+  renderQuestList,
+  renderSkillActionButtons,
+  renderSkills,
+  renderStartScreen,
+  renderTab,
+  resolveCell,
+  returnHome,
+  roomDoorLabel,
+  runeEffectText,
+  saveCurrentFloor,
+  saveGame,
+  saveGameToSlot,
+  saveSlots,
+  saveSlotCard,
+  sellEquipment,
+  shouldShowMapObject,
+  showConfirm,
+  showEquipmentSlot,
+  showEvent,
+  showInventoryEquipmentCompare,
+  showInventoryEquipmentDetail,
+  showModal,
+  showToast,
+  startGame,
+  startNewGame,
+  starterEquipment,
+  starterInventory,
+  tileLabel,
+  toggleAudio,
+  teleportToTarget,
+  triggerTrap,
+  unequipItem,
+  updateSoundButton,
+  updateVisibility,
+  upgradeSkill,
+  useBattlePotion,
+  useItem,
+  validRoomDoor
+};
+
+export function exposeRuntime() {
+  Object.assign(window, runtimeApi);
+  window.__runeDungeon = {
+    getState,
+    setState
+  };
 }

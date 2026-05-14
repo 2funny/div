@@ -1,25 +1,13 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
+const { createTestContext } = require("./helpers/test-context");
 
 const storage = {};
-const context = {
-  assert,
-  console,
-  document: { getElementById: () => ({}) },
-  localStorage: {
-    getItem: (key) => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
-    setItem: (key, value) => { storage[key] = String(value); },
-    removeItem: (key) => { delete storage[key]; }
-  },
-  window: { crypto: { randomUUID: () => "test-id" } }
-};
-context.window.window = context.window;
-context.window.document = context.document;
+const context = createTestContext(assert, storage);
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("js/data.js", "utf8"), context);
-vm.runInContext(fs.readFileSync("js/game.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
 vm.runInContext(`
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
   assert.strictEqual(saveSlots().length, 4, "start screen should expose multiple save slots");
@@ -100,11 +88,20 @@ vm.runInContext(`
   let eventBody = "";
   const junk = { id: "junk", kind: "equip", name: "Junk Ring", slot: "ring", quality: "普通", stats: { luk: 1 }, runeSlots: 0, runes: [], level: 0 };
   state.inventory.push(junk);
+  state.map = {
+    size: 3,
+    cells: [
+      [{ x: 0, y: 0, terrain: "floor", object: null }, { x: 1, y: 0, terrain: "floor", object: null }, { x: 2, y: 0, terrain: "floor", object: null }],
+      [{ x: 0, y: 1, terrain: "floor", object: null }, { x: 1, y: 1, terrain: "floor", object: null }, { x: 2, y: 1, terrain: "floor", object: null }],
+      [{ x: 0, y: 2, terrain: "floor", object: null }, { x: 1, y: 2, terrain: "floor", object: null }, { x: 2, y: 2, terrain: "floor", object: null }]
+    ]
+  };
+  state.player = { x: 1, y: 1 };
   const goldBeforeSell = state.gold || 0;
   sellEquipment("junk");
   assert.strictEqual(state.gold || 0, goldBeforeSell, "selling away from merchant should not grant gold");
   assert(state.inventory.some((entry) => entry.id === "junk"), "selling away from merchant should keep equipment");
-  assert(eventTitle.includes("商人"), "selling away from merchant should explain the merchant requirement");
+  assert(getElement("modalTitle").textContent.includes("商人"), "selling away from merchant should explain the merchant requirement");
   state.map = {
     size: 3,
     cells: [
@@ -191,18 +188,20 @@ vm.runInContext(`
   assert(state.inventory.some((entry) => entry.id === "old"), "unequip returns item to inventory");
 `, context);
 
-const css = fs.readFileSync("styles.css", "utf8");
-const gameSource = fs.readFileSync("js/game.js", "utf8");
+const css = fs.readFileSync("src/styles.css", "utf8");
+const runtimeSource = fs.readFileSync("src/game/runtime.ts", "utf8");
+const audioRuntimeSource = fs.readFileSync("src/game/audioRuntime.ts", "utf8");
+const audioSource = fs.readFileSync("src/game/audioProfiles.ts", "utf8");
 assert(!css.includes(".tile.reachable::after"), "movable tiles should not render a persistent reachable highlight dot");
 assert(!css.includes("better-equipment:hover::after"), "equipment upgrade markers should not be hover-only");
 assert(css.includes(".door::after"), "door art should include a layered dark dungeon overlay");
 assert(css.includes("bottom: 24px"), "interaction toasts should be anchored low instead of crowding the top edge");
-assert(!gameSource.includes('title="${label}"'), "map object hints should avoid native browser tooltips that crowd the upper corner");
-assert(gameSource.includes("const MASTER_VOLUME = .92"), "master audio should be louder than the previous quiet mix");
-assert(gameSource.includes("function startBattleMusic"), "game audio should include a separate battle music layer");
-assert(gameSource.includes('musicMode === "battle"'), "music should switch into battle mode during encounters");
-assert(gameSource.includes("scheduleDungeonMotif"), "dungeon BGM should include an audible repeating motif instead of only low ambience");
-assert(gameSource.includes("playDungeonChord"), "dungeon BGM should play an audible entrance chord outside battle");
+assert(!runtimeSource.includes('title="${label}"'), "map object hints should avoid native browser tooltips that crowd the upper corner");
+assert(audioSource.includes("export const MASTER_VOLUME = 0.92") || fs.readFileSync("src/game/data.ts", "utf8").includes("MASTER_VOLUME = 0.92"), "master audio should be louder than the previous quiet mix");
+assert(audioRuntimeSource.includes("function startBattleMusic"), "game audio should include a separate battle music layer");
+assert(audioRuntimeSource.includes('musicMode === "battle"'), "music should switch into battle mode during encounters");
+assert(audioRuntimeSource.includes("scheduleDungeonMotif"), "dungeon BGM should include an audible repeating motif instead of only low ambience");
+assert(audioRuntimeSource.includes("playDungeonChord"), "dungeon BGM should play an audible entrance chord outside battle");
 assert(css.includes(".item-side"), "inventory cards should keep counts and actions in a stable right rail");
 assert(css.includes(".save-slot-grid"), "start screen should present save slots as a clear selectable grid");
 assert(css.includes(".start-hero"), "start screen should have a dedicated save hub header");

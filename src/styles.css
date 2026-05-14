@@ -1,5 +1,7 @@
 :root {
   color-scheme: dark;
+  --floor-texture: url("/assets/dawngeon/floor-dark.svg");
+  --wall-texture: url("/assets/dawngeon/wall-dark.svg");
   --bg: #111318;
   --panel: #1a1f28;
   --panel-2: #222936;
@@ -1420,7 +1422,7 @@ h2 {
 
 .floor {
   background:
-    url("assets/dawngeon/floor-dark.svg"),
+    var(--floor-texture),
     linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.06)),
     linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px),
     linear-gradient(0deg, rgba(0,0,0,.08) 1px, transparent 1px),
@@ -1431,7 +1433,7 @@ h2 {
 
 .wall {
   background:
-    url("assets/dawngeon/wall-dark.svg"),
+    var(--wall-texture),
     linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,.62)),
     repeating-linear-gradient(0deg, #171a22 0 7px, #10131a 7px 14px),
     #10131a;

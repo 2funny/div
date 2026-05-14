@@ -1,8 +1,34 @@
 # 符文地牢项目设计文档
 
+> 迁移说明：项目当前运行入口已经迁移为 Vite + Vanilla TypeScript + 原生 CSS。页面由 `index.html` 加载 `src/main.ts`，样式入口是 `src/styles.css`，静态资源位于 `public/assets`。旧版 `js/data.js`、`js/game.js`、`js/bootstrap.js`、根目录 `styles.css` 和根目录 `assets/` 已不再作为运行或测试入口保留。
+
+## 0. 当前工程结构
+
+- `index.html`：Vite 页面入口，保留原有 DOM 骨架。
+- `src/main.ts`：应用启动入口，导入样式、绑定事件、渲染开始界面。
+- `src/styles.css`：原生 CSS 样式入口。
+- `src/game/data.ts`：职业、主题、地图尺寸、资源路径、图例、全局常量等静态配置。
+- `src/game/runtime.ts`：迁移期主运行时，仍承载大部分原游戏逻辑。后续继续按职责拆到 `map.ts`、`combat.ts`、`inventory.ts`、`save.ts`、`player.ts` 等文件。
+- `src/game/types.ts`：核心类型定义，如 `GameState`、`Player`、`Enemy`、`Room`、`Cell`、`Item`。
+- `src/game/save.ts`：存档槽配置、localStorage index 读写、时间格式化，并导出运行时存档入口。
+- `src/game/audioProfiles.ts`、`src/game/audioEngine.ts`：短音效配置和 Web Audio 底层合成。
+- `src/game/combatFx.ts`：战斗飘字和动画状态。
+- `src/ui/bindEvents.ts`：键盘、按钮、标签页、声音、保存等事件绑定。
+- `src/ui/renderMap.ts`、`src/ui/renderPanel.ts`：地图和面板渲染入口，后续承接从 `runtime.ts` 拆出的 UI 实现。
+- `public/assets`：Vite 静态资源目录，构建后会复制到 `dist/assets`。
+- `tests/`：Node 回归测试。`npm test` 会先用 Vite 打包 `tests/harness/runtimeHarness.ts`，再验证 TypeScript 运行时和 `src/styles.css`。
+
+常用命令：
+
+```powershell
+npm run dev
+npm run build
+npm test
+```
+
 ## 1. 项目定位
 
-这是一个纯前端的半随机地牢闯关 RPG。项目不依赖构建工具，直接由 `index.html` 加载 `styles.css`、`js/data.js`、`js/game.js` 和 `js/bootstrap.js` 后运行。游戏状态存储在浏览器 `localStorage` 中，刷新页面后可以继续读取同一份存档。
+这是一个纯前端的半随机地牢闯关 RPG。项目使用 Vite 作为开发和打包工具，使用 Vanilla TypeScript 组织游戏逻辑，并继续使用原生 CSS。`index.html` 加载 `src/main.ts` 后启动游戏，Vite 负责打包 `src/styles.css`、`src/game`、`src/ui` 和 `public/assets`。游戏状态存储在浏览器 `localStorage` 中，刷新页面后可以继续读取同一份存档。
 
 核心玩法循环是：
 
@@ -23,9 +49,9 @@
 - 中间 `map-wrap`：楼层标题、主地图、小地图、图例，战斗时也会在这里切换成战斗面板。
 - 右侧 `action-panel`：上下文行动、背包/技能/任务标签页、冒险日志。
 
-如果要新增一个固定 UI 容器，例如“成就栏”“设置面板”，优先从这里增加 DOM 节点，再在 `js/game.js` 里新增渲染函数。
+如果要新增一个固定 UI 容器，例如“成就栏”“设置面板”，优先从这里增加 DOM 节点，再在 `src/ui` 或对应 `src/game` 模块里新增渲染函数。
 
-### `styles.css`
+### `src/styles.css`
 
 所有布局、地图格子、战斗面板、背包列表、纸娃娃、弹窗和提示层样式都在这里。游戏逻辑不依赖 CSS 变量之外的样式状态，通常可以独立调整视觉。
 
@@ -36,7 +62,7 @@
 - 背包装备卡片：搜索 `.item-row`、`.equipment-card`、`.equipment-compare`。
 - 弹窗和 toast：搜索 `.modal`、`.toast`。
 
-### `js/data.js`
+### `src/game/data.ts`
 
 这里放静态配置，不负责状态变化。
 
@@ -55,20 +81,20 @@
 
 如果只改数值、职业、技能名称、资源路径，优先改这个文件。
 
-### `js/game.js`
+### `src/game/runtime.ts`
 
-这是项目主逻辑文件，包含全局状态、地图生成、探索、战斗、任务、装备、渲染、存档和弹窗。
+这是迁移期主运行时文件，仍包含大部分原游戏逻辑：全局状态、地图生成、探索、战斗、任务、装备、渲染、存档和弹窗。后续继续按职责迁出到 `map.ts`、`combat.ts`、`inventory.ts`、`save.ts`、`player.ts`、`renderMap.ts`、`renderPanel.ts` 等模块。
 
 全局变量：
 
 - `state`：完整游戏状态，保存角色、地图、背包、装备、任务、战斗、日志等。
 - `activeTab`、`activeInventoryTab`、`activeEquipmentFilter`：右侧面板当前标签和筛选状态。
 - `selectedTile`：当前被点击的小地图或主地图格子。
-- `battleFx`：战斗飘字和动画状态。
+- 战斗飘字和动画状态：已迁到 `src/game/combatFx.ts`。
 - `statDraft`：属性点分配弹窗的临时草稿。
 - `audioState`、`audioEnabled`：音频上下文和开关状态。
 
-### `js/bootstrap.js`
+### `src/ui/bindEvents.ts`
 
 只负责事件绑定和启动：
 
@@ -156,7 +182,7 @@
 
 手动修改建议：
 
-- 想改地图尺寸：改 `js/data.js` 的 `MAP_SIZE`，同时确认样式和测试。
+- 想改地图尺寸：改 `src/game/data.ts` 的 `MAP_SIZE`，同时确认样式和测试。
 - 想改最大楼层：改 `MAX_FLOOR`，再检查最终 Boss、主题和数值曲线。
 - 想改玩家视野：改 `VISION_RADIUS`，逻辑在 `updateVisibility()`。
 - 想改每层怪物数量：看 `generateFloor()` 里 `scatter(map, "monster", ...)`。
@@ -246,7 +272,7 @@
 - 改普通攻击公式：看 `attackEnemy()` 中 `dealDamage(enemy, ...)` 的入参。
 - 改暴击概率和倍率：看 `dealDamage()`。
 - 改敌人伤害：看 `enemyTurn()`。
-- 改技能效果：看 `castSkill()` 和 `js/data.js` 的 `CLASSES.skills`。
+- 改技能效果：看 `castSkill()` 和 `src/game/data.ts` 的 `CLASSES.skills`。
 - 改敌人数值成长：看 `makeEnemy()`。
 - 改敌人词缀：看 `ENEMY_AFFIXES`、`maybeApplyEnemyAffix()`、`enemyAffixText()`。
 - 改一键战斗门槛：看 `autoBattlePolicy()`。
@@ -416,7 +442,7 @@
 
 ## 12. 音频系统
 
-音频逻辑在 `js/game.js` 顶部：
+音频逻辑分布在 `src/game/audioProfiles.ts`、`src/game/audioEngine.ts` 和 `src/game/runtime.ts`：
 
 - `initAudio()`：创建 AudioContext，并处理浏览器交互后才能播放的限制。
 - `setAudioEnabled()`：切换声音开关并保存到 localStorage。
@@ -429,7 +455,7 @@
 
 | 目标 | 优先查看 |
 | --- | --- |
-| 新增职业 | `js/data.js` 的 `CLASSES`、`starterEquipment()`、`assetForClass()`、`ASSETS` |
+| 新增职业 | `src/game/data.ts` 的 `CLASSES`、`starterEquipment()`、`assetForClass()`、`ASSETS` |
 | 修改最大楼层 | `MAX_FLOOR`、`isFinalFloor()`、`makeEnemy()`、`nextFloor()` |
 | 修改技能 | `CLASSES.skills`、`castSkill()`、`upgradedSkill()` |
 | 修改怪物强度 | `makeEnemy()`、`makeKeyGuardian()` |
@@ -447,17 +473,16 @@
 | 修改商人 | `openMerchant()`、`openMerchantShop()`、`buy()`、`merchantSalvageRows()` |
 | 修改合成台 | `openForge()`、`enhance()`、`canEnhance()`、`enhanceDisabledReason()` |
 | 修改存档兼容 | `SAVE_KEY`、`saveGame()`、`loadGame()` |
-| 修改输入 | `js/bootstrap.js` |
-| 修改主 UI 布局 | `index.html`、`render()`、`styles.css` |
+| 修改输入 | `src/ui/bindEvents.ts` |
+| 修改主 UI 布局 | `index.html`、`render()`、`src/styles.css` |
 
 ## 14. 修改后的验证建议
 
 只改注释或文档：
 
 ```powershell
-node --check js\data.js
-node --check js\game.js
-node --check js\bootstrap.js
+npm run build
+npm test
 ```
 
 改地图生成：

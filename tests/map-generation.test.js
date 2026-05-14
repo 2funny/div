@@ -1,20 +1,12 @@
 const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
+const { createTestContext } = require("./helpers/test-context");
 
-const context = {
-  assert,
-  console,
-  document: { getElementById: () => ({}) },
-  localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
-  window: { crypto: { randomUUID: () => "test-id" } }
-};
-context.window.window = context.window;
-context.window.document = context.document;
+const context = createTestContext(assert);
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("js/data.js", "utf8"), context);
-vm.runInContext(fs.readFileSync("js/game.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
 vm.runInContext(`
   function reachableFloorCount(map, start) {
     const passable = (cell) => ["floor", "door"].includes(cell.terrain);
