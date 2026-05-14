@@ -16,14 +16,22 @@ function createElementStub() {
       add() {},
       remove() {},
       toggle() {},
-      contains() { return false; }
+      contains() {
+        return false;
+      }
     },
     addEventListener() {},
     removeEventListener() {},
-    querySelector() { return null; },
-    querySelectorAll() { return []; },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
     setAttribute() {},
-    getAttribute() { return null; },
+    getAttribute() {
+      return null;
+    },
     appendChild() {},
     remove() {},
     focus() {},
@@ -60,9 +68,13 @@ function createTestContext(assert, storage = {}) {
     setTimeout,
     clearTimeout,
     localStorage: {
-      getItem: (key) => Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null,
-      setItem: (key, value) => { storage[key] = String(value); },
-      removeItem: (key) => { delete storage[key]; }
+      getItem: (key) => (Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null),
+      setItem: (key, value) => {
+        storage[key] = String(value);
+      },
+      removeItem: (key) => {
+        delete storage[key];
+      }
     },
     window: {
       crypto: { randomUUID: () => "test-id" },

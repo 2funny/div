@@ -9,4 +9,3 @@ export function requiredById<T extends HTMLElement = HTMLElement>(id: string): T
   }
   return element;
 }
-

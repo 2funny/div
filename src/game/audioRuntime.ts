@@ -4,10 +4,12 @@ import { choice, rand } from "./random";
 import { soundProfile } from "./audioProfiles";
 import { playNoiseLayer, playToneLayer } from "./audioEngine";
 
+// 音频运行时只负责 Web Audio 生命周期、音效播放和探索/战斗音乐切换。
 export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
   let audioState = null;
   let audioEnabled = localStorage.getItem("rune-dungeon-audio") === "on";
 
+  // 在用户触发交互后创建或恢复 AudioContext，满足浏览器自动播放限制。
   function initAudio(playReady = false) {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return null;
@@ -16,7 +18,17 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
       const master = ctx.createGain();
       master.gain.value = audioEnabled ? MASTER_VOLUME : 0;
       master.connect(ctx.destination);
-      audioState = { ctx, master, music: null, drone: null, battlePulse: null, ambienceTimer: null, musicTimer: null, musicStep: 0, musicMode: null };
+      audioState = {
+        ctx,
+        master,
+        music: null,
+        drone: null,
+        battlePulse: null,
+        ambienceTimer: null,
+        musicTimer: null,
+        musicStep: 0,
+        musicMode: null
+      };
     }
     const start = () => {
       syncMusicToGame();
@@ -26,7 +38,11 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
       }
       updateSoundButton();
     };
-    if (audioState.ctx.state === "suspended") audioState.ctx.resume().then(start).catch(() => updateSoundButton());
+    if (audioState.ctx.state === "suspended")
+      audioState.ctx
+        .resume()
+        .then(start)
+        .catch(() => updateSoundButton());
     else start();
     return audioState;
   }
@@ -41,7 +57,7 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     if (audioState?.master) {
       const now = audioState.ctx.currentTime;
       audioState.master.gain.cancelScheduledValues(now);
-      audioState.master.gain.setTargetAtTime(enabled ? MASTER_VOLUME : 0, now, .035);
+      audioState.master.gain.setTargetAtTime(enabled ? MASTER_VOLUME : 0, now, 0.035);
     }
     updateSoundButton();
     if (enabled) initAudio(playReady);
@@ -55,6 +71,7 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     button.classList.toggle("muted", !audioEnabled);
   }
 
+  // 根据当前游戏状态选择静音、地牢氛围或战斗节奏。
   function syncMusicToGame() {
     if (!audioState) return;
     const state = getState();
@@ -84,7 +101,7 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
       const { ctx, music } = audioState;
       const now = ctx.currentTime;
       music.gain.cancelScheduledValues(now);
-      music.gain.setTargetAtTime(0, now, .04);
+      music.gain.setTargetAtTime(0, now, 0.04);
       setTimeout(() => music.disconnect(), 220);
       audioState.music = null;
     }
@@ -96,13 +113,13 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     stopMusicLayer();
     const { ctx, master } = audioState;
     const music = ctx.createGain();
-    music.gain.value = .2;
+    music.gain.value = 0.18;
     music.connect(master);
     audioState.music = music;
     audioState.musicMode = "dungeon";
     audioState.musicStep = 0;
     startDungeonDrone();
-    playAmbientTone(.1);
+    playAmbientTone(0.075);
     playDungeonChord();
     scheduleDungeonMotif();
     scheduleDungeonAmbience();
@@ -115,13 +132,13 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     const low = ctx.createOscillator();
     const high = ctx.createOscillator();
     const filter = ctx.createBiquadFilter();
-    drone.gain.value = .075;
-    low.type = "sine";
-    high.type = "triangle";
-    low.frequency.value = 55;
-    high.frequency.value = 82.41;
+    drone.gain.value = 0.065;
+    low.type = "triangle";
+    high.type = "sine";
+    low.frequency.value = 36.71;
+    high.frequency.value = 73.42;
     filter.type = "lowpass";
-    filter.frequency.value = 260;
+    filter.frequency.value = 210;
     low.connect(filter);
     high.connect(filter);
     filter.connect(drone);
@@ -143,54 +160,99 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
   function scheduleDungeonMotif() {
     if (!audioState?.music || audioState.musicMode !== "dungeon") return;
     const phrases = [
-      [293.66, 349.23, 392, 329.63, 293.66, 261.63],
-      [329.63, 392, 440, 392, 349.23, 293.66],
-      [261.63, 293.66, 349.23, 392, 329.63, 246.94],
-      [293.66, 329.63, 392, 440, 392, 349.23]
+      [293.66, 349.23, 311.13, 293.66, 220, 261.63],
+      [220, 261.63, 293.66, 349.23, 311.13, 261.63],
+      [196, 220, 261.63, 293.66, 349.23, 293.66],
+      [293.66, 440, 392, 349.23, 311.13, 293.66],
+      [261.63, 293.66, 349.23, 392, 349.23, 311.13],
+      [220, 293.66, 349.23, 329.63, 293.66, 246.94],
+      [196, 246.94, 293.66, 349.23, 293.66, 220],
+      [293.66, 311.13, 349.23, 293.66, 261.63, 220]
     ];
     const phrase = phrases[audioState.musicStep % phrases.length];
-    const bass = [73.42, 82.41, 98, 110][audioState.musicStep % 4];
+    const bassLine = [73.42, 73.42, 65.41, 58.27, 55, 49, 55, 65.41];
+    const bass = bassLine[audioState.musicStep % bassLine.length];
+    const rhythm = [0, 0.42, 0.88, 1.36, 1.84, 2.32];
     phrase.forEach((note, index) => {
-      const delay = index * .24;
-      playMusicNote(note, index % 3 === 2 ? .36 : .24, .12, "triangle", 1500, delay);
-      if (index === 1 || index === 4) playMusicNote(note * 1.5, .18, .045, "sine", 2100, delay + .08);
+      const delay = rhythm[index];
+      const accent = index === 0 || index === 3;
+      playMusicNote(note, accent ? 0.48 : 0.28, accent ? 0.095 : 0.06, "triangle", 1150, delay);
+      if (index === 1 || index === 4)
+        playMusicNote(note * 1.5, 0.34, 0.026, "sine", 1850, delay + 0.13);
     });
-    playMusicNote(bass, 1.4, .07, "sine", 520, .02);
-    if (audioState.musicStep % 2 === 0) playDungeonChord();
+    [0, 1.36, 2.32].forEach((delay, index) => {
+      playMusicNote(
+        index === 1 ? bass * 1.5 : bass,
+        index === 1 ? 0.34 : 0.78,
+        index === 1 ? 0.028 : 0.055,
+        "sine",
+        430,
+        delay
+      );
+    });
+    if (audioState.musicStep % 4 === 0) playDungeonChord();
+    if (audioState.musicStep % 3 === 1) playDungeonTexture(0.7);
     audioState.musicStep++;
-    audioState.musicTimer = setTimeout(scheduleDungeonMotif, 1780);
+    audioState.musicTimer = setTimeout(scheduleDungeonMotif, 3000);
   }
 
-  function playAmbientTone(volume = .045) {
+  function playAmbientTone(volume = 0.045) {
     if (!audioState?.music || audioState.musicMode !== "dungeon") return;
     const { ctx, music } = audioState;
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const filter = ctx.createBiquadFilter();
     const gain = ctx.createGain();
-    const notes = [55, 61.74, 73.42, 82.41, 98];
+    const notes = [36.71, 49, 55, 65.41, 73.42, 98];
     osc.type = "sine";
     osc.frequency.value = choice(notes);
     filter.type = "lowpass";
-    filter.frequency.value = 360;
+    filter.frequency.value = 300;
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(volume, now + .8);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + 4.8);
+    gain.gain.linearRampToValueAtTime(volume, now + 1.1);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 6.2);
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(music);
     osc.start(now);
-    osc.stop(now + 5);
+    osc.stop(now + 6.4);
+  }
+
+  function playDungeonTexture(delay = 0) {
+    if (!audioState?.music || audioState.musicMode !== "dungeon") return;
+    playMusicNoise(0.42, 0.012, 520, delay);
+    playMusicNote(choice([392, 440, 523.25, 587.33]), 0.7, 0.018, "sine", 2400, delay + 0.12);
   }
 
   function playDungeonChord() {
     if (!audioState?.music || audioState.musicMode !== "dungeon") return;
-    [146.83, 220, 293.66].forEach((note, index) => {
-      playMusicNote(note, .52, index ? .075 : .1, index ? "triangle" : "sine", 1100, index * .07);
+    const chords = [
+      [73.42, 146.83, 220, 293.66],
+      [65.41, 130.81, 196, 261.63],
+      [58.27, 116.54, 174.61, 233.08],
+      [55, 110, 165, 220]
+    ];
+    const chord = chords[Math.floor((audioState.musicStep || 0) / 4) % chords.length];
+    chord.forEach((note, index) => {
+      playMusicNote(
+        note,
+        0.82,
+        index ? 0.052 : 0.08,
+        index > 1 ? "triangle" : "sine",
+        920,
+        index * 0.055
+      );
     });
   }
 
-  function playMusicNote(frequency, duration, volume, type = "sine", filterFrequency = 1200, delay = 0) {
+  function playMusicNote(
+    frequency,
+    duration,
+    volume,
+    type = "sine",
+    filterFrequency = 1200,
+    delay = 0
+  ) {
     if (!audioState?.music) return;
     const { ctx, music } = audioState;
     const now = ctx.currentTime + delay;
@@ -201,14 +263,46 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     osc.frequency.value = frequency;
     filter.type = "lowpass";
     filter.frequency.value = filterFrequency;
-    gain.gain.setValueAtTime(.0001, now);
-    gain.gain.linearRampToValueAtTime(volume, now + .025);
-    gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(volume, now + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(music);
     osc.start(now);
-    osc.stop(now + duration + .02);
+    osc.stop(now + duration + 0.02);
+  }
+
+  function playMusicSweep(
+    start,
+    end,
+    duration,
+    volume,
+    type = "sine",
+    filterFrequency = 1200,
+    delay = 0
+  ) {
+    if (!audioState?.music) return;
+    const { ctx, music } = audioState;
+    playToneLayer(ctx, music, ctx.currentTime + delay, {
+      type,
+      start,
+      end,
+      duration,
+      volume,
+      attack: 0.006,
+      filter: filterFrequency
+    });
+  }
+
+  function playMusicNoise(duration, volume, filterFrequency = 900, delay = 0) {
+    if (!audioState?.music) return;
+    const { ctx, music } = audioState;
+    playNoiseLayer(ctx, music, ctx.currentTime + delay, {
+      duration,
+      volume,
+      filter: filterFrequency
+    });
   }
 
   function startBattleMusic() {
@@ -223,19 +317,19 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     const filter = ctx.createBiquadFilter();
     const tickFilter = ctx.createBiquadFilter();
     const now = ctx.currentTime;
-    music.gain.value = .16;
-    pulse.gain.setValueAtTime(.0001, now);
-    pulse.gain.linearRampToValueAtTime(.06, now + .08);
-    low.type = "triangle";
+    music.gain.value = 0.17;
+    pulse.gain.setValueAtTime(0.0001, now);
+    pulse.gain.linearRampToValueAtTime(0.065, now + 0.08);
+    low.type = "sawtooth";
     mid.type = "square";
     tick.type = "triangle";
     low.frequency.value = 73.42;
-    mid.frequency.value = 146.83;
-    tick.frequency.value = 220;
+    mid.frequency.value = 220;
+    tick.frequency.value = 293.66;
     filter.type = "lowpass";
-    filter.frequency.value = 560;
+    filter.frequency.value = 620;
     tickFilter.type = "bandpass";
-    tickFilter.frequency.value = 1050;
+    tickFilter.frequency.value = 1280;
     low.connect(filter);
     mid.connect(filter);
     filter.connect(pulse);
@@ -258,38 +352,83 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     const { ctx, battlePulse } = audioState;
     const now = ctx.currentTime;
     const phrases = [
-      [293.66, 349.23, 392, 329.63, 261.63, 293.66, 440, 392],
-      [329.63, 392, 440, 392, 349.23, 293.66, 261.63, 293.66]
+      [293.66, 349.23, 440, 587.33, 523.25, 440, 392, 349.23, 311.13, 349.23, 440, 523.25],
+      [293.66, 220, 293.66, 349.23, 440, 523.25, 587.33, 523.25, 466.16, 440, 349.23, 311.13],
+      [349.23, 440, 523.25, 659.25, 587.33, 523.25, 440, 392, 349.23, 392, 440, 587.33],
+      [261.63, 293.66, 349.23, 440, 392, 349.23, 293.66, 261.63, 246.94, 293.66, 349.23, 440],
+      [392, 440, 523.25, 587.33, 523.25, 440, 392, 349.23, 293.66, 349.23, 392, 440],
+      [311.13, 349.23, 440, 523.25, 440, 392, 349.23, 311.13, 293.66, 349.23, 440, 392]
     ];
     const phraseIndex = audioState.musicStep % phrases.length;
     const phrase = phrases[phraseIndex];
-    const bass = phraseIndex ? 82.41 : 73.42;
-    const rhythm = [
-      { delay: 0, duration: .28, strong: true },
-      { delay: .3, duration: .16 },
-      { delay: .5, duration: .34, strong: true, echo: true },
-      { delay: .88, duration: .18 },
-      { delay: 1.1, duration: .24 },
-      { delay: 1.42, duration: .16 },
-      { delay: 1.62, duration: .4, strong: true, echo: true },
-      { delay: 2.12, duration: .28 }
+    const bassPatterns = [
+      [73.42, 73.42, 146.83, 73.42, 65.41, 65.41, 58.27, 55],
+      [73.42, 110, 146.83, 110, 65.41, 98, 116.54, 98],
+      [87.31, 87.31, 174.61, 87.31, 73.42, 73.42, 65.41, 55],
+      [65.41, 65.41, 130.81, 65.41, 58.27, 58.27, 55, 49]
     ];
+    const bass = bassPatterns[phraseIndex % bassPatterns.length];
+    const rhythm = [0, 0.16, 0.32, 0.5, 0.72, 0.88, 1.04, 1.24, 1.46, 1.62, 1.82, 2.1];
+    const bassRhythm = [0, 0.32, 0.64, 0.96, 1.28, 1.6, 1.92, 2.16];
     battlePulse.pulse.gain.cancelScheduledValues(now);
-    battlePulse.pulse.gain.setValueAtTime(.018, now);
-    [0, .5, 1.1, 1.62].forEach((delay, index) => {
+    battlePulse.pulse.gain.setValueAtTime(0.014, now);
+    bassRhythm.forEach((delay, index) => {
       const hitAt = now + delay;
-      battlePulse.pulse.gain.linearRampToValueAtTime(index === 0 || index === 3 ? .105 : .072, hitAt + .055);
-      battlePulse.pulse.gain.exponentialRampToValueAtTime(.022, hitAt + .42);
+      battlePulse.pulse.gain.linearRampToValueAtTime(
+        index === 0 || index === 4 ? 0.105 : 0.066,
+        hitAt + 0.035
+      );
+      battlePulse.pulse.gain.exponentialRampToValueAtTime(0.018, hitAt + 0.22);
     });
     phrase.forEach((note, index) => {
-      const beat = rhythm[index];
-      playMusicNote(note, beat.duration, beat.strong ? .1 : .068, beat.strong ? "square" : "triangle", 1480, beat.delay);
-      if (beat.echo) playMusicNote(note / 2, .42, .052, "triangle", 720, beat.delay + .08);
+      const delay = rhythm[index];
+      const strong = index === 0 || index === 3 || index === 7 || index === 11;
+      playMusicNote(
+        note,
+        strong ? 0.19 : 0.12,
+        strong ? 0.085 : 0.052,
+        strong ? "square" : "triangle",
+        strong ? 1750 : 1320,
+        delay
+      );
+      if (index === 3 || index === 10)
+        playMusicNote(note / 2, 0.34, 0.035, "triangle", 720, delay + 0.055);
     });
-    playMusicNote(bass, 1.14, .082, "triangle", 520, .02);
-    playMusicNote(bass * 2, .36, .052, "square", 850, 1.1);
+    bass.forEach((note, index) => {
+      playMusicNote(
+        note,
+        index % 2 ? 0.18 : 0.28,
+        index % 2 ? 0.045 : 0.068,
+        index % 2 ? "square" : "sawtooth",
+        620,
+        bassRhythm[index]
+      );
+    });
+    [
+      { notes: [146.83, 220, 293.66], delay: 0 },
+      { notes: [130.81, 196, 261.63], delay: 1.28 }
+    ].forEach((stab) => {
+      stab.notes.forEach((note, index) =>
+        playMusicNote(note, 0.22, index ? 0.028 : 0.045, "square", 880, stab.delay + index * 0.025)
+      );
+    });
+    playBattleDrums();
     audioState.musicStep++;
-    audioState.ambienceTimer = setTimeout(scheduleBattlePulse, 2500);
+    audioState.ambienceTimer = setTimeout(scheduleBattlePulse, 2400);
+  }
+
+  function playBattleDrums() {
+    if (!audioState?.music || audioState.musicMode !== "battle") return;
+    [0, 0.64, 1.28, 1.92].forEach((delay) => {
+      playMusicSweep(92, 45, 0.18, 0.072, "sine", 520, delay);
+    });
+    [0.48, 1.48, 2.18].forEach((delay) => {
+      playMusicNoise(0.11, 0.032, 2400, delay);
+      playMusicSweep(220, 150, 0.08, 0.018, "triangle", 900, delay);
+    });
+    [0.16, 0.32, 0.8, 0.96, 1.12, 1.66, 1.82, 2.32].forEach((delay) => {
+      playMusicNoise(0.035, 0.014, 5600, delay);
+    });
   }
 
   function playSound(kind, ensure = true) {
@@ -300,7 +439,8 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     const { ctx, master } = audio;
     const now = ctx.currentTime;
     playToneLayer(ctx, master, now, profile);
-    if (profile.harmonic) playToneLayer(ctx, master, now + (profile.harmonicDelay || 0), profile.harmonic);
+    if (profile.harmonic)
+      playToneLayer(ctx, master, now + (profile.harmonicDelay || 0), profile.harmonic);
     if (profile.noise) playNoiseLayer(ctx, master, now, profile.noise);
   }
 

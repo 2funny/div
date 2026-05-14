@@ -8,3 +8,7 @@ bindEvents();
 renderStartScreen();
 updateSoundButton();
 render();
+document.body.classList.add("app-ready");
+requestAnimationFrame(() => {
+  document.body.classList.remove("app-booting");
+});

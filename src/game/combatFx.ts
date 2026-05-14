@@ -32,4 +32,3 @@ export function setBattleFx(target: "hero" | "enemy" | "center", data: BattleFxE
   if (!battleFx) return;
   battleFx[target] = { ...data, seq: `${battleFx.seq}-${target}` };
 }
-

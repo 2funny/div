@@ -51,4 +51,3 @@ export function playNoiseLayer(
   source.start(startAt);
   source.stop(startAt + profile.duration + 0.02);
 }
-

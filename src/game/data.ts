@@ -12,9 +12,32 @@ export const CLASSES: Record<string, PlayerClass> = {
     mp: 12,
     growth: { hp: 4, mp: 1, primary: "atk", primaryEvery: 2, secondary: "def", secondaryEvery: 4 },
     skills: [
-      { id: "heavy", name: "重斩", mp: 4, desc: "造成高额攻击伤害。", type: "damage", scale: "atk", power: 1.35 },
-      { id: "guard", name: "格挡", mp: 3, desc: "本回合获得护盾并反击。", type: "guard", power: 0.45 },
-      { id: "roar", name: "战吼", mp: 5, desc: "造成伤害并削弱敌人。", type: "weaken", scale: "atk", power: 0.85 }
+      {
+        id: "heavy",
+        name: "重斩",
+        mp: 4,
+        desc: "造成高额攻击伤害。",
+        type: "damage",
+        scale: "atk",
+        power: 1.35
+      },
+      {
+        id: "guard",
+        name: "格挡",
+        mp: 3,
+        desc: "本回合获得护盾并反击。",
+        type: "guard",
+        power: 0.45
+      },
+      {
+        id: "roar",
+        name: "战吼",
+        mp: 5,
+        desc: "造成伤害并削弱敌人。",
+        type: "weaken",
+        scale: "atk",
+        power: 0.85
+      }
     ]
   },
   mage: {
@@ -28,8 +51,24 @@ export const CLASSES: Record<string, PlayerClass> = {
     mp: 30,
     growth: { hp: 2, mp: 4, primary: "mag", primaryEvery: 2, secondary: "res", secondaryEvery: 4 },
     skills: [
-      { id: "fireball", name: "火球术", mp: 5, desc: "造成高魔法伤害并灼烧。", type: "burn", scale: "mag", power: 1.45 },
-      { id: "frost", name: "寒冰箭", mp: 4, desc: "造成伤害并减速。", type: "slow", scale: "mag", power: 1.15 },
+      {
+        id: "fireball",
+        name: "火球术",
+        mp: 5,
+        desc: "造成高魔法伤害并灼烧。",
+        type: "burn",
+        scale: "mag",
+        power: 1.45
+      },
+      {
+        id: "frost",
+        name: "寒冰箭",
+        mp: 4,
+        desc: "造成伤害并减速。",
+        type: "slow",
+        scale: "mag",
+        power: 1.15
+      },
       { id: "shield", name: "奥术护盾", mp: 5, desc: "获得大量护盾。", type: "shield", power: 1.3 }
     ]
   },
@@ -44,9 +83,25 @@ export const CLASSES: Record<string, PlayerClass> = {
     mp: 18,
     growth: { hp: 3, mp: 2, primary: "spd", primaryEvery: 2, secondary: "luk", secondaryEvery: 4 },
     skills: [
-      { id: "double", name: "连射", mp: 4, desc: "连续攻击两次。", type: "double", scale: "atk", power: 0.86 },
+      {
+        id: "double",
+        name: "连射",
+        mp: 4,
+        desc: "连续攻击两次。",
+        type: "double",
+        scale: "atk",
+        power: 0.86
+      },
       { id: "step", name: "闪避步", mp: 3, desc: "提高闪避并准备暴击。", type: "evade", power: 1 },
-      { id: "poison", name: "毒箭", mp: 4, desc: "造成伤害并中毒。", type: "poison", scale: "atk", power: 1.05 }
+      {
+        id: "poison",
+        name: "毒箭",
+        mp: 4,
+        desc: "造成伤害并中毒。",
+        type: "poison",
+        scale: "atk",
+        power: 1.05
+      }
     ]
   }
 };
@@ -58,17 +113,71 @@ export const THEMES = [
   { id: "throne", name: "符文王座", floors: [10], wallRate: 0.05, colorClass: "throne" }
 ];
 
+export const FLOOR_EFFECTS = [
+  {
+    id: "rain",
+    name: "暴雨层",
+    className: "effect-rain",
+    desc: "雨幕让怪物更凶，但地牢会冲出更多战利品。",
+    difficulty: 1.08,
+    reward: 1.12,
+    minFloor: 4
+  },
+  {
+    id: "snow",
+    name: "霜雪层",
+    className: "effect-snow",
+    desc: "寒雪压低视线，精英和宝藏都更常见。",
+    difficulty: 1.1,
+    reward: 1.14,
+    minFloor: 6
+  },
+  {
+    id: "lava",
+    name: "熔岩层",
+    className: "effect-lava",
+    desc: "地脉热浪强化敌人，也让奖励更加丰厚。",
+    difficulty: 1.14,
+    reward: 1.18,
+    minFloor: 8
+  }
+];
+
 export const RUNES = ["火焰", "寒冰", "雷霆", "吸血", "守护", "迅捷"];
 export const SLOTS: SlotKey[] = ["weapon", "armor", "boots", "ring", "amulet"];
-export const SLOT_NAMES: Record<SlotKey, string> = { weapon: "武器", armor: "护甲", boots: "鞋子", ring: "戒指", amulet: "护符" };
-export const STAT_NAMES: Record<StatKey, string> = { atk: "攻击", mag: "法强", def: "防御", res: "抗性", spd: "速度", luk: "幸运" };
+export const SLOT_NAMES: Record<SlotKey, string> = {
+  weapon: "武器",
+  armor: "护甲",
+  boots: "鞋子",
+  ring: "戒指",
+  amulet: "护符"
+};
+export const STAT_NAMES: Record<StatKey, string> = {
+  atk: "攻击",
+  mag: "法强",
+  def: "防御",
+  res: "抗性",
+  spd: "速度",
+  luk: "幸运"
+};
 export const SAVE_KEY = "rune-dungeon-save-v1";
 export const DEFAULT_CLASS_ID = "warrior";
 export const MASTER_VOLUME = 0.92;
 export const MAX_FLOOR = 66;
 export const MAP_SIZE = 27;
+export const MAP_SIZE_MIN = 23;
+export const MAP_SIZE_MAX = 31;
 export const MAP_VIEW_SIZE = 15;
 export const VISION_RADIUS = 3;
+
+export function isValidMapSize(size: unknown): size is number {
+  return (
+    typeof size === "number" &&
+    Number.isInteger(size) &&
+    size >= MAP_SIZE_MIN &&
+    size <= MAP_SIZE_MAX
+  );
+}
 
 export const ASSETS = {
   warrior: "assets/dawngeon/player-warrior.png",
@@ -105,6 +214,7 @@ export const LEGEND_ITEMS = [
   ["forge", "合成", "强化/符文"],
   ["shop", "商人", "补给"],
   ["questNpc", "委托", "中立委托人"],
+  ["lockedDoor", "锁门", "需要指定钥匙或万能钥匙"],
   ["fenceGate", "门栅", "需要钥匙打开"],
   ["trap", "陷阱", "伤害"],
   ["portal", "传送", "下一层"]

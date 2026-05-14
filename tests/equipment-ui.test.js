@@ -8,7 +8,8 @@ const context = createTestContext(assert, storage);
 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
-vm.runInContext(`
+vm.runInContext(
+  `
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
   assert.strictEqual(saveSlots().length, 4, "start screen should expose multiple save slots");
   assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
@@ -37,6 +38,11 @@ vm.runInContext(`
   assert.strictEqual(loadGame("slot-2"), true, "loading a selected slot should restore that save");
   assert.strictEqual(currentSaveSlot, "slot-2", "loading a slot should make it the active save target");
   assert.strictEqual(state.classId, savedState.classId, "loading should restore the selected slot state");
+  state = null;
+  getElement("map").innerHTML = "";
+  continueSavedGame("slot-2");
+  assert.strictEqual(state.classId, savedState.classId, "continue should restore the selected slot in one click");
+  assert(getElement("map").innerHTML.length > 0, "continue should render the game view immediately after loading");
 
   const upgrade = { id: "new", kind: "equip", name: "New Sword", slot: "weapon", quality: "优秀", stats: { atk: 8 }, runeSlots: 0, runes: [], level: 0 };
   const compare = equipmentCompareText(upgrade);
@@ -138,6 +144,26 @@ vm.runInContext(`
   updateVisibility();
   assert.strictEqual(state.map.cells[4][4].seen, true, "player cell should be explored");
   assert.strictEqual(state.map.cells[0][0].seen, false, "far cells should remain unexplored");
+  state.map = {
+    size: 5,
+    rooms: [{ id: "room-1-0", name: "1号房" }],
+    cells: Array.from({ length: 5 }, (_, y) => Array.from({ length: 5 }, (_, x) => ({
+      x, y, terrain: "floor", object: null, seen: true, visible: true
+    })))
+  };
+  state.map.cells[2][1].terrain = "door";
+  state.map.cells[2][1].roomId = "room-1-0";
+  state.map.cells[2][2].roomId = "room-1-0";
+  state.map.cells[2][3].terrain = "door";
+  state.map.cells[2][3].roomId = "room-1-0";
+  state.map.cells[2][3].object = { type: "lockedDoor", keyId: "door-a", keyName: "1号房钥匙", roomName: "1号房" };
+  state.player = { x: 0, y: 0 };
+  state.classId = "warrior";
+  renderMinimap();
+  const miniMarkup = getElement("minimap").innerHTML;
+  assert(miniMarkup.includes("mini-room-label"), "minimap should stamp explored rooms with compact room numbers");
+  assert(miniMarkup.includes("mini-door"), "minimap should mark normal room doors");
+  assert(miniMarkup.includes("mini-locked-door"), "minimap should mark locked room doors");
 
   state.classId = "warrior";
   state.mp = 0;
@@ -186,22 +212,119 @@ vm.runInContext(`
   unequipItem("weapon");
   assert.strictEqual(state.equipment.weapon, null, "unequip clears the slot");
   assert(state.inventory.some((entry) => entry.id === "old"), "unequip returns item to inventory");
-`, context);
+`,
+  context
+);
 
 const css = fs.readFileSync("src/styles.css", "utf8");
 const runtimeSource = fs.readFileSync("src/game/runtime.ts", "utf8");
+const bindEventsSource = fs.readFileSync("src/ui/bindEvents.ts", "utf8");
 const audioRuntimeSource = fs.readFileSync("src/game/audioRuntime.ts", "utf8");
 const audioSource = fs.readFileSync("src/game/audioProfiles.ts", "utf8");
-assert(!css.includes(".tile.reachable::after"), "movable tiles should not render a persistent reachable highlight dot");
-assert(!css.includes("better-equipment:hover::after"), "equipment upgrade markers should not be hover-only");
+const weatherSource = fs.readFileSync("src/game/weatherCanvas.ts", "utf8");
+assert(
+  !css.includes(".tile.reachable::after"),
+  "movable tiles should not render a persistent reachable highlight dot"
+);
+assert(
+  !css.includes("better-equipment:hover::after"),
+  "equipment upgrade markers should not be hover-only"
+);
 assert(css.includes(".door::after"), "door art should include a layered dark dungeon overlay");
-assert(css.includes("bottom: 24px"), "interaction toasts should be anchored low instead of crowding the top edge");
-assert(!runtimeSource.includes('title="${label}"'), "map object hints should avoid native browser tooltips that crowd the upper corner");
-assert(audioSource.includes("export const MASTER_VOLUME = 0.92") || fs.readFileSync("src/game/data.ts", "utf8").includes("MASTER_VOLUME = 0.92"), "master audio should be louder than the previous quiet mix");
-assert(audioRuntimeSource.includes("function startBattleMusic"), "game audio should include a separate battle music layer");
-assert(audioRuntimeSource.includes('musicMode === "battle"'), "music should switch into battle mode during encounters");
-assert(audioRuntimeSource.includes("scheduleDungeonMotif"), "dungeon BGM should include an audible repeating motif instead of only low ambience");
-assert(audioRuntimeSource.includes("playDungeonChord"), "dungeon BGM should play an audible entrance chord outside battle");
-assert(css.includes(".item-side"), "inventory cards should keep counts and actions in a stable right rail");
-assert(css.includes(".save-slot-grid"), "start screen should present save slots as a clear selectable grid");
+assert(
+  css.includes("bottom: 24px"),
+  "interaction toasts should be anchored low instead of crowding the top edge"
+);
+assert(
+  !runtimeSource.includes('title="${label}"'),
+  "map object hints should avoid native browser tooltips that crowd the upper corner"
+);
+assert(
+  audioSource.includes("export const MASTER_VOLUME = 0.92") ||
+    fs.readFileSync("src/game/data.ts", "utf8").includes("MASTER_VOLUME = 0.92"),
+  "master audio should be louder than the previous quiet mix"
+);
+assert(
+  audioRuntimeSource.includes("function startBattleMusic"),
+  "game audio should include a separate battle music layer"
+);
+assert(
+  audioRuntimeSource.includes('musicMode === "battle"'),
+  "music should switch into battle mode during encounters"
+);
+assert(
+  audioRuntimeSource.includes("scheduleDungeonMotif"),
+  "dungeon BGM should include an audible repeating motif instead of only low ambience"
+);
+assert(
+  audioRuntimeSource.includes("playDungeonChord"),
+  "dungeon BGM should play an audible entrance chord outside battle"
+);
+assert(
+  css.includes(".item-side"),
+  "inventory cards should keep counts and actions in a stable right rail"
+);
+assert(
+  css.includes(".save-slot-grid"),
+  "start screen should present save slots as a clear selectable grid"
+);
 assert(css.includes(".start-hero"), "start screen should have a dedicated save hub header");
+assert(
+  css.includes(".map-stage.effect-rain::before"),
+  "rainy special floors should render a weather overlay"
+);
+assert(
+  css.includes(".map-stage.effect-snow::before"),
+  "snowy special floors should render a weather overlay"
+);
+assert(
+  css.includes(".map-stage.effect-lava::before"),
+  "lava special floors should render a heat overlay"
+);
+assert(css.includes(".weather-canvas"), "special floors should mount a canvas weather layer");
+assert(
+  weatherSource.includes("drawRain"),
+  "rainy special floors should draw rain as particles instead of CSS stripes"
+);
+assert(
+  weatherSource.includes("drawSnow"),
+  "snowy special floors should draw drifting snow particles"
+);
+assert(weatherSource.includes("drawLava"), "lava special floors should draw heat glow and embers");
+assert(!css.includes("@keyframes weatherRain"), "rain should not rely on old stripe animation");
+assert(
+  css.includes(".effect-snow .floor"),
+  "snowy special floors should visually frost floor tiles"
+);
+assert(css.includes(".effect-snow .wall"), "snowy special floors should visually frost wall tiles");
+assert(css.includes(".lava"), "lava special floors should render dedicated lava terrain");
+assert(css.includes("@keyframes lavaTileFlow"), "lava terrain should have a subtle animated glow");
+assert(css.includes(".admin-panel"), "admin mode should have a dedicated panel layout");
+assert(
+  css.includes(".admin-floating-button"),
+  "admin mode should create a temporary floating entry button after unlock"
+);
+assert(
+  runtimeSource.includes("function openAdminPanel"),
+  "runtime should expose a hidden admin panel"
+);
+assert(
+  runtimeSource.includes("adminApplyFloorEffect"),
+  "admin panel should be able to change the current floor effect"
+);
+assert(
+  bindEventsSource.includes("import.meta.env.DEV"),
+  "admin mode should only be reachable in dev builds"
+);
+assert(
+  bindEventsSource.includes("unlockAdminButton"),
+  "typing the hidden admin code should unlock a session-only button"
+);
+assert(
+  bindEventsSource.includes("document.body.appendChild(button)"),
+  "admin button should be created dynamically instead of persisted"
+);
+assert(
+  !bindEventsSource.includes('"runeadmin"'),
+  "admin code should not be written as a plaintext string"
+);

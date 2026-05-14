@@ -20,6 +20,16 @@ export const QUEST_DEFS = {
     rewardGold: (floor: number) => 14 + floor * 3,
     rewardKeys: 1
   },
+  lockedRoomKey: {
+    id: "lockedRoomKey",
+    giver: "questNpc",
+    title: "房门钥匙委托",
+    giverName: "钥匙保管人",
+    desc: "清理附近游荡怪物，换取指定房间的钥匙。",
+    target: 2,
+    rewardGold: (floor: number) => 8 + floor * 2,
+    rewardDoorKey: true
+  },
   merchantRoute: {
     id: "merchantRoute",
     giver: "shop",
@@ -31,4 +41,3 @@ export const QUEST_DEFS = {
     rewardPotion: "hp"
   }
 } as const;
-

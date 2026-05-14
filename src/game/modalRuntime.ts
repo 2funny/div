@@ -3,15 +3,18 @@ export function createModalRuntime({ $, initAudio, resetStatDraft }) {
   function showModal(title, body, actions) {
     $("modalTitle").textContent = title;
     $("modalBody").innerHTML = body;
-    $("modalActions").innerHTML = actions.map((action, index) => `<button type="button" onclick="modalAction(${index})">${action.text}</button>`).join("");
+    $("modalActions").innerHTML = actions
+      .map(
+        (action, index) =>
+          `<button type="button" onclick="modalAction(${index})">${action.text}</button>`
+      )
+      .join("");
     window._modalActions = actions;
     $("modal").classList.remove("hidden");
   }
 
   function showEvent(title, body, actionText = "确定") {
-    showModal(title, body, [
-      { text: actionText, action: closeModal }
-    ]);
+    showModal(title, body, [{ text: actionText, action: closeModal }]);
   }
 
   function showToast(message, duration = 2600) {
@@ -27,7 +30,13 @@ export function createModalRuntime({ $, initAudio, resetStatDraft }) {
   function showConfirm(title, body, confirmText, onConfirm) {
     showModal(title, body, [
       { text: "取消", action: closeModal },
-      { text: confirmText, action: () => { closeModal(); onConfirm(); } }
+      {
+        text: confirmText,
+        action: () => {
+          closeModal();
+          onConfirm();
+        }
+      }
     ]);
   }
 

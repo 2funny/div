@@ -7,7 +7,8 @@ const context = createTestContext(assert);
 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
-vm.runInContext(`
+vm.runInContext(
+  `
   function reachableFloorCount(map, start) {
     const passable = (cell) => ["floor", "door"].includes(cell.terrain);
     const key = (cell) => cell.x + "," + cell.y;
@@ -31,23 +32,30 @@ vm.runInContext(`
   };
   generateFloor();
   const generated = state.map.cells;
+  const mapSize = state.map.size;
   const generatedCells = generated.flat();
   const floorCells = generatedCells.filter((cell) => cell.terrain === "floor");
   const passableCells = generatedCells.filter((cell) => ["floor", "door"].includes(cell.terrain));
   const mainPathCells = generatedCells.filter((cell) => cell.mainPath);
   const stairsDown = generatedCells.find((cell) => cell.object?.type === "stairsDown");
   const stairsUp = generatedCells.find((cell) => cell.object?.type === "stairsUp");
+  assert(mapSize >= MAP_SIZE_MIN && mapSize <= MAP_SIZE_MAX, "generated floor size should stay within the configured range");
+  assert.strictEqual(generated.length, mapSize, "generated floor row count should match the map size");
   assert(floorCells.length / generatedCells.length < .58, "generated floor should not be an open field");
   assert(floorCells.length / generatedCells.length > .24, "generated floor should still have enough playable space");
-  assert(mainPathCells.length >= MAP_SIZE + 8, "generated floor should have a clear main trunk path");
+  assert(mainPathCells.length >= mapSize + 8, "generated floor should have a clear main trunk path");
   assert.strictEqual(reachableFloorCount(generated, generated[1][1]), passableCells.length, "all playable floor cells should connect to the main route");
   assert(stairsDown, "generated floor should include a downstairs tile before the final floor");
   assert(stairsUp, "generated floors after the first should include an upstairs tile");
-  assert.notDeepStrictEqual([stairsDown.x, stairsDown.y], [MAP_SIZE - 2, MAP_SIZE - 2], "downstairs should not be fixed in the lower-right corner");
+  assert.notDeepStrictEqual([stairsDown.x, stairsDown.y], [mapSize - 2, mapSize - 2], "downstairs should not be fixed in the lower-right corner");
   assert.notDeepStrictEqual([stairsUp.x, stairsUp.y], [1, 1], "upstairs should not be fixed in the upper-left corner");
   assert(distance(stairsDown, { x: 1, y: 1 }) >= 10, "downstairs should not be discoverable immediately from the starting area");
   assert(stairsDown.roomId || floorNeighborCount(generated, stairsDown.x, stairsDown.y) <= 1, "downstairs should prefer a room or route endpoint");
   assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
+  const lockedDoors = generatedCells.filter((cell) => cell.object?.type === "lockedDoor");
+  assert(lockedDoors.length >= 1, "generated floors should include at least one quest-locked room door");
+  assert(lockedDoors.every((cell) => cell.object.keyId && cell.object.keyName), "locked room doors should carry a specific key id and display name");
+  assert(generatedCells.some((cell) => cell.object?.questId === "lockedRoomKey"), "locked room doors should have a matching key quest giver");
   for (const door of generatedCells.filter((cell) => cell.terrain === "door")) {
     assert(door.roomId, "room doors should belong to a labelled room");
     assert(validRoomDoor(generated, door, door.roomId), "room doors should connect a room interior to an outside corridor through the wall");
@@ -108,6 +116,10 @@ vm.runInContext(`
   };
   generateFloor();
   const finalCells = state.map.cells.flat();
+  assert.strictEqual(state.map.effect?.id, "lava", "final floor should carry the lava special floor effect");
+  assert(finalCells.some((cell) => cell.terrain === "lava"), "lava special floors should place blocking lava terrain");
   assert(finalCells.some((cell) => cell.object?.type === "boss"), "final floor should contain the final boss");
   assert(!finalCells.some((cell) => cell.object?.type === "stairsDown"), "final floor should not contain downstairs");
-`, context);
+`,
+  context
+);

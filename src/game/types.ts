@@ -1,6 +1,6 @@
 export type StatKey = "atk" | "mag" | "def" | "res" | "spd" | "luk";
 export type SlotKey = "weapon" | "armor" | "boots" | "ring" | "amulet";
-export type Terrain = "wall" | "floor" | "door" | "fence";
+export type Terrain = "wall" | "floor" | "door" | "fence" | "lava";
 
 export interface Stats {
   atk?: number;
@@ -92,6 +92,10 @@ export interface CellObject {
   rescueName?: string;
   target?: number;
   targetFloor?: number;
+  keyId?: string;
+  keyName?: string;
+  doorKeyId?: string;
+  doorKeyName?: string;
   [key: string]: unknown;
 }
 
@@ -110,11 +114,22 @@ export interface Room {
   id: string;
   name: string;
   threat?: string;
+  locked?: boolean;
+  keyId?: string;
+  keyName?: string;
   cells?: Cell[];
 }
 
 export interface GameMap {
   size?: number;
+  effect?: {
+    id: string;
+    name: string;
+    className: string;
+    desc: string;
+    difficulty: number;
+    reward: number;
+  } | null;
   cells: Cell[][];
   rooms?: Room[];
   stairsDown?: Player;
@@ -133,6 +148,8 @@ export interface QuestState {
   roomName?: string | null;
   targetRoomName?: string | null;
   rescueName?: string | null;
+  doorKeyId?: string | null;
+  doorKeyName?: string | null;
   roomCleared?: boolean;
   rescued?: boolean;
   accepted: boolean;
@@ -152,6 +169,9 @@ export interface GameState {
   currentEnemy?: Enemy | null;
   gold?: number;
   keys?: number;
+  universalKeys?: number;
+  doorKeys?: Record<string, number>;
+  doorKeyNames?: Record<string, string>;
   hp?: number;
   mp?: number;
   xp?: number;

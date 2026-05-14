@@ -12,4 +12,3 @@ export function hasActiveGame(): boolean {
 export function setActivePanelTab(tab: string): void {
   runtime.setActiveTab(tab);
 }
-

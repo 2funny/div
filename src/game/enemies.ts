@@ -4,4 +4,3 @@ export const ENEMY_AFFIXES = [
   { id: "drain", name: "汲取", desc: "造成伤害后恢复生命" },
   { id: "swift", name: "迅捷", desc: "更容易避开攻击" }
 ] as const;
-

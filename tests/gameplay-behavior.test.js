@@ -7,7 +7,8 @@ const context = createTestContext(assert);
 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
-vm.runInContext(`
+vm.runInContext(
+  `
   const empty = emptyEquipment();
   assert(SLOTS.every((slot) => empty[slot] === null), "new heroes should start with empty equipment slots");
   assert.strictEqual(starterInventory("warrior").filter((entry) => entry.kind === "equip").length, Object.values(starterEquipment("warrior")).filter(Boolean).length, "starter gear should be placed in inventory");
@@ -58,6 +59,23 @@ vm.runInContext(`
   assert.strictEqual(lockedCell.object, null, "locked chest should open when a key is available");
   assert.strictEqual(state.keys, 0, "opening a locked chest should consume one key");
   assert(state.inventory.length > 0, "locked chest should grant equipment");
+
+  const lockedDoorCell = { terrain: "door", object: { type: "lockedDoor", keyId: "door-a", keyName: "1号房钥匙", roomName: "1号房" } };
+  state.doorKeys = {};
+  state.doorKeyNames = {};
+  state.universalKeys = 0;
+  openLockedDoor(lockedDoorCell);
+  assert.strictEqual(lockedDoorCell.object?.type, "lockedDoor", "locked room door should stay shut without a matching key");
+  state.doorKeys["door-a"] = 1;
+  openLockedDoor(lockedDoorCell);
+  assert.strictEqual(lockedDoorCell.object, null, "locked room door should open with its specific quest key");
+  assert.strictEqual(state.doorKeys["door-a"], undefined, "specific room key should be consumed after opening the door");
+
+  const universalDoorCell = { terrain: "door", object: { type: "lockedDoor", keyId: "door-b", keyName: "2号房钥匙", roomName: "2号房" } };
+  state.universalKeys = 1;
+  openLockedDoor(universalDoorCell);
+  assert.strictEqual(universalDoorCell.object, null, "universal key should open a locked room door");
+  assert.strictEqual(state.universalKeys, 0, "universal key should be consumed after opening a locked room door");
 
   maybeDrop({ type: "elite", roomBoss: true, dropsKey: true, name: "Key Guardian" });
   assert.strictEqual(state.keys, 1, "key guardian drops should add one key");
@@ -174,9 +192,9 @@ vm.runInContext(`
   assert.strictEqual(state.map.cells[2][2].object.locked, false, "defeating a seal guardian should unlock the downstairs");
 
   state.map.rooms = [{ id: "room-8-1", name: "12号房" }];
-  assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12号", "room doors should expose a compact room number label");
+  assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12", "room doors should expose only the compact room number");
   state.map.rooms = [{ id: "room-8-2", name: "13号房", threat: "danger" }];
-  assert(roomDoorLabel({ terrain: "door", roomId: "room-8-2" }).includes("险"), "dangerous rooms should show a threat marker beside the room number");
+  assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-2" }), "13", "room doors should not show suffixes or threat markers beside the room number");
 
   state = { floor: 3 };
   const elite = makeEnemy(true);
@@ -273,6 +291,12 @@ vm.runInContext(`
   move(-1, 0);
   assert.deepStrictEqual(state.player, { x: 1, y: 1 }, "ordinary elite movement should enter the tile immediately");
 
+  state.currentEnemy = { type: "monster", name: "Stale Slime", hp: 0, maxHp: 10, atk: 2, def: 0 };
+  state.player = { x: 1, y: 1 };
+  move(1, 0);
+  assert.deepStrictEqual(state.player, { x: 2, y: 1 }, "movement should recover from a stale defeated current enemy instead of freezing");
+  assert.strictEqual(state.currentEnemy, null, "stale defeated current enemy should be cleared during movement recovery");
+
   state = {
     floor: 1,
     player: { x: 2, y: 1 },
@@ -307,6 +331,12 @@ vm.runInContext(`
   render = () => {};
   move(-1, 0);
   assert(modalState().title.includes("商队"), "moving into a merchant should open the merchant interaction");
+  state.gold = 58;
+  state.universalKeys = 0;
+  state.map.cells[1][1].object = { type: "shop", sellsUniversalKey: true };
+  buy("universalKey");
+  assert.strictEqual(state.universalKeys, 1, "lucky merchants should sell one universal key");
+  assert.strictEqual(state.map.cells[1][1].object.universalKeySold, true, "merchant universal key stock should be marked sold after purchase");
 
   state = {
     floor: 1,
@@ -468,4 +498,6 @@ vm.runInContext(`
   openMerchantShop();
   assert(modalState().body.includes("merchant-salvage-list"), "merchant shop should include an equipment salvage list");
   assert(modalState().body.includes("confirmDisassembleEquipment"), "merchant shop should offer equipment disassembly");
-`, context);
+`,
+  context
+);

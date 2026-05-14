@@ -11,9 +11,14 @@ import {
 import { hasActiveGame } from "../game/state";
 import { byId } from "./dom";
 
+const ADMIN_CODE = String.fromCharCode(114, 117, 110, 101, 97, 100, 109, 105, 110);
+let adminCodeBuffer = "";
+let adminButtonUnlocked = false;
+
 export function bindEvents(): void {
   document.addEventListener("keydown", (event) => {
     initAudio();
+    if (trackAdminCode(event)) return;
     const modal = byId("modal");
     const modalOpen = modal ? !modal.classList.contains("hidden") : false;
     if (modalOpen && event.key === " ") {
@@ -24,7 +29,22 @@ export function bindEvents(): void {
     const state = window.__runeDungeon?.getState?.();
     if (!state) return;
     const key = event.key.toLowerCase();
-    if (state.currentEnemy && [" ", "enter", "arrowup", "w", "arrowdown", "s", "arrowleft", "a", "arrowright", "d"].includes(key)) {
+    const activeEnemy = state.currentEnemy && Number(state.currentEnemy.hp) > 0;
+    if (
+      activeEnemy &&
+      [
+        " ",
+        "enter",
+        "arrowup",
+        "w",
+        "arrowdown",
+        "s",
+        "arrowleft",
+        "a",
+        "arrowright",
+        "d"
+      ].includes(key)
+    ) {
       event.preventDefault();
       return;
     }
@@ -86,4 +106,37 @@ export function bindEvents(): void {
     returnHome();
     (event.currentTarget as HTMLButtonElement).blur();
   });
+}
+
+function trackAdminCode(event: KeyboardEvent): boolean {
+  if (!import.meta.env.DEV) return false;
+  const target = event.target;
+  const editable =
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable);
+  if (editable || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1)
+    return false;
+  adminCodeBuffer = `${adminCodeBuffer}${event.key.toLowerCase()}`.slice(-ADMIN_CODE.length);
+  if (adminCodeBuffer !== ADMIN_CODE) return false;
+  adminCodeBuffer = "";
+  event.preventDefault();
+  unlockAdminButton();
+  return true;
+}
+
+function unlockAdminButton(): void {
+  if (adminButtonUnlocked || document.getElementById("adminFloatingButton")) return;
+  adminButtonUnlocked = true;
+  const button = document.createElement("button");
+  button.id = "adminFloatingButton";
+  button.className = "admin-floating-button";
+  button.type = "button";
+  button.textContent = "调试";
+  button.addEventListener("click", () => {
+    (window as typeof window & { openAdminPanel?: () => void }).openAdminPanel?.();
+    button.blur();
+  });
+  document.body.appendChild(button);
 }

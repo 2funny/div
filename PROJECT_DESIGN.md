@@ -1,214 +1,312 @@
 # 符文地牢项目设计文档
 
-> 迁移说明：项目当前运行入口已经迁移为 Vite + Vanilla TypeScript + 原生 CSS。页面由 `index.html` 加载 `src/main.ts`，样式入口是 `src/styles.css`，静态资源位于 `public/assets`。旧版 `js/data.js`、`js/game.js`、`js/bootstrap.js`、根目录 `styles.css` 和根目录 `assets/` 已不再作为运行或测试入口保留。
+## 1. 项目概览
 
-## 0. 当前工程结构
+符文地牢是一个基于 Vite、Vanilla TypeScript 和原生 CSS 的纯前端半随机地牢闯关 RPG。应用由 `index.html` 承载页面骨架，`src/main.ts` 负责启动，`src/styles.css` 提供全局样式，静态资源放在 `public/assets`。游戏状态存储在浏览器 `localStorage` 中，支持四个存档槽和当前存档槽记录。
 
-- `index.html`：Vite 页面入口，保留原有 DOM 骨架。
-- `src/main.ts`：应用启动入口，导入样式、绑定事件、渲染开始界面。
-- `src/styles.css`：原生 CSS 样式入口。
-- `src/game/data.ts`：职业、主题、地图尺寸、资源路径、图例、全局常量等静态配置。
-- `src/game/runtime.ts`：迁移期主运行时，仍承载大部分原游戏逻辑。后续继续按职责拆到 `map.ts`、`combat.ts`、`inventory.ts`、`save.ts`、`player.ts` 等文件。
-- `src/game/types.ts`：核心类型定义，如 `GameState`、`Player`、`Enemy`、`Room`、`Cell`、`Item`。
-- `src/game/save.ts`：存档槽配置、localStorage index 读写、时间格式化，并导出运行时存档入口。
-- `src/game/audioProfiles.ts`、`src/game/audioEngine.ts`：短音效配置和 Web Audio 底层合成。
-- `src/game/combatFx.ts`：战斗飘字和动画状态。
-- `src/ui/bindEvents.ts`：键盘、按钮、标签页、声音、保存等事件绑定。
-- `src/ui/renderMap.ts`、`src/ui/renderPanel.ts`：地图和面板渲染入口，后续承接从 `runtime.ts` 拆出的 UI 实现。
-- `public/assets`：Vite 静态资源目录，构建后会复制到 `dist/assets`。
-- `tests/`：Node 回归测试。`npm test` 会先用 Vite 打包 `tests/harness/runtimeHarness.ts`，再验证 TypeScript 运行时和 `src/styles.css`。
+核心玩法循环：
+
+1. 选择剑士、法师或游侠创建角色。
+2. 在 23x23 到 31x31 之间随机尺寸的半随机地牢楼层中探索。
+3. 触发怪物、宝箱、祭坛、商人、合成台、任务 NPC、楼梯和陷阱。
+4. 遭遇普通楼层或带雨雪、熔岩等特效的特殊楼层。
+5. 通过战斗、任务和宝箱获得经验、金币、装备、符文、钥匙和材料。
+6. 通过装备、强化、符文、属性点和技能升级提升角色强度。
+7. 推进到第 66 层并挑战最终 Boss。
+
+技术边界：
+
+- 构建工具：Vite。
+- 语言：TypeScript。
+- UI：原生 DOM 渲染和原生 CSS。
+- 存储：浏览器 `localStorage`。
+- 音频：Web Audio API。
+- 测试：Vite 测试入口打包后由 Node 脚本执行回归测试。
+
+## 2. 运行与验证
 
 常用命令：
 
 ```powershell
+npm install
 npm run dev
 npm run build
 npm test
 ```
 
-## 1. 项目定位
+脚本含义：
 
-这是一个纯前端的半随机地牢闯关 RPG。项目使用 Vite 作为开发和打包工具，使用 Vanilla TypeScript 组织游戏逻辑，并继续使用原生 CSS。`index.html` 加载 `src/main.ts` 后启动游戏，Vite 负责打包 `src/styles.css`、`src/game`、`src/ui` 和 `public/assets`。游戏状态存储在浏览器 `localStorage` 中，刷新页面后可以继续读取同一份存档。
+- `npm run dev`：启动 Vite 开发服务器。
+- `npm run build`：执行 TypeScript 检查并构建前端产物。
+- `npm run build:test-harness`：使用 `vite.test.config.ts` 打包测试运行时。
+- `npm test`：依次运行地图、装备 UI、玩法行为三类回归测试。
+- `npm run preview`：预览构建产物。
 
-核心玩法循环是：
+回归测试入口：
 
-1. 选择职业并创建角色。
-2. 在 27x27 的随机地牢中探索。
-3. 触发怪物、宝箱、祭坛、商人、合成台、任务 NPC、楼梯等地图物件。
-4. 通过战斗、任务和宝箱获得经验、金币、装备、符文和材料。
-5. 使用装备、强化、符文和技能升级提升角色强度。
-6. 逐层推进到第 66 层最终 Boss。
+- `tests/map-generation.test.js`：地图生成、楼梯、房间和可达性。
+- `tests/equipment-ui.test.js`：装备、背包、纸娃娃、文案和 UI 行为。
+- `tests/gameplay-behavior.test.js`：移动、战斗、任务、楼层推进和存档相关行为。
+- `tests/harness/runtimeHarness.ts`：把运行时和静态配置暴露给 Node 测试脚本。
 
-## 2. 文件职责
+## 3. 当前架构
 
-### `index.html`
+项目采用“主运行时装配器 + 领域运行时工厂”的结构。`src/game/runtime.ts` 持有核心状态、UI 临时状态和跨模块接口，各领域运行时通过 `create*Runtime()` 工厂接收上下文和回调，避免把所有玩法逻辑集中到一个文件里。
 
-页面结构固定在这里，主要提供三个区域：
+主要协作方式：
 
-- 左侧 `hero-panel`：玩家头像、生命/法力/经验条、属性、纸娃娃装备。
-- 中间 `map-wrap`：楼层标题、主地图、小地图、图例，战斗时也会在这里切换成战斗面板。
-- 右侧 `action-panel`：上下文行动、背包/技能/任务标签页、冒险日志。
+- `runtime.ts` 创建 `audioRuntime`、`modalRuntime`、`floorRuntime`、`questRuntime`、`interactionRuntime`、`combatRuntime`、`inventoryRuntime`、`renderRuntime` 和 `saveRuntime`。
+- `state` 是游戏的核心状态源，领域运行时通过 `getState()` 获取当前状态。
+- `uiState` 包装当前标签页、背包子标签、装备筛选、选中格子和存档槽。
+- `battleState` 包装战斗输入锁定时间。
+- `runtimeApi` 汇总跨领域调用，并通过 `exposeRuntime()` 挂到 `window`，供 HTML 内联事件、调试和测试使用。
 
-如果要新增一个固定 UI 容器，例如“成就栏”“设置面板”，优先从这里增加 DOM 节点，再在 `src/ui` 或对应 `src/game` 模块里新增渲染函数。
+模块依赖原则：
 
-### `src/styles.css`
+- 静态配置放在 `data.ts`。
+- 纯工具函数放在 `random.ts`、`mapGeometry.ts`、`audioEngine.ts` 等文件。
+- 领域行为放在对应 `*Runtime.ts` 文件。
+- DOM 查询集中在 `src/ui/dom.ts`。
+- 事件绑定集中在 `src/ui/bindEvents.ts`。
+- 测试依赖运行时导出的稳定 API，调整 `runtimeApi` 时同步检查 `tests/harness/runtimeHarness.ts`。
 
-所有布局、地图格子、战斗面板、背包列表、纸娃娃、弹窗和提示层样式都在这里。游戏逻辑不依赖 CSS 变量之外的样式状态，通常可以独立调整视觉。
+## 4. 工程目录
 
-常见修改点：
+```text
+.
+├─ index.html
+├─ public/assets/
+├─ src/
+│  ├─ main.ts
+│  ├─ styles.css
+│  ├─ game/
+│  └─ ui/
+├─ tests/
+├─ vite.config.ts
+├─ vite.test.config.ts
+├─ tsconfig.json
+└─ package.json
+```
 
-- 地图大小显示、格子样式：搜索 `.map`、`.tile`、`.minimap`。
-- 战斗界面：搜索 `.battle-stage`、`.battle-board`、`.battle-command-panel`。
-- 背包装备卡片：搜索 `.item-row`、`.equipment-card`、`.equipment-compare`。
-- 弹窗和 toast：搜索 `.modal`、`.toast`。
+入口文件：
 
-### `src/game/data.ts`
+- `index.html`：页面骨架，包含顶部操作、职业选择、游戏主视图、弹窗和 toast。
+- `src/main.ts`：导入样式，调用 `exposeRuntime()`、`bindEvents()`、`renderStartScreen()`、`updateSoundButton()` 和 `render()`。
+- `src/styles.css`：布局、地图、战斗、背包、纸娃娃、弹窗、toast 和响应式样式。
+- `public/assets`：Vite 静态资源目录，游戏图片路径以 `assets/...` 形式引用。
 
-这里放静态配置，不负责状态变化。
+`src/ui`：
 
-主要配置：
+- `bindEvents.ts`：键盘、按钮、声音、保存和返回首页事件。
+- `dom.ts`：DOM 获取工具。
+- `renderMap.ts`：导出地图相关运行时入口。
+- `renderPanel.ts`：导出面板相关运行时入口。
 
-- `CLASSES`：职业、初始属性、生命法力、技能。
-- `THEMES`：楼层主题、墙体比例和 CSS 主题 class。
-- `RUNES`：符文基础名称。
-- `SLOTS`、`SLOT_NAMES`：装备槽位。
-- `STAT_NAMES`：属性显示名。
-- `SAVE_KEY`：localStorage 存档 key。
-- `MAX_FLOOR`：最大楼层，当前为 66 层。
-- `MAP_SIZE`、`MAP_VIEW_SIZE`、`VISION_RADIUS`：地图尺寸、可视窗口和视野半径。
-- `ASSETS`：图片资源路径。
-- `LEGEND_ITEMS`：地图图例。
+`src/game` 静态与工具模块：
 
-如果只改数值、职业、技能名称、资源路径，优先改这个文件。
+- `data.ts`：职业、楼层主题、符文、装备槽、属性名、地图尺寸、最大楼层、资源路径和图例。
+- `types.ts`：核心类型，如 `GameState`、`GameMap`、`Cell`、`Enemy`、`Item`、`QuestState`。
+- `random.ts`：随机数和 id 工具。
+- `mapGeometry.ts`：邻居、范围、距离、房门合法性等地图几何工具。
+- `map.ts`：地图相关导出门面。
+- `inventory.ts`：物品、药水、初始装备、传送信标和背包相关导出门面。
+- `save.ts`：存档槽 key、索引读写、时间格式化和存档运行时导出门面。
+- `state.ts`：活动状态和活动面板标签的轻量门面。
+- `combatFx.ts`：战斗飘字和动画状态。
+- `audioProfiles.ts`：短音效配置。
+- `audioEngine.ts`：Web Audio 底层合成。
+- `quests.ts`：任务定义。
+- `enemies.ts`：敌人词缀定义。
+- `events.ts`、`combat.ts`、`player.ts`、`index.ts`：面向外部导出的聚合入口。
 
-### `src/game/runtime.ts`
+`src/game` 领域运行时：
 
-这是迁移期主运行时文件，仍包含大部分原游戏逻辑：全局状态、地图生成、探索、战斗、任务、装备、渲染、存档和弹窗。后续继续按职责迁出到 `map.ts`、`combat.ts`、`inventory.ts`、`save.ts`、`player.ts`、`renderMap.ts`、`renderPanel.ts` 等模块。
+- `runtime.ts`：主运行时装配器、核心状态持有者和运行时 API 汇总。
+- `audioRuntime.ts`：声音开关、音效播放、探索音乐和战斗音乐。
+- `modalRuntime.ts`：弹窗、确认框、事件弹窗和 toast。
+- `floorRuntime.ts`：楼层地图、房间、宝藏、任务点、怪物、楼梯和封印生成。
+- `interactionRuntime.ts`：玩家移动、视野、格子触发、宝箱、陷阱和门栅。
+- `combatRuntime.ts`：回合制战斗、技能、掉落、升级、死亡、一键战斗和任务击杀进度。
+- `inventoryRuntime.ts`：属性点、装备穿脱、出售、分解、药水、传送、符文、强化、商店和合成台。
+- `questRuntime.ts`：任务状态、接取、奖励、任务 NPC 和救援 NPC。
+- `renderRuntime.ts`：开始页、存档页、角色栏、地图、小地图、战斗、背包、技能、任务和日志渲染。
+- `saveRuntime.ts`：多槽存档、存档摘要、读取、保存、删除、返回首页和存档字段补齐。
 
-全局变量：
+## 5. 页面与 UI 结构
 
-- `state`：完整游戏状态，保存角色、地图、背包、装备、任务、战斗、日志等。
-- `activeTab`、`activeInventoryTab`、`activeEquipmentFilter`：右侧面板当前标签和筛选状态。
-- `selectedTile`：当前被点击的小地图或主地图格子。
-- 战斗飘字和动画状态：已迁到 `src/game/combatFx.ts`。
-- `statDraft`：属性点分配弹窗的临时草稿。
-- `audioState`、`audioEnabled`：音频上下文和开关状态。
+`index.html` 提供固定 DOM 容器，运行时按需填充内容。
 
-### `src/ui/bindEvents.ts`
+主区域：
 
-只负责事件绑定和启动：
+- `topbar`：标题、副标题、声音、保存和返回首页。
+- `classSelect`：开始页、职业选择和存档列表。
+- `gameView`：游戏主界面。
 
-- 键盘方向键、WASD 移动。
-- 点击弹窗遮罩关闭弹窗。
-- 点击按钮后移除焦点。
-- 方向按钮、标签页、声音、保存、新游戏按钮。
-- 首次进入时渲染开始界面。
+游戏主界面：
 
-如果要改“玩家输入方式”，例如增加快捷键、手柄按钮、移动按钮行为，优先看这里。
+- 左侧 `hero-panel`：头像、职业名、生命/法力/经验条、属性、资源、纸娃娃装备。
+- 中间 `map-wrap`：楼层标题、主题、主地图、小地图和图例。战斗时同一区域切换为战斗面板。
+- 右侧 `action-panel`：上下文行动、背包/装备/技能/任务标签页和冒险日志。
 
-### `tests/`
+全局浮层：
 
-测试使用 Node 脚本直接加载前端 JS。当前有三类测试：
+- `modal`：确认、任务、商店、合成、装备详情、存档等弹窗。
+- `toast`：短提示。
 
-- `map-generation.test.js`：地图生成相关行为。
-- `gameplay-behavior.test.js`：移动、战斗、楼层、任务等玩法行为。
-- `equipment-ui.test.js`：装备、背包、UI 文案和操作行为。
+输入行为：
 
-改逻辑后建议至少运行对应测试；只改注释和文档时可以运行 `node --check` 做语法验证。
+- 方向键和 WASD 控制移动。
+- 弹窗打开时空格关闭弹窗。
+- 战斗中方向键、WASD、空格和 Enter 不触发地图移动。
+- 顶部按钮控制声音、保存和返回首页。
+- 右侧标签按钮切换背包、装备、技能和任务面板。
 
-## 3. 状态结构
+## 6. 状态模型
 
-`state` 是整个游戏的唯一核心状态。创建角色时由 `startGame(classId)` 初始化，保存时通过 `saveGame()` 写入 localStorage。
+`GameState` 是完整游戏状态。创建新游戏时由 `startGame(classId, slotId)` 初始化，保存时序列化到 `localStorage`。
 
-常用字段：
+核心字段：
 
 - `classId`：职业 id，对应 `CLASSES`。
 - `floor`：当前楼层。
 - `level`、`xp`、`xpNext`：等级和经验。
 - `gold`、`keys`：金币和符文钥匙。
 - `hp`、`maxHp`、`mp`、`maxMp`：当前生命法力和基础上限。
-- `stats`：基础属性，装备和符文不会直接写入这里。
+- `stats`：基础属性。
 - `statPoints`、`skillPoints`、`skillDust`：成长资源。
-- `inventory`：背包，包含药水、装备和传送道具。
+- `inventory`：背包物品。
 - `materials`：强化石、魔尘、首领印记等材料。
-- `runes`：符文库存，格式如 `火焰1`。
+- `runes`：符文库存。
 - `equipment`：当前装备，key 来自 `SLOTS`。
 - `map`：当前楼层地图。
-- `floorStates`：已经访问过的楼层缓存。
-- `player`：玩家地图坐标。
-- `currentEnemy`：当前战斗敌人，非空时进入战斗模式。
-- `quests`：任务列表。
+- `floorStates`：已访问楼层缓存。
+- `player`：玩家坐标。
+- `facing`：玩家朝向。
+- `currentEnemy`：当前战斗敌人。
+- `quest`、`quests`：任务状态。
+- `skillLevels`：技能等级。
 - `log`：冒险日志。
 
-注意：装备和符文属性通过 `totals()` 动态汇总，不直接改写 `state.stats`。修改属性计算时优先看 `totals()`、`applyRune()`、`effectiveMaxHp()`、`effectiveMaxMp()`。
+属性计算：
 
-## 4. 地图生成设计
+- `state.stats` 保存基础属性。
+- 装备、强化和符文属性通过 `totals()` 动态汇总。
+- 生命和法力有效上限通过 `effectiveMaxHp()`、`effectiveMaxMp()` 计算。
+- 符文效果由 `applyRune(total, rune)` 写入汇总结果。
 
-入口方法是 `generateFloor()`。
+楼层缓存：
 
-普通楼层流程：
+- 离开楼层前，`saveCurrentFloor()` 保存当前地图、玩家坐标、任务、背包和其他必要状态。
+- `enterFloor(direction)` 根据目标楼层恢复缓存或生成新地图。
+- `entryPositionForDirection(direction)` 根据上下楼方向把玩家放到对应楼梯附近。
+
+## 7. 静态配置
+
+`src/game/data.ts` 是静态配置中心。
+
+主要配置：
+
+- `CLASSES`：剑士、法师、游侠的描述、初始属性、生命法力、成长和技能。
+- `THEMES`：楼层主题、名称、墙体比例和 CSS 主题 class。
+- `FLOOR_EFFECTS`：特殊楼层效果，包括雨、雪、熔岩及对应难度和奖励倍率。
+- `RUNES`：符文基础名称。
+- `SLOTS`、`SLOT_NAMES`：装备槽位和展示名。
+- `STAT_NAMES`：属性展示名。
+- `SAVE_KEY`：localStorage 存档前缀。
+- `DEFAULT_CLASS_ID`：默认职业。
+- `MASTER_VOLUME`：音频主音量。
+- `MAX_FLOOR`：最大楼层，当前为 66。
+- `MAP_SIZE`：地图默认尺寸，当前为 27。
+- `MAP_SIZE_MIN`、`MAP_SIZE_MAX`：随机地图尺寸范围，当前为 23 到 31。
+- `MAP_VIEW_SIZE`：主地图视口尺寸，当前为 15。
+- `VISION_RADIUS`：玩家视野半径，当前为 3。
+- `ASSETS`：图片资源路径。
+- `LEGEND_ITEMS`：地图图例。
+
+修改数值、职业、技能文案、地图尺寸或资源路径时，优先检查这个文件。
+
+## 8. 地图与楼层
+
+地图由 `floorRuntime.ts` 生成，入口是 `generateFloor()`。地图由二维 `Cell[][]` 组成，每个格子包含坐标、地形、物件、可见性和房间信息。
+
+普通楼层生成流程：
 
 1. 创建全墙地图。
-2. `carveMainRoute()` 从左上入口挖到右下出口。
-3. `widenMainRoute()` 扩宽主路。
-4. `carveSideRooms()` 生成分支房间。
-5. `carveStructuredRooms()` 生成带门和 roomId 的结构化房间。
-6. `pruneDisconnectedFloors()` 删除入口不可达区域。
-7. `assignRoomLabels()` 给房间生成展示名。
-8. `placeTreasureEncounters()` 放置宝箱遭遇。
-9. `scatter()` 散布普通怪、陷阱、祭坛、商人和合成台。
-10. `placeRescueQuest()` 或 `placeQuestNpc()` 放置任务内容。
-11. `resolveOutdoorFeatureCrowding()` 调整室外物件密度。
-12. `placeFloorStairs()` 在远离入口的房间或路线尽头放置上下楼梯。
-13. `maybeSealDownstairs()` 偶尔给下行楼梯添加封印，并在附近生成封印守卫。
-14. `updateVisibility()` 初始化视野。
+2. 生成从入口到远端的主路径。
+3. 扩宽主路径。
+4. 生成分支房间和结构化房间。
+5. 删除入口不可达区域。
+6. 标记房间名称和威胁等级。
+7. 根据楼层决定是否附加特殊效果，如暴雨层、霜雪层或熔岩层。
+8. 放置宝箱遭遇、怪物、任务点、陷阱、祭坛、商人和合成台。
+9. 调整室外物件密度。
+10. 规范房门。
+11. 放置上行和下行楼梯。
+12. 为部分下行楼梯设置封印和封印守卫。
+13. 初始化视野。
 
-第 66 层是特殊 Boss 层：中心区域固定开阔，中心放最终 Boss，角落放祭坛和合成台，不再生成下行楼梯。
+最终楼层：
 
-上下楼规则：
+- 第 66 层使用 Boss 楼层规则。
+- 中心区域固定开阔。
+- 中心放置最终 Boss。
+- 角落放置祭坛和合成台。
+- 不生成下行楼梯。
 
-- 第 1 层没有上行楼梯，玩家从 `1,1` 附近开始探索。
-- 第 2 层以后，上行楼梯也会放在真实地图格上，不再固定左上角。
-- 下行楼梯优先选择远离入口的房间、门后区域或路线尽头，避免开局很快找到。
-- `state.map.stairsUp` 和 `state.map.stairsDown` 记录楼梯位置，`enterFloor()` 根据上下楼方向把玩家放到对应楼梯处。
-- 如果下行楼梯带 `locked: true`，`nextFloor()` 会阻止下楼，并提示要击败封印守卫。
-- 击败带 `sealId` 的封印守卫后，`completeStairSeal()` 会解除对应下楼梯封印。
+楼梯规则：
 
-房间威胁：
+- 第 1 层没有上行楼梯。
+- 第 2 层起，上行楼梯放在真实地图格上。
+- 下行楼梯优先选择远离入口的位置。
+- 下行楼梯可能带 `locked: true` 和 `sealId`。
+- 击败对应封印守卫后，`completeStairSeal()` 解除封印。
 
-- `assignRoomLabels()` 会给房间分配轻量威胁等级：安静、危险、封印、宝藏。
-- `roomDoorLabel()` 会在门牌上显示威胁标记，例如 `13号险`。
-- 危险/封印房间里的怪物更容易生成精英，用于制造“要不要现在进去”的探索选择。
+房间规则：
 
-手动修改建议：
+- `assignRoomLabels()` 给房间分配名称和威胁等级。
+- `roomDoorLabel(cell)` 在门牌上只显示房间编号。
+- 危险和封印房间更容易出现精英敌人。
 
-- 想改地图尺寸：改 `src/game/data.ts` 的 `MAP_SIZE`，同时确认样式和测试。
-- 想改最大楼层：改 `MAX_FLOOR`，再检查最终 Boss、主题和数值曲线。
-- 想改玩家视野：改 `VISION_RADIUS`，逻辑在 `updateVisibility()`。
-- 想改每层怪物数量：看 `generateFloor()` 里 `scatter(map, "monster", ...)`。
-- 想改宝箱数量：看 `placeTreasureEncounters(map, 5)`。
-- 想改商人/合成台出现频率：看 `state.floor % 3` 的判断。
-- 想改楼梯距离、偏好和封印频率：看 `chooseStairCell()`、`stairScore()`、`maybeSealDownstairs()`。
-- 想增加新地图物件：先在 `ASSETS`、`LEGEND_ITEMS` 加配置，再补 `resolveCell()`、`objectSprite()`、`badgeForObject()`、`tileLabel()`。
+特殊楼层规则：
 
-## 5. 探索与交互
+- 第 4 层后有概率出现特殊楼层，当前包括暴雨层、霜雪层和熔岩层。
+- 特殊楼层会在地图区域显示天气或热浪特效。
+- 特殊楼层敌人的生命、攻击和防御会获得温和提升。
+- 特殊楼层的经验、金币、宝箱、掉落和任务金币奖励会获得温和提升。
+- 第 66 层固定为熔岩效果的最终 Boss 楼层。
 
-玩家移动入口是 `move(dx, dy)`。
+地图修改入口：
+
+- 地图尺寸：`MAP_SIZE`、`MAP_SIZE_MIN`、`MAP_SIZE_MAX`、`MAP_VIEW_SIZE`、`src/styles.css` 地图样式和地图测试。
+- 特殊楼层：`FLOOR_EFFECTS`、`chooseFloorEffect()`、`applyFloorEffectToEnemy()`、`floorEffectReward()` 和 `.effect-*` 样式。
+- 视野半径：`VISION_RADIUS` 和 `updateVisibility()`。
+- 普通怪数量：`monsterCountForFloor()`。
+- 宝箱数量：`treasureCountForFloor()`。
+- 陷阱数量：`trapCountForFloor()`。
+- 房间数量：`sideRoomCountForFloor()` 和结构化房间生成参数。
+- 商人/合成台频率：`state.floor % 3` 判断。
+- 楼梯位置：`placeFloorStairs()`、`chooseStairCell()`、`stairScore()`。
+- 楼梯封印：`maybeSealDownstairs()`、`placeGuardNear()`、`completeStairSeal()`。
+- 新地图物件：`ASSETS`、`LEGEND_ITEMS`、`resolveCell()`、`objectSprite()`、`badgeForObject()`、`tileLabel()`。
+
+## 9. 探索与交互
+
+探索逻辑由 `interactionRuntime.ts` 处理，移动入口是 `move(dx, dy)`。
 
 移动流程：
 
-1. 更新朝向。
+1. 更新玩家朝向。
 2. 计算目标格。
-3. 如果是墙或栅栏，阻止移动。
-4. 如果是危险敌人，先调用 `promptDangerousEnemy()` 确认。
-5. 如果是商人、合成台、委托人、救援目标、门栅或未解锁宝箱，先交互不移动。
+3. 墙和栅栏阻止移动。
+4. 危险敌人触发确认。
+5. 商人、合成台、委托人、救援目标、门栅和上锁宝箱优先交互。
 6. 移动玩家坐标。
 7. 播放脚步或危险音效。
 8. 更新视野。
-9. 调用 `resolveCell(cell)` 触发格子物件。
+9. 调用 `resolveCell(cell)` 处理格子物件。
 10. 重新渲染。
 
-`resolveCell()` 是地图物件分发中心：
+格子物件分发：
 
 - 怪物：`handleEnemyEncounter()`。
 - 普通宝箱：`openChest()`。
@@ -220,287 +318,399 @@ npm test
 - 委托人：`openQuestNpc()`。
 - 救援目标：`openRescueNpc()`。
 - 门栅：`openFenceGate()`。
-- 楼梯或传送门：`nextFloor()` / `previousFloor()`。
+- 楼梯：`nextFloor()` 或 `previousFloor()`。
 
-## 6. 战斗系统
+视野规则：
 
-战斗入口是 `enterBattle(enemy)`，它把敌人写入 `state.currentEnemy`，渲染时 `renderBattleView()` 会把地图区域切换为战斗面板。
+- `updateVisibility()` 根据 `VISION_RADIUS` 标记当前可见格。
+- 可见格会同步标记为已探索。
+- 未探索格隐藏物件信息。
+- 陷阱按显示规则决定是否暴露。
 
-玩家行动入口是 `attackEnemy(mode, skill)`：
+## 10. 战斗系统
 
-- `attack`：普通攻击，使用 `dealDamage()` 计算伤害和暴击。
-- `skill`：先检查 MP，再用 `castSkill()` 执行技能效果。
-- `defend`：设置 `state._guard`，敌人回合会扣减伤害。
+战斗逻辑由 `combatRuntime.ts` 处理。`enterBattle(enemy)` 将敌人写入 `state.currentEnemy`，渲染层根据该字段切换战斗视图。
 
-敌人回合由 `enemyTurn(enemy)` 处理：
+玩家行动：
 
-- 速度和闪避技能影响闪避概率。
-- 防御状态会抵扣伤害。
-- 生命小于等于 0 时触发 `death()`。
+- `attackEnemy("attack")`：普通攻击。
+- `attackEnemy("skill", skill)`：释放技能。
+- `attackEnemy("defend")`：防御。
+- `useBattlePotion(id)`：战斗中使用药水。
+- `autoBattle()`：尝试一键战斗。
 
-胜利结算由 `winBattle(enemy)` 处理：
+战斗结算：
 
-1. 发放金币和经验。
-2. 清除当前格子的敌人。
-3. 调用 `recordQuestKill()` 推进任务。
-4. 调用 `maybeDrop()` 抽掉落。
-5. 循环调用 `levelUp()` 处理升级。
-6. 如果击败 Boss，显示通关弹窗。
+- `dealDamage(enemy, amount, label)` 处理伤害、暴击和飘字。
+- `castSkill(enemy, skill, totals)` 处理技能效果。
+- `enemyTurn(enemy)` 处理敌人回合。
+- `winBattle(enemy)` 处理奖励、掉落、任务击杀进度和升级。
+- `death()` 处理玩家死亡。
 
-一键战斗：
+敌人系统：
 
-- `battleRisk(enemy)` 估算玩家胜率。
-- `autoBattlePolicy(enemy)` 是一键战斗准入策略，只允许资源充足时清理低风险普通怪。
-- `autoBattle()` 在风险过高、生命低、法力低、敌人是精英/守卫/Boss、敌人带词缀时阻止自动结算。
-- `executeAutoBattle()` 最多连续结算 3 回合，仍然复用普通战斗流程，回合后如果不再满足安全线会中止。
+- `makeEnemy(eliteOrBoss)` 按楼层生成敌人。
+- `makeEnemyWithVariant(eliteOrBoss)` 生成带变体的敌人。
+- `makeKeyGuardian()` 生成封印守卫。
+- `maybeApplyEnemyAffix(enemy, eliteOrBoss)` 添加词缀。
+- `enemyAffixText(enemy)` 生成词缀说明。
 
-敌人词缀：
+当前敌人词缀：
 
-- `maybeApplyEnemyAffix(enemy, eliteOrBoss)` 会给精英、特殊守卫和部分中后期普通怪添加词缀。
-- `enemyAffixText(enemy)` 生成战斗面板和地图提示中使用的词缀说明。
-- 当前词缀包括 `坚甲`、`破盾`、`汲取`、`迅捷`。词缀敌人禁用一键战斗，需要玩家手动处理。
+- `坚甲`：防御提高，普通攻击效率降低。
+- `破盾`：防御姿态减伤降低。
+- `汲取`：造成伤害后恢复生命。
+- `迅捷`：更容易避开攻击。
 
-难度目标：
+一键战斗规则：
 
-- 普通怪：装备正常时可以处理，资源充足且胜率高时允许一键战斗。
-- 精英怪：首次遭遇通常需要手动判断技能、药水和防御。
-- 封印守卫：用于锁楼梯，应当逼玩家确认状态再打。
-- Boss：不应靠一键战斗解决。
+- `battleRisk(enemy)` 估算风险。
+- `autoBattlePolicy(enemy)` 判断是否允许自动结算。
+- 精英、守卫、Boss、带词缀敌人、资源不足或风险较高时不允许一键战斗。
+- `executeAutoBattle()` 最多连续结算 3 回合，并复用普通战斗流程。
 
-手动修改建议：
+战斗修改入口：
 
-- 改普通攻击公式：看 `attackEnemy()` 中 `dealDamage(enemy, ...)` 的入参。
-- 改暴击概率和倍率：看 `dealDamage()`。
-- 改敌人伤害：看 `enemyTurn()`。
-- 改技能效果：看 `castSkill()` 和 `src/game/data.ts` 的 `CLASSES.skills`。
-- 改敌人数值成长：看 `makeEnemy()`。
-- 改敌人词缀：看 `ENEMY_AFFIXES`、`maybeApplyEnemyAffix()`、`enemyAffixText()`。
-- 改一键战斗门槛：看 `autoBattlePolicy()`。
-- 改掉落概率：看 `maybeDrop()`。
-- 改升级曲线：看 `levelUp()`。
+- 普通攻击和暴击：`dealDamage()`。
+- 技能效果：`castSkill()` 和 `CLASSES.skills`。
+- 敌人回合：`enemyTurn()`。
+- 掉落：`maybeDrop()`。
+- 升级：`levelUp()` 和 `applyClassLevelGrowth()`。
+- 一键战斗阈值：`autoBattlePolicy()` 和 `battleRisk()`。
+- 战斗 UI：`renderBattleView()`、`renderBattleCommandPanel()`、`renderSkillActionButtons()`。
 
-## 7. 装备、符文和成长
+## 11. 装备、背包与成长
 
-装备结构由 `item()` 创建：
+背包和成长逻辑由 `inventoryRuntime.ts` 处理，基础物品工厂在 `inventory.ts`。
+
+物品类型：
+
+- 药水：`potion(name, kind, amount)` 创建，`kind` 为 `hp` 或 `mp`。
+- 装备：`item(name, slot, quality, stats, runeSlots, runes)` 创建。
+- 传送道具：`teleportBeacon()` 创建商路信标。
+
+装备结构：
 
 - `kind: "equip"`。
 - `slot`：装备槽位。
 - `quality`：普通、优秀、稀有、史诗、传说。
 - `stats`：属性加成。
 - `runeSlots`：符文槽数量。
-- `runes`：已镶嵌符文列表。
+- `runes`：已镶嵌符文。
 - `level`：强化等级。
 
-装备掉落由 `randomEquipment()` 创建，品质由 `qualityRoll()` 决定，基础属性预算由 `qualityBonus()` 决定。
+装备入口：
 
-装备相关入口：
+- `equipItem(id)`：穿戴装备。
+- `unequipItem(slot)`：卸下装备。
+- `sellEquipment(id)`：出售装备。
+- `disassembleEquipment(id)`：分解装备。
+- `enhance(slot)`：强化装备。
+- `itemScore(item)`：计算装备评分。
+- `equipmentCompareText(item)`：生成装备对比文本。
 
-- `equipItem(id)`：穿装备，并把旧装备放回背包。
-- `unequipItem(slot)`：拆下装备。
-- `enhance(slot)`：消耗金币和强化石强化装备。
-- `sellEquipment(id)`：在商人附近出售装备。
-- `disassembleEquipment(id)`：分解装备获得魔尘和强化石。
-- `itemScore(item)`：装备评分，用于排序和对比。
+成长入口：
 
-符文相关入口：
+- `openStatAllocator(preferredKey)`：打开属性点分配弹窗。
+- `adjustStatDraft(key, delta)`：调整属性点草稿。
+- `applyStatDraft()`：应用属性点分配。
+- `upgradeSkill(skillId)`：升级技能。
+- `skillUpgradeCost(skillId)`：计算技能升级成本。
+- `upgradedSkill(skill)`：计算升级后的技能效果。
+
+符文入口：
 
 - `craftRune(name)`：三个同级同名符文合成下一级。
 - `applyRune(total, rune)`：把符文效果写入汇总属性。
-- `runeEffectText(rune)`：生成符文说明文案。
+- `runeEffectText(rune)`：展示符文效果。
 
-属性成长：
+商店和合成台：
 
-- `openStatAllocator()`、`adjustStatDraft()`、`applyStatDraft()` 控制批量分配属性点。
-- `upgradeSkill(skillId)` 控制技能升级。
-- `skillUpgradeCost(skillId)` 控制技能升级成本。
-- `upgradedSkill(skill)` 控制技能升级后的倍率和耗蓝。
+- `openMerchant()`：打开商人对话。
+- `openMerchantShop()`：打开商店购买界面。
+- `buy(kind)`：购买药水、钥匙或商路信标。
+- `merchantSalvageRows()`：商人处分解/出售入口。
+- `openForge()`：打开合成台，提供强化和符文合成。
 
-手动修改建议：
+装备修改入口：
 
-- 新增装备槽：改 `SLOTS`、`SLOT_NAMES`，再检查 `starterEquipment()`、`emptyEquipment()`、纸娃娃和 CSS。
-- 改装备品质概率：改 `qualityRoll()`。
-- 改品质数值强度：改 `qualityBonus()`。
-- 改强化成本：改 `confirmEnhance()` 文案、`canEnhance()` 条件和 `enhance()` 扣费。
-- 改符文效果：改 `applyRune()` 和 `runeEffectText()`。
-- 改装备评分：改 `itemScore()`。
+- 装备槽：`SLOTS`、`SLOT_NAMES`、`emptyEquipment()`、`starterEquipment()`、纸娃娃渲染和 CSS。
+- 品质概率：`qualityRoll()`。
+- 品质强度：`qualityBonus()`。
+- 装备评分：`itemScore()`。
+- 强化成本：`canEnhance()`、`enhanceDisabledReason()`、`enhance()`、`confirmEnhance()`。
+- 符文效果：`applyRune()` 和 `runeEffectText()`。
 
-## 8. 任务系统
+## 12. 任务系统
 
-任务定义在 `QUEST_DEFS`，任务状态保存在 `state.quests`。任务发布楼层记录在 `floor`，目标楼层记录在 `targetFloor`。普通委托可以指向当前层或相邻楼层，跨度不应过大；任务列表会显示“目标第 N 层”。
+任务定义在 `quests.ts`，运行时逻辑在 `questRuntime.ts`。任务状态保存在 `state.quests`，部分兼容字段保存在 `state.quest`。
 
 任务类型：
 
-- `wardenErrand`：巡夜人清怪任务。
-- `merchantRoute`：商人路线清理任务。
-- `rescueRoom`：房间救援任务，会动态绑定房间、被困者和任务发布者。
+- `rescueRoom`：房间救援，清理指定房间并救出被困者。
+- `wardenErrand`：巡夜人委托，清理本层怪物换取钥匙。
+- `merchantRoute`：商路清理，帮商人扫清附近怪物换取补给和金币。
 
-关键方法：
+任务入口：
 
-- `placeRescueQuest(map, rooms)`：地图生成时选择远处房间，放置被困者和房间怪物。
-- `placeQuestNpc(map, source)`：放置任务发布者。
-- `questDefFromSource(giver, source)`：根据任务来源合成动态任务定义。
-- `acceptQuest(id, source)`：接受任务。
-- `recordQuestKill(enemy, rewards)`：击杀怪物后推进任务。
-- `openQuestFromGiver(giver, source)`：展示任务弹窗。
-- `claimQuestReward(id, roomId)`：领取奖励。
-- `renderQuestList()`：右侧任务列表。
+- `placeQuestNpc(map, source)`：在地图上放置任务 NPC。
+- `placeRescueQuest(map, rooms)`：生成救援房间、被困者和相关敌人。
+- `questDefFromSource(giver, source)`：由地图物件合成任务定义。
+- `acceptQuest(id, source)`：接取任务。
+- `recordQuestKill(enemy, rewards)`：战斗胜利后推进任务。
+- `openQuestFromGiver(giver, source)`：打开任务弹窗。
+- `openRescueNpc(obj)`：处理救援目标交互。
+- `claimQuestReward(id, roomId)`：领取任务奖励。
+- `renderQuestList()`：渲染右侧任务列表。
 
-手动修改建议：
+任务修改入口：
 
-- 新增固定任务：在 `QUEST_DEFS` 加定义，再确认对应发布者 `giver`。
-- 修改奖励：改任务定义里的 `rewardGold`、`rewardKeys`、`rewardPotion`。
-- 修改救援任务流程：看 `placeRescueQuest()`、`openRescueNpc()`、`recordQuestKill()`。
-- 修改任务列表展示：看 `renderQuestList()`。
+- 新任务定义：`QUEST_DEFS`。
+- 新任务 NPC：`placeQuestNpc()` 和地图投放规则。
+- 救援任务流程：`placeRescueQuest()`、`openRescueNpc()`、`recordQuestKill()`。
+- 任务奖励：`questRewardGold()` 和任务定义中的奖励字段。
+- 任务展示：`renderQuestList()` 和 `questLocationText()`。
 
-## 9. 传送道具
+## 13. 传送道具
 
-`商路信标` 是一种消耗道具，商人处可以购买。使用后会扫描当前楼层和 `floorStates` 中已经探索过的楼层，列出可传送目标：
+商路信标是一次性传送道具，由 `teleportBeacon()` 创建。玩家可在商人处购买，使用后列出已知可传送目标。
+
+目标来源：
+
+- 当前楼层。
+- `floorStates` 中已缓存的楼层。
+
+目标类型：
 
 - 商人。
 - 委托人。
 - 被困者。
 - 合成台。
 
-关键方法：
+关键入口：
 
-- `teleportBeacon()`：创建商路信标物品。
-- `openTeleportBeacon(id)`：打开传送目标弹窗。
-- `knownTeleportTargets()`：从当前楼层和楼层缓存收集可传送目标。
-- `landingNear(map, x, y)`：寻找目标附近可落脚格，避免直接站到阻挡型 NPC 或设施上。
-- `teleportToTarget(id, target)`：消耗信标并切换楼层、移动玩家。
+- `openTeleportBeacon(id)`：打开目标列表。
+- `knownTeleportTargets()`：收集可传送目标。
+- `landingNear(map, x, y)`：寻找目标附近可落脚格。
+- `teleportToTarget(id, target)`：消耗信标并移动玩家。
 
-手动修改建议：
+修改入口：
 
-- 想调整传送目标类型：改 `knownTeleportTargets()` 中允许的 `object.type`。
-- 想调整价格：改 `buy("beacon")` 和 `confirmBuy()`。
-- 想让信标通过掉落获得：在 `maybeDrop()` 或 `openChest()` 里加入 `teleportBeacon()`。
+- 目标类型：`knownTeleportTargets()`。
+- 传送落点：`landingNear()`。
+- 道具价格：`buy("beacon")` 和 `confirmBuy()`。
+- 掉落来源：`maybeDrop()` 或 `openChest()`。
 
-## 10. 渲染设计
+## 14. 渲染系统
 
-渲染入口是 `render()`。它会：
+渲染逻辑集中在 `renderRuntime.ts`。入口 `render()` 根据当前状态决定显示开始页、地图视图或战斗视图，并在完整渲染后静默保存当前游戏。
 
-1. 如果没有 `state`，显示职业选择/开始界面。
-2. 如果地图不存在或尺寸过期，重新生成地图。
-3. 修正当前生命法力不超过有效上限。
-4. 渲染左侧角色、主地图、小地图、图例、战斗面板、右侧上下文、标签页和日志。
-5. 自动把当前状态写入 localStorage。
+渲染流程：
 
-主要渲染方法：
+1. 没有活动游戏时显示开始页。
+2. 地图为空或尺寸不匹配时生成地图。
+3. 修正生命法力不超过有效上限。
+4. 根据 `state.currentEnemy` 渲染地图或战斗区域。
+5. 渲染角色栏、图例、右侧上下文、标签页和日志。
+6. 同步音乐状态。
+7. 静默保存。
 
-- `renderHero()`：左侧角色信息和纸娃娃。
+主要渲染入口：
+
+- `renderStartScreen()`：开始页和存档列表。
+- `renderClassSelect(slotId)`：职业选择。
+- `renderContinueSlots()`：继续游戏列表。
+- `renderHero()`：左侧角色信息。
+- `renderPaperdoll()`：纸娃娃装备。
 - `renderMap()`：主地图。
 - `renderMinimap()`：小地图。
 - `renderLegend()`：图例。
-- `renderBattleView()`：战斗区域。
+- `renderBattleView()`：战斗视图。
 - `renderContext()`：右侧上下文行动。
-- `renderTab()`：侧边栏标签。
+- `renderTab()`：右侧标签页内容。
 - `renderInventory()`：背包。
-- `renderSkills()`：技能。
-- `renderQuestList()`：任务。
-- `renderLog()`：日志。
+- `renderEquipment()`：装备页。
+- `renderCraft()`：合成页。
+- `renderSkills()`：技能页。
+- `renderQuestList()`：任务页。
+- `renderLog()`：冒险日志。
 
-地图格子的说明和视觉由这些方法共同决定：
+地图展示入口：
 
-- `shouldShowMapObject()`：未探索或陷阱是否显示。
-- `tileLabel()`：格子的可读说明。
-- `objectSprite()`：物件图片。
-- `badgeForObject()`：短标签。
-- `roomDoorLabel()`：房间门上的短编号，例如 `12号`。
-- `assetForClass()`：职业图片。
+- `shouldShowMapObject(cell)`：判断物件是否显示。
+- `objectSprite(obj)`：物件图片。
+- `enemySprite(enemy)`：敌人图片。
+- `badgeForObject(type)`：格子短标签。
+- `tileLabel(cell, isPlayer, reveal)`：格子可读文案。
+- `roomDoorLabel(cell)`：房间门牌。
+- `assetForClass(classId)`：职业图片。
+- `clickTile(x, y)`：点击地图格。
+- `applyFloorEffectClass(effect)`：给地图区域挂载雨、雪、熔岩等特殊楼层 class。
 
-手动修改建议：
+渲染修改入口：
 
-- 想改地图上显示的图标：看 `objectSprite()`、`enemySprite()`、`ASSETS`。
-- 想改地图按钮文案：看 `tileLabel()`。
-- 想改房间编号显示：看 `roomDoorLabel()` 和 `.room-label` 样式。
-- 想改右侧行动提示：看 `renderContext()`。
-- 想改背包分组：看 `inventoryGroupMarkup()`、`inventorySubtabs()`。
-- 想改装备详情：看 `equipmentDetailMarkup()`。
-- 想改战斗按钮布局：看 `renderBattleCommandPanel()`。
+- 主布局：`index.html` 和 `src/styles.css`。
+- 地图格：`renderMap()`、`tileLabel()`、`objectSprite()`、`.tile`。
+- 小地图：`renderMinimap()`、`minimapMarker()`、`.minimap`。
+- 战斗面板：`renderBattleView()`、`renderBattleCommandPanel()`、`.battle-*`。
+- 背包列表：`inventoryGroupMarkup()`、`inventorySubtabs()`、`equipmentInventoryRow()`。
+- 装备详情：`equipmentDetailMarkup()`、`equipmentCompareText()`。
+- 右侧上下文：`renderContext()`。
+- 弹窗：`modalRuntime.ts` 和 `.modal`。
 
-## 11. 存档和兼容
+## 15. 存档系统
 
-存档 key 是 `SAVE_KEY = "rune-dungeon-save-v1"`。
+存档逻辑由 `saveRuntime.ts` 处理，存档槽工具在 `save.ts`。
+
+存储 key：
+
+- `SAVE_KEY`：`rune-dungeon-save-v1`。
+- `SAVE_INDEX_KEY`：`${SAVE_KEY}-index-v2`。
+- 单个槽位：`${SAVE_KEY}-${slotId}`。
+- 当前槽位：`${SAVE_KEY}-current`。
+
+存档槽：
+
+- `SAVE_SLOT_LIMIT` 当前为 4。
+- 槽位 id 格式为 `slot-1` 到 `slot-4`。
+- `saveSlots()` 返回槽位列表和摘要信息。
+- `saveSlotLabel(slotId)` 生成展示名。
 
 保存入口：
 
-- `saveGame(show = true)`：手动保存或静默保存。
-- `render()`：每次完整渲染后自动保存一次。
+- `saveGame(show, slotId)`：保存完整 `state`。
+- `saveGameToSlot(slotId)`：保存弹窗确认后的写入。
+- `openSaveSlotPicker()`：打开保存槽选择。
+- `updateSaveSlotMeta(slotId, snapshot)`：更新存档摘要。
 
 读取入口：
 
-- `loadGame()`：从 localStorage 读取，并补齐新版字段。
-- `continueSavedGame()`：开始界面点击继续冒险。
+- `loadGame(slotId)`：读取槽位并补齐当前状态字段。
+- `continueSavedGame(slotId)`：从开始页继续游戏。
+- `renderContinueSlots()`：渲染可继续的存档槽。
+
+删除和返回：
+
+- `deleteSaveSlot(slotId)`：删除指定槽位和摘要。
+- `returnHome()`：保存当前状态，退出到开始页。
+- `newGamePrompt()`：打开新游戏/存档列表选择。
 
 兼容处理：
 
-- `loadGame()` 会补齐 `skillPoints`、`skillDust`、`keys`、`quests`、`floorStates`、`skillLevels`。
-- 如果地图尺寸变化，会重新生成地图。
-- 如果探索版本不是 2，会调用 `resetExploration()` 重置视野字段。
+- `migrateLegacySave()` 把单槽存档数据归入 `slot-1`。
+- `loadGame()` 补齐 `facing`、`skillPoints`、`skillDust`、`keys`、`quest`、`quests`、`floorStates` 和 `skillLevels`。
+- 地图尺寸不匹配时重新生成地图。
+- 探索版本不匹配时重置视野字段。
 
-如果改了 `state` 结构，要同步检查 `loadGame()`，否则老存档可能缺字段。
+修改 `GameState` 字段时，同步检查 `startGame()` 初始化、`loadGame()` 字段补齐、`tests/harness/runtimeHarness.ts` 归一化逻辑和相关测试。
 
-## 12. 音频系统
+## 16. 音频系统
 
-音频逻辑分布在 `src/game/audioProfiles.ts`、`src/game/audioEngine.ts` 和 `src/game/runtime.ts`：
+音频逻辑由 `audioRuntime.ts`、`audioProfiles.ts` 和 `audioEngine.ts` 组成。
 
-- `initAudio()`：创建 AudioContext，并处理浏览器交互后才能播放的限制。
-- `setAudioEnabled()`：切换声音开关并保存到 localStorage。
-- `startDungeonMusic()`、`scheduleDungeonAmbience()`、`playAmbientTone()`：地牢氛围声。
-- `playSound(kind)`：短音效。
+职责划分：
 
-新增音效时，在 `playSound()` 的 `tones` 对象里加新 key，然后在事件发生处调用 `playSound("新key")`。
+- `audioProfiles.ts`：定义短音效的振荡器、包络、滤波等参数。
+- `audioEngine.ts`：提供音频节点创建、调度和播放工具。
+- `audioRuntime.ts`：管理 AudioContext、声音开关、短音效、探索音乐和战斗音乐。
 
-## 13. 常见修改索引
+主要入口：
+
+- `initAudio(playReady)`：初始化 AudioContext。
+- `toggleAudio()`：切换声音开关。
+- `setAudioEnabled(enabled, playReady)`：设置声音状态并写入 localStorage。
+- `updateSoundButton()`：同步按钮文案和 `aria-pressed`。
+- `playSound(kind)`：播放短音效。
+- `syncMusicToGame()`：根据当前是否战斗切换音乐层。
+- `startDungeonMusic()`：启动探索氛围。
+- `startBattleMusic()`：启动战斗音乐。
+
+修改入口：
+
+- 新短音效：`audioProfiles.ts`。
+- 新播放时机：对应领域运行时调用 `playSound("key")`。
+- 音乐层行为：`syncMusicToGame()`、`startDungeonMusic()`、`startBattleMusic()`。
+- 声音按钮：`updateSoundButton()` 和 `index.html` 的 `soundBtn`。
+
+## 17. 开发调试面板
+
+开发调试面板仅在开发环境启用，用于手动验证楼层特效、奖励倍率和物品系统。正式构建不会响应调试入口，公开文档也不记录暗号。开发环境输入调试暗号后，会在本次页面会话右上角显示临时调试按钮；刷新页面后按钮消失。
+
+当前能力：
+
+- 切换当前地图为无效果、暴雨层、霜雪层或熔岩层。
+- 调整当前地图的难度倍率，范围限制为 0.80 到 1.50。
+- 调整当前地图的奖励倍率，范围限制为 0.80 到 2.00。
+- 增加金币、符文钥匙、强化石和技能尘。
+- 回满生命和法力。
+- 添加随机装备、生命药水、法力药水、商路信标和指定一级符文。
+
+相关入口只保留在开发源码中，正式构建产物不暴露调试入口。
+
+## 18. 常见修改索引
 
 | 目标 | 优先查看 |
 | --- | --- |
-| 新增职业 | `src/game/data.ts` 的 `CLASSES`、`starterEquipment()`、`assetForClass()`、`ASSETS` |
-| 修改最大楼层 | `MAX_FLOOR`、`isFinalFloor()`、`makeEnemy()`、`nextFloor()` |
-| 修改技能 | `CLASSES.skills`、`castSkill()`、`upgradedSkill()` |
-| 修改怪物强度 | `makeEnemy()`、`makeKeyGuardian()` |
+| 新增职业 | `CLASSES`、`starterEquipment()`、`starterInventory()`、`assetForClass()`、`ASSETS` |
+| 修改职业技能 | `CLASSES.skills`、`castSkill()`、`upgradedSkill()`、`renderSkills()` |
+| 修改地图尺寸 | `MAP_SIZE`、`MAP_SIZE_MIN`、`MAP_SIZE_MAX`、`MAP_VIEW_SIZE`、`renderMap()`、`renderMinimap()`、`src/styles.css`、地图测试 |
+| 修改最大楼层 | `MAX_FLOOR`、`isFinalFloor()`、`themeForFloor()`、`makeEnemy()`、`nextFloor()` |
+| 修改楼层主题 | `THEMES`、`themeForFloor()`、CSS 主题 class |
+| 修改楼梯规则 | `placeFloorStairs()`、`chooseStairCell()`、`entryPositionForDirection()` |
+| 修改楼梯封印 | `maybeSealDownstairs()`、`placeGuardNear()`、`completeStairSeal()` |
+| 修改地图物件 | `LEGEND_ITEMS`、`ASSETS`、`resolveCell()`、`objectSprite()`、`badgeForObject()`、`tileLabel()` |
+| 修改特殊楼层 | `FLOOR_EFFECTS`、`chooseFloorEffect()`、`floorEffectReward()`、`applyFloorEffectToEnemy()`、`.effect-*` |
+| 修改怪物数值 | `makeEnemy()`、`makeEnemyWithVariant()`、`makeKeyGuardian()` |
 | 修改敌人词缀 | `ENEMY_AFFIXES`、`maybeApplyEnemyAffix()`、`enemyAffixText()` |
-| 修改一键战斗 | `autoBattlePolicy()`、`autoBattle()`、`executeAutoBattle()` |
-| 修改地图尺寸 | `MAP_SIZE`、`MAP_VIEW_SIZE`、`renderMap()`、CSS 地图样式、测试 |
-| 修改楼梯位置 | `placeFloorStairs()`、`chooseStairCell()`、`entryPositionForDirection()` |
-| 修改楼梯封印 | `maybeSealDownstairs()`、`currentStairsDown()`、`completeStairSeal()` |
-| 修改地图物件 | `resolveCell()`、`objectSprite()`、`badgeForObject()`、`tileLabel()`、`LEGEND_ITEMS` |
+| 修改战斗公式 | `dealDamage()`、`enemyTurn()`、`castSkill()` |
+| 修改一键战斗 | `battleRisk()`、`autoBattlePolicy()`、`executeAutoBattle()` |
 | 修改掉落 | `openChest()`、`openLockedChest()`、`maybeDrop()`、`randomEquipment()` |
-| 修改装备系统 | `item()`、`randomEquipment()`、`equipItem()`、`enhance()`、`itemScore()` |
-| 修改符文系统 | `RUNES`、`craftRune()`、`applyRune()`、`runeEffectText()` |
-| 修改任务 | `QUEST_DEFS`、`placeRescueQuest()`、`openQuestFromGiver()`、`recordQuestKill()` |
-| 修改传送道具 | `teleportBeacon()`、`knownTeleportTargets()`、`teleportToTarget()` |
+| 修改装备系统 | `item()`、`randomEquipment()`、`equipItem()`、`unequipItem()`、`itemScore()` |
+| 修改强化 | `canEnhance()`、`enhanceDisabledReason()`、`enhance()`、`confirmEnhance()` |
+| 修改符文 | `RUNES`、`craftRune()`、`applyRune()`、`runeEffectText()` |
+| 修改属性点 | `openStatAllocator()`、`adjustStatDraft()`、`applyStatDraft()` |
+| 修改任务 | `QUEST_DEFS`、`placeQuestNpc()`、`placeRescueQuest()`、`recordQuestKill()`、`renderQuestList()` |
 | 修改商人 | `openMerchant()`、`openMerchantShop()`、`buy()`、`merchantSalvageRows()` |
-| 修改合成台 | `openForge()`、`enhance()`、`canEnhance()`、`enhanceDisabledReason()` |
-| 修改存档兼容 | `SAVE_KEY`、`saveGame()`、`loadGame()` |
+| 修改合成台 | `openForge()`、`renderCraft()`、`enhance()`、`craftRune()` |
+| 修改传送道具 | `teleportBeacon()`、`openTeleportBeacon()`、`knownTeleportTargets()`、`teleportToTarget()` |
+| 修改存档 | `save.ts`、`saveRuntime.ts`、`startGame()`、`loadGame()`、测试 harness |
+| 修改开发调试面板 | `src/ui/bindEvents.ts`、`src/game/runtime.ts`、`src/styles.css` |
 | 修改输入 | `src/ui/bindEvents.ts` |
-| 修改主 UI 布局 | `index.html`、`render()`、`src/styles.css` |
+| 修改主 UI | `index.html`、`renderRuntime.ts`、`src/styles.css` |
+| 修改音频 | `audioProfiles.ts`、`audioRuntime.ts`、`audioEngine.ts` |
 
-## 14. 修改后的验证建议
+## 19. 验证范围
 
-只改注释或文档：
+文档或注释修改：
+
+```powershell
+npm run build
+```
+
+地图生成、楼梯、房间、视野、地图物件修改：
+
+```powershell
+npm run build:test-harness
+node tests\map-generation.test.js
+```
+
+装备、背包、装备对比、纸娃娃和 UI 文案修改：
+
+```powershell
+npm run build:test-harness
+node tests\equipment-ui.test.js
+```
+
+移动、战斗、任务、楼层推进、存档行为修改：
+
+```powershell
+npm run build:test-harness
+node tests\gameplay-behavior.test.js
+```
+
+跨系统修改：
 
 ```powershell
 npm run build
 npm test
 ```
-
-改地图生成：
-
-```powershell
-node tests\map-generation.test.js
-```
-
-改战斗、移动、任务、楼层：
-
-```powershell
-node tests\gameplay-behavior.test.js
-```
-
-改装备、背包、UI 操作：
-
-```powershell
-node tests\equipment-ui.test.js
-```
-
-如果修改影响多个系统，建议三个测试脚本都跑一遍。

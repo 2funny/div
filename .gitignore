@@ -4,3 +4,7 @@ dist/
 tests/.generated/
 npm-debug.log*
 .vite-dev*.log
+.playwright-mcp/
+vite-smoke.err.log
+vite-smoke.out.log
+mobile-after-test.png

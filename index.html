@@ -1,88 +1,116 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rune Dungeon</title>
-</head>
-<body>
-  <main class="shell">
-    <section class="topbar">
-      <div>
-        <h1>符文地牢</h1>
-        <p id="subtitle">半随机地牢闯关 RPG</p>
-      </div>
-      <div class="save-actions">
-        <button id="soundBtn" class="sound-toggle" type="button" aria-pressed="true">声音：开</button>
-        <button id="saveBtn" type="button">保存</button>
-        <button id="homeBtn" type="button">返回首页</button>
-      </div>
-    </section>
-
-    <section id="classSelect" class="class-select"></section>
-
-    <section id="gameView" class="game-view hidden">
-      <aside class="panel hero-panel">
-        <div class="avatar" id="heroAvatar">剑</div>
-        <h2 id="heroName">剑士</h2>
-        <div class="bars">
-          <div class="bar"><span>生命</span><strong id="hpText"></strong><i id="hpBar"></i></div>
-          <div class="bar"><span>法力</span><strong id="mpText"></strong><i id="mpBar"></i></div>
-          <div class="bar"><span>经验</span><strong id="xpText"></strong><i id="xpBar"></i></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rune Dungeon</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #111318;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        overflow: hidden;
+        background: #111318;
+        color: #eef3ff;
+        font-family: "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      }
+      body:not(.app-ready) .shell,
+      body:not(.app-ready) #modal,
+      body:not(.app-ready) #toast {
+        opacity: 0;
+        pointer-events: none;
+      }
+      body.app-booting *,
+      body.app-booting *::before,
+      body.app-booting *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    </style>
+  </head>
+  <body class="app-booting">
+    <main class="shell">
+      <section class="topbar">
+        <div>
+          <h1>符文地牢</h1>
+          <p id="subtitle">半随机地牢闯关 RPG</p>
         </div>
-        <div id="statsGrid" class="stats-grid"></div>
-        <div class="points">
-          <span>属性点 <b id="statPoints">0</b></span>
-          <span>技能点 <b id="skillPointsText">0</b></span>
-          <span>技能尘 <b id="skillDustText">0</b></span>
-          <span>金币 <b id="goldText">0</b></span>
+        <div class="save-actions">
+          <button id="soundBtn" class="sound-toggle" type="button" aria-pressed="true">
+            声音：开
+          </button>
+          <button id="saveBtn" type="button">保存</button>
+          <button id="homeBtn" type="button">返回首页</button>
         </div>
-        <section class="paperdoll">
-          <h2>装备模型</h2>
-          <div id="paperdoll" class="paperdoll-body"></div>
-        </section>
-      </aside>
-
-      <section class="map-wrap">
-        <div class="floor-title">
-          <span id="floorText"></span>
-          <span id="themeText"></span>
-        </div>
-        <div class="map-stage">
-          <div id="map" class="map" aria-label="地牢地图"></div>
-          <div id="minimap" class="minimap" aria-label="小地图"></div>
-        </div>
-        <div id="legend" class="legend" aria-label="地图图例"></div>
       </section>
 
-      <aside class="panel action-panel">
-        <h2 id="contextTitle">行动</h2>
-        <div id="contextBody" class="context-body"></div>
-        <div class="tabs">
-          <button data-tab="inventory" type="button">背包</button>
-          <button data-tab="skills" type="button">技能</button>
-          <button data-tab="quests" type="button">任务</button>
-        </div>
-        <div id="tabBody" class="tab-body"></div>
+      <section id="classSelect" class="class-select"></section>
 
-        <section class="log-panel">
-          <h2>冒险日志</h2>
-          <div id="log" class="log"></div>
+      <section id="gameView" class="game-view hidden">
+        <aside class="panel hero-panel">
+          <div class="avatar" id="heroAvatar">剑</div>
+          <h2 id="heroName">剑士</h2>
+          <div class="bars">
+            <div class="bar"><span>生命</span><strong id="hpText"></strong><i id="hpBar"></i></div>
+            <div class="bar"><span>法力</span><strong id="mpText"></strong><i id="mpBar"></i></div>
+            <div class="bar"><span>经验</span><strong id="xpText"></strong><i id="xpBar"></i></div>
+          </div>
+          <div id="statsGrid" class="stats-grid"></div>
+          <div class="points">
+            <span>属性点 <b id="statPoints">0</b></span>
+            <span>技能点 <b id="skillPointsText">0</b></span>
+            <span>技能尘 <b id="skillDustText">0</b></span>
+            <span>金币 <b id="goldText">0</b></span>
+          </div>
+          <section class="paperdoll">
+            <h2>装备模型</h2>
+            <div id="paperdoll" class="paperdoll-body"></div>
+          </section>
+        </aside>
+
+        <section class="map-wrap">
+          <div class="floor-title">
+            <span id="floorText"></span>
+            <span id="themeText"></span>
+          </div>
+          <div class="map-stage">
+            <div id="map" class="map" aria-label="地牢地图"></div>
+            <div id="minimap" class="minimap" aria-label="小地图"></div>
+          </div>
+          <div id="legend" class="legend" aria-label="地图图例"></div>
         </section>
-      </aside>
-    </section>
-  </main>
 
-  <div id="modal" class="modal hidden">
-    <div class="modal-card">
-      <h2 id="modalTitle"></h2>
-      <div id="modalBody"></div>
-      <div id="modalActions" class="modal-actions"></div>
+        <aside class="panel action-panel">
+          <h2 id="contextTitle">行动</h2>
+          <div id="contextBody" class="context-body"></div>
+          <div class="tabs">
+            <button data-tab="inventory" type="button">背包</button>
+            <button data-tab="skills" type="button">技能</button>
+            <button data-tab="quests" type="button">任务</button>
+          </div>
+          <div id="tabBody" class="tab-body"></div>
+
+          <section class="log-panel">
+            <h2>冒险日志</h2>
+            <div id="log" class="log"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <h2 id="modalTitle"></h2>
+        <div id="modalBody"></div>
+        <div id="modalActions" class="modal-actions"></div>
+      </div>
     </div>
-  </div>
 
-  <div id="toast" class="toast" aria-live="polite"></div>
+    <div id="toast" class="toast" aria-live="polite"></div>
 
-  <script type="module" src="/src/main.ts"></script>
-</body>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

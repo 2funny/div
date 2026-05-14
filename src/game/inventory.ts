@@ -26,11 +26,12 @@ export function item(
 }
 
 export function starterEquipment(classId: string): EquipmentSet {
-  const weapon = classId === "mage"
-    ? item("学徒法杖", "weapon", "普通", { mag: 2 })
-    : classId === "ranger"
-      ? item("短弓", "weapon", "普通", { atk: 2, spd: 1 })
-      : item("铁剑", "weapon", "普通", { atk: 2 });
+  const weapon =
+    classId === "mage"
+      ? item("学徒法杖", "weapon", "普通", { mag: 2 })
+      : classId === "ranger"
+        ? item("短弓", "weapon", "普通", { atk: 2, spd: 1 })
+        : item("铁剑", "weapon", "普通", { atk: 2 });
   return {
     weapon,
     armor: item("旧皮甲", "armor", "普通", { def: 1, hp: 4 }),
