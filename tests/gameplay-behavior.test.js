@@ -137,6 +137,27 @@ vm.runInContext(
   assert(state.hp < 90, "battle potion should spend the player action and allow an enemy response");
 
   state = {
+    classId: "warrior",
+    floor: 2,
+    hp: 90,
+    maxHp: 100,
+    mp: 12,
+    maxMp: 20,
+    stats: { atk: 14, mag: 0, def: 8, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    skillLevels: {},
+    skillBranches: {},
+    currentEnemy: { type: "monster", name: "Skill Dummy", hp: 40, maxHp: 40, atk: 1, def: 0 },
+    log: []
+  };
+  const realDateNowForSkill = Date.now;
+  Date.now = () => realDateNowForSkill() + 1000;
+  attackEnemy("skill", "heavy");
+  Date.now = realDateNowForSkill;
+  assert(state.mp < 12, "battle skills should spend mp when invoked by skill id");
+  assert(state.currentEnemy.hp < 40, "battle skills invoked by id should damage the enemy");
+
+  state = {
     floor: 3,
     facing: "down",
     player: { x: 1, y: 1 },
@@ -246,25 +267,23 @@ vm.runInContext(
   };
   assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "safe ordinary monsters should be eligible for auto battle");
   state.hp = 110;
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "auto battle should stop when hp is below the safety reserve");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "auto battle should follow win rate instead of a fixed hp reserve");
   state.hp = 180;
   state.mp = 18;
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "auto battle should stop when mp is below the safety reserve");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "auto battle should follow win rate instead of a fixed mp reserve");
   state.mp = 60;
   state.currentEnemy = { type: "elite", name: "Elite Guard", hp: 20, maxHp: 20, atk: 4, def: 1 };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "elite enemies should require manual battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "elite enemies above 60% win rate should be eligible for auto battle");
   state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "affixed enemies should require manual battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "affixed enemies above 60% win rate should be eligible for auto battle");
   state.currentEnemy = { type: "monster", name: "Skilled Guard", hp: 20, maxHp: 20, atk: 4, def: 1, skills: [{ id: "harden", name: "Harden", type: "guard" }] };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "skilled enemies should require manual battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "skilled enemies above 60% win rate should be eligible for auto battle");
+  state.currentEnemy = { type: "monster", name: "Overwhelming Guard", hp: 240, maxHp: 240, atk: 46, def: 20 };
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "auto battle should stop when the win rate is 60% or lower");
   state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
-  let autoStarted = false;
-  let autoWarning = null;
-  executeAutoBattle = () => { autoStarted = true; };
-  showEvent = (title, body) => { autoWarning = { title, body }; };
   autoBattle();
-  assert.strictEqual(autoStarted, false, "auto battle should not start for affixed enemies");
-  assert(modalState().body.includes("手动"), "auto battle warning should explain that manual battle is required");
+  assert(modalState().body.includes("胜率"), "auto battle confirmation should show the estimated win rate");
+  assert(modalState().actions.some((action) => action.text.includes("开始一键战斗")), "auto battle should be available above 60% win rate");
 
   state = {
     floor: 1,

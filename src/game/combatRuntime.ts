@@ -41,8 +41,21 @@ export function createCombatRuntime(ctx) {
   // 执行玩家回合：普通攻击、技能或防御都会在这里统一进入敌方回合。
   function attackEnemy(mode, skill = null) {
     if (Date.now() < battle.inputLockedUntil) return;
-    playSound(mode === "skill" ? "spell" : mode === "attack" ? "attack" : "guard");
     const enemy = state.currentEnemy;
+    if (!enemy || Number(enemy.hp) <= 0) {
+      state.currentEnemy = null;
+      render();
+      return;
+    }
+    if (mode === "skill") {
+      skill = typeof skill === "string" ? skillById(skill) : skill;
+      if (!skill) {
+        log("技能未找到。");
+        render();
+        return;
+      }
+    }
+    playSound(mode === "skill" ? "spell" : mode === "attack" ? "attack" : "guard");
     const t = totals();
     let result = "";
     resetBattleFx(mode);
@@ -573,32 +586,15 @@ export function createCombatRuntime(ctx) {
     }
   }
 
-  // 一键战斗准入策略：只允许资源充足时清理低风险普通怪。
-  // 自动战斗策略只做保守决策：优先保命，再选择收益最高的可用行动。
+  // 一键战斗准入策略：显示胜率高于 60% 时允许使用。
   function autoBattlePolicy(enemy) {
     if (!enemy) return { allowed: false, score: 0, label: "未知", reason: "没有可结算的敌人" };
     const risk = battleRisk(enemy);
-    const hpMax = safeEffectiveMaxHp();
-    const mpMax = safeEffectiveMaxMp();
-    if (enemy.type !== "monster" || enemy.roomBoss) {
-      return { ...risk, allowed: false, reason: "精英、首领和守卫需要手动处理" };
+    const displayedWinRate = Math.round(risk.score * 100);
+    if (displayedWinRate <= 60) {
+      return { ...risk, allowed: false, reason: "胜率没有超过 60%" };
     }
-    if (enemy.affix) {
-      return { ...risk, allowed: false, reason: "带词缀敌人需要手动判断" };
-    }
-    if (enemy.skills?.length) {
-      return { ...risk, allowed: false, reason: "会使用技能的敌人需要手动判断" };
-    }
-    if (state.hp / hpMax < 0.65) {
-      return { ...risk, allowed: false, reason: "生命低于安全线" };
-    }
-    if (state.mp / mpMax < 0.3) {
-      return { ...risk, allowed: false, reason: "法力低于安全线" };
-    }
-    if (risk.score < 0.78) {
-      return { ...risk, allowed: false, reason: "胜率没有达到安全扫荡线" };
-    }
-    return { ...risk, allowed: true, reason: "风险较低" };
+    return { ...risk, allowed: true, reason: "胜率高于 60%" };
   }
 
   // 兼容测试和老存档中缺少装备结构的场景，安全获取生命上限。

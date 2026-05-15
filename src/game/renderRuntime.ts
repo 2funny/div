@@ -778,9 +778,9 @@ export function createRenderRuntime(ctx) {
           const mpText = hasMp ? `${upgraded.mp} MP` : `${upgraded.mp} MP · MP不足`;
           const elementText = elementName(upgraded.element);
           const branchText = upgraded.branch ? `${upgraded.branch.name} · ` : "";
-          return `<button class="battle-skill-card" type="button" ${disabled} onclick="attackEnemy('skill', skillById('${skill.id}'))"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}</small></button>`;
+          return `<button class="battle-skill-card" type="button" ${disabled} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}</small></button>`;
         }
-        return `<button type="button" ${disabled} onclick="attackEnemy('skill', skillById('${skill.id}'))">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP</button>`;
+        return `<button type="button" ${disabled} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP</button>`;
       })
       .join("");
   }
