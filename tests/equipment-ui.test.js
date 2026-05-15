@@ -52,9 +52,12 @@ vm.runInContext(
   assert(compare.includes("攻击差 +3"), "inventory equipment should compare changed stats");
   assert(equippedStateBadge(), "equipment rows should have an equipped badge");
   assert.strictEqual(canUnequipSlot("weapon"), true, "equipped slot can be unequipped");
+  const mageWeapon = { id: "staff", kind: "equip", name: "Wrong Staff", slot: "weapon", weaponType: "staff", quality: "优秀", stats: { mag: 8 }, runeSlots: 0, runes: [], level: 0 };
+  assert(equipmentCompareText(mageWeapon).includes("职业不可用"), "unusable weapon comparisons should show the class restriction");
   state.inventory.push(
     { id: "potion", kind: "potion", name: "Potion", effect: "hp", amount: 20 },
-    upgrade
+    upgrade,
+    mageWeapon
   );
   state.materials = { "强化石": 2, "魔尘": 1 };
   state.runes = { "火焰1": 3 };
@@ -64,6 +67,8 @@ vm.runInContext(
   assert(inventory.includes("equipment-compare-corner"), "inventory equipment comparison should live in the row corner");
   assert(inventory.includes("compare-badge compare-badge-up"), "better equipment should show a persistent green up badge");
   assert(inventory.includes("compare-arrow"), "equipment comparison badge should include a directional arrow mark");
+  assert(inventory.includes("职业不可用"), "inventory rows should flag weapons unusable by the current class");
+  assert(inventory.includes("disabled"), "unusable weapon equip buttons should be disabled");
   assert(!inventory.includes("攻击差 +3"), "full stat deltas should stay out of compact inventory rows");
   assert(inventory.includes("inventory-filter"), "equipment inventory should include a type filter");
   assert(inventory.includes('<option value="weapon"'), "equipment filter should include weapon slot");
@@ -172,6 +177,15 @@ vm.runInContext(
   assert(battleSkills.includes("MP不足"), "battle skill cards should explain when MP is insufficient");
   assert(battleSkills.includes("skill-preview"), "battle skills should show direct outcome previews");
   assert(!battleSkills.includes("倍率"), "skill UI should avoid exposing internal multiplier wording");
+  state.classId = "mage";
+  state.mp = 50;
+  state.skillLevels = { fireball: 3, frost: 0, shield: 0 };
+  state.skillBranches = { fireball: "ember" };
+  state.stats = { ...CLASSES.mage.stats };
+  state.equipment = emptyEquipment();
+  const branchedSkills = renderSkillActionButtons("battle");
+  assert(branchedSkills.includes("余烬"), "branched skills should show the selected branch in battle");
+  assert(branchedSkills.includes("火属性"), "elemental skills should show their element");
   state.hp = 120;
   state.stats = { ...CLASSES.warrior.stats };
   state.equipment = {

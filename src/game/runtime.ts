@@ -17,6 +17,8 @@ import {
   VISION_RADIUS
 } from "./data";
 import { ENEMY_AFFIXES } from "./enemies";
+import { ELEMENT_IDS, elementName } from "./elements";
+import { WEAPON_TYPES, randomWeaponTypeForClass, weaponPrimaryStat, weaponTypeName } from "./equipmentRules";
 import { QUEST_DEFS } from "./quests";
 import { choice, rand, uid } from "./random";
 import {
@@ -28,6 +30,11 @@ import {
   writeSaveIndex
 } from "./save";
 import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
+import {
+  discoverLorePage,
+  ensureLoreState,
+  unlockLoreChaptersForFloor
+} from "./lore";
 import {
   emptyEquipment,
   item,
@@ -166,7 +173,9 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     doorKeyNames: {},
     quest: null,
     quests: [],
+    lore: { chapters: [], pages: [] },
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
+    skillBranches: {},
     inventory: [
       potion("小型生命药水", "hp", 18),
       potion("小型法力药水", "mp", 12),
@@ -185,6 +194,7 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
   state.hp = effectiveMaxHp();
   state.mp = effectiveMaxMp();
   generateFloor();
+  announceLoreUnlocks(unlockLoreChaptersForFloor(state));
   log(`你作为${cls.name}踏入了符文地牢。`);
   saveGame(false);
   render();
@@ -257,14 +267,14 @@ const {
 function randomEquipment() {
   const slot = choice(SLOTS);
   const quality = qualityRoll();
-  const prefix = { weapon: "符刻", armor: "守望", boots: "疾行", ring: "秘银", amulet: "星纹" }[
-    slot
-  ];
+  const weaponType = slot === "weapon" ? randomWeaponTypeForClass(state.classId || "warrior") : "";
+  const prefix =
+    slot === "weapon"
+      ? weaponTypeName(weaponType)
+      : { armor: "守望", boots: "疾行", ring: "秘银", amulet: "星纹" }[slot];
   const main =
     slot === "weapon"
-      ? Math.random() < 0.5
-        ? "atk"
-        : "mag"
+      ? weaponPrimaryStat(weaponType)
       : slot === "armor"
         ? "def"
         : slot === "boots"
@@ -275,13 +285,32 @@ function randomEquipment() {
   const bonus = qualityBonus(quality) + Math.floor(state.floor / 4);
   const stats = { [main]: bonus };
   if (slot === "armor") stats.hp = 4 + state.floor;
-  return item(
+  const equipment = item(
     `${quality}${prefix}${SLOT_NAMES[slot]}`,
     slot,
     quality,
     stats,
     quality === "普通" ? 0 : quality === "优秀" ? 1 : 2
   );
+  if (weaponType) equipment.weaponType = weaponType;
+  if (slot === "weapon" && (state.floor >= 4 || quality !== "普通") && Math.random() < weaponElementChance(quality)) {
+    equipment.element = choice(ELEMENT_IDS);
+    equipment.name = `${elementName(equipment.element)}纹${equipment.name}`;
+  }
+  if (slot !== "weapon" && state.floor >= 4 && Math.random() < elementResistanceChance(quality)) {
+    const resistance = choice(ELEMENT_IDS);
+    equipment.elementResistances = [resistance];
+    equipment.name = `${elementName(resistance)}抗${equipment.name}`;
+  }
+  return equipment;
+}
+
+function weaponElementChance(quality) {
+  return { 普通: 0.08, 优秀: 0.18, 稀有: 0.32, 史诗: 0.48, 传说: 0.7 }[quality] || 0.18;
+}
+
+function elementResistanceChance(quality) {
+  return { 普通: 0.08, 优秀: 0.16, 稀有: 0.28, 史诗: 0.42, 传说: 0.58 }[quality] || 0.16;
 }
 
 // 抽取装备品质，幸运值和楼层会略微提高高品质概率。
@@ -329,6 +358,7 @@ function nextFloor() {
   state.hp = Math.min(effectiveMaxHp(), state.hp + 5);
   state.mp = Math.min(effectiveMaxMp(), state.mp + 3);
   log(`进入第 ${state.floor} 层。`);
+  announceLoreUnlocks(unlockLoreChaptersForFloor(state));
   saveGame(false);
   showToast(`<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`);
 }
@@ -350,8 +380,13 @@ function previousFloor() {
   state.hp = Math.min(effectiveMaxHp(), state.hp + 3);
   state.mp = Math.min(effectiveMaxMp(), state.mp + 1);
   log(`返回第 ${state.floor} 层。`);
+  unlockLoreChaptersForFloor(state);
   saveGame(false);
   showToast(`<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`);
+}
+
+function announceLoreUnlocks(chapters = []) {
+  for (const chapter of chapters) log(`主线解锁：${chapter.title}。`);
 }
 
 // 保存当前楼层地图、玩家位置和朝向，供上下楼后恢复。
@@ -462,6 +497,23 @@ function openAdminPanel() {
     )
   ].join("");
   const runeOptions = RUNES.map((name) => `<option value="${name}1">${name}1</option>`).join("");
+  const weapon = state?.equipment?.weapon || null;
+  const weaponElement = weapon?.element || "none";
+  const weaponType = weapon?.weaponType || "none";
+  const weaponElementOptions = [
+    `<option value="none"${weaponElement === "none" ? " selected" : ""}>无元素</option>`,
+    ...ELEMENT_IDS.map(
+      (element) =>
+        `<option value="${element}"${weaponElement === element ? " selected" : ""}>${elementName(element)}</option>`
+    )
+  ].join("");
+  const weaponTypeOptions = [
+    `<option value="none"${weaponType === "none" ? " selected" : ""}>无限制</option>`,
+    ...Object.entries(WEAPON_TYPES).map(
+      ([type, def]) =>
+        `<option value="${type}"${weaponType === type ? " selected" : ""}>${def.name}</option>`
+    )
+  ].join("");
   showModal(
     "管理员模式",
     `
@@ -503,6 +555,25 @@ function openAdminPanel() {
           <select id="adminRune">${runeOptions}</select>
         </label>
         <button type="button" onclick="adminAddSelectedRune()">添加符文</button>
+      </section>
+      <section>
+        <h3>当前武器</h3>
+        <p class="admin-note">${
+          weapon
+            ? `${weapon.name} · ${weapon.element ? `${elementName(weapon.element)}属性` : "无元素"} · ${
+                weapon.weaponType ? weaponTypeName(weapon.weaponType) : "无限制"
+              }`
+            : "未装备武器，先在背包装备一把武器。"
+        }</p>
+        <div class="admin-grid">
+          <label>元素特效
+            <select id="adminWeaponElement" ${weapon ? "" : "disabled"}>${weaponElementOptions}</select>
+          </label>
+          <label>武器类型
+            <select id="adminWeaponType" ${weapon ? "" : "disabled"}>${weaponTypeOptions}</select>
+          </label>
+        </div>
+        <button type="button" ${weapon ? "" : "disabled"} onclick="adminApplyWeaponDebug()">应用到当前武器</button>
       </section>
     </div>
   `,
@@ -651,6 +722,27 @@ function adminAddRune(rune, amount = 1) {
   state.runes[rune] = (state.runes[rune] || 0) + amount;
   showToast(`${rune} +${amount}`);
   render();
+}
+
+function adminApplyWeaponDebug() {
+  const weapon = state?.equipment?.weapon;
+  if (!weapon) {
+    showToast("当前没有已装备武器");
+    return;
+  }
+  const element = document.getElementById("adminWeaponElement")?.value || "none";
+  const weaponType = document.getElementById("adminWeaponType")?.value || "none";
+  if (element === "none") delete weapon.element;
+  else weapon.element = element;
+  if (weaponType === "none") delete weapon.weaponType;
+  else weapon.weaponType = weaponType;
+  showToast(
+    `已更新${weapon.name}：${weapon.element ? `${elementName(weapon.element)}属性` : "无元素"} / ${
+      weapon.weaponType ? weaponTypeName(weapon.weaponType) : "无限制"
+    }`
+  );
+  render();
+  openAdminPanel();
 }
 
 // 结算玩家一次战斗行动，然后触发敌人回合或胜利流程。
@@ -1094,13 +1186,16 @@ const runtimeApi = {
   confirmUseItem,
   continueSavedGame,
   craftRune,
+  dealDamage,
   deleteSaveSlot,
+  discoverLorePage,
   disassembleEquipment,
   distance,
   effectiveMaxHp,
   effectiveMaxMp,
   emptyEquipment,
   enhance,
+  ensureLoreState,
   enterBattle,
   enterFloor,
   enemyAffixText,
@@ -1161,6 +1256,7 @@ const runtimeApi = {
   renderQuestList,
   renderSkills,
   renderSkillActionButtons,
+  skillById,
   renderStartScreen,
   renderTab,
   resolveCell,
@@ -1200,6 +1296,7 @@ const runtimeApi = {
   unequipItem,
   updateSoundButton,
   updateVisibility,
+  unlockLoreChaptersForFloor,
   upgradeSkill,
   useBattlePotion,
   useItem,
@@ -1220,6 +1317,7 @@ if (import.meta.env.DEV) {
     adminAddSelectedRune,
     adminAddSkillDust,
     adminApplyFloorEffect,
+    adminApplyWeaponDebug,
     adminHeal,
     openAdminPanel
   });
@@ -1252,13 +1350,16 @@ export {
   confirmUseItem,
   continueSavedGame,
   craftRune,
+  dealDamage,
   deleteSaveSlot,
+  discoverLorePage,
   disassembleEquipment,
   distance,
   effectiveMaxHp,
   effectiveMaxMp,
   emptyEquipment,
   enhance,
+  ensureLoreState,
   enterBattle,
   enterFloor,
   enemyAffixText,
@@ -1350,6 +1451,7 @@ export {
   unequipItem,
   updateSoundButton,
   updateVisibility,
+  unlockLoreChaptersForFloor,
   upgradeSkill,
   useBattlePotion,
   useItem,

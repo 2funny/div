@@ -21,6 +21,19 @@ export interface Skill {
   type: string;
   scale?: StatKey;
   power: number;
+  element?: string;
+  branches?: SkillBranch[];
+}
+
+export interface SkillBranch {
+  id: string;
+  name: string;
+  desc: string;
+  powerBonus?: number;
+  mpDelta?: number;
+  element?: string;
+  statusBonus?: number;
+  pierceResist?: boolean;
 }
 
 export interface PlayerClass {
@@ -59,10 +72,24 @@ export interface Enemy {
   spd?: number;
   luk?: number;
   affix?: string;
+  element?: string;
+  weaknesses?: string[];
+  resistances?: string[];
+  skills?: EnemySkill[];
+  _guard?: number;
   defeated?: boolean;
   roomId?: string;
   dropsKey?: boolean;
   roomBoss?: boolean;
+}
+
+export interface EnemySkill {
+  id: string;
+  name: string;
+  type: "damage" | "guard" | "heal" | "drain" | "weaken";
+  power?: number;
+  element?: string;
+  chance?: number;
 }
 
 export interface Item {
@@ -72,6 +99,9 @@ export interface Item {
   type?: string;
   slot?: SlotKey;
   quality?: string;
+  weaponType?: string;
+  element?: string;
+  elementResistances?: string[];
   stats?: Stats;
   runeSlots?: number;
   runes?: string[];
@@ -157,6 +187,11 @@ export interface QuestState {
   claimed: boolean;
 }
 
+export interface LoreState {
+  chapters: string[];
+  pages: string[];
+}
+
 export interface GameState {
   floor: number;
   classId?: string;
@@ -180,8 +215,10 @@ export interface GameState {
   statPoints?: number;
   skillPoints?: number;
   skillDust?: number;
+  skillBranches?: Record<string, string>;
   quest?: QuestState;
   quests?: QuestState[];
+  lore?: LoreState;
   log: string[];
   [key: string]: unknown;
 }

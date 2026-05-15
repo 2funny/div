@@ -8,6 +8,7 @@ import {
   saveSlotLabel,
   writeSaveIndex
 } from "./save";
+import { ensureLoreState, unlockLoreChaptersForFloor } from "./lore";
 
 // 存档运行时封装多槽 localStorage 读写、旧存档迁移和存档元信息维护。
 export function createSaveRuntime(ctx) {
@@ -168,8 +169,11 @@ export function createSaveRuntime(ctx) {
     state.doorKeyNames = state.doorKeyNames || {};
     state.quest = state.quest || null;
     state.quests = Array.isArray(state.quests) ? state.quests : [];
+    ensureLoreState(state);
+    unlockLoreChaptersForFloor(state);
     state.floorStates = state.floorStates || {};
     state.skillLevels = state.skillLevels || {};
+    state.skillBranches = state.skillBranches || {};
     for (const skill of CLASSES[state.classId].skills) {
       state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
     }

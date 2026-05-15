@@ -1,7 +1,9 @@
 // @ts-nocheck
 import { CLASSES, MAX_FLOOR, RUNES, SLOTS } from "./data";
+import { PLAYER_ELEMENT_RESIST, elementMatchLabel, elementMultiplier, elementName } from "./elements";
 import { QUEST_DEFS } from "./quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
+import { discoverLorePage } from "./lore";
 import { choice, rand } from "./random";
 
 // 战斗运行时聚合回合制战斗、技能升级、胜负结算和自动战斗策略。
@@ -48,7 +50,8 @@ export function createCombatRuntime(ctx) {
       result = dealDamage(
         enemy,
         Math.max(2, t.atk * 0.92 + t.spd * 0.12 - enemy.def * 0.45),
-        "普通攻击"
+        "普通攻击",
+        currentWeaponElement()
       );
     } else if (mode === "skill") {
       skill = upgradedSkill(skill);
@@ -107,16 +110,25 @@ export function createCombatRuntime(ctx) {
   }
 
   // 计算暴击并扣除敌人生命，同时返回战斗日志文本。
-  function dealDamage(enemy, amount, label) {
+  function dealDamage(enemy, amount, label, element = null, options = {}) {
     if (enemy.affix?.id === "swift" && Math.random() < 0.12) {
       setBattleFx("enemy", { type: "evade", text: "闪避", label });
       return `${enemy.name}借迅捷身法避开了${label}。`;
     }
+    const guard = enemy._guard || 0;
+    if (guard > 0) {
+      amount = Math.max(1, amount - guard);
+      enemy._guard = 0;
+    }
+    const multiplier = elementMultiplier(element, enemy, state.classId, options);
     const crit = Math.random() < 0.06 + totals().luk * 0.008;
-    const damage = Math.max(1, Math.round(amount * (crit ? 1.7 : 1)));
+    const damage = Math.max(1, Math.round(amount * multiplier * (crit ? 1.7 : 1)));
     enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
-    setBattleFx("enemy", { type: crit ? "crit" : "hit", text: `-${damage}`, label });
-    return `${label}${crit ? "暴击" : ""}，造成 ${damage} 点伤害。`;
+    const match = elementMatchLabel(multiplier);
+    const elementText = elementName(element);
+    const fxLabel = [label, elementText, match].filter(Boolean).join("·");
+    setBattleFx("enemy", { type: crit ? "crit" : "hit", element, text: `-${damage}`, label: fxLabel });
+    return `${label}${elementText ? `（${elementText}）` : ""}${crit ? "暴击" : ""}，造成 ${damage} 点伤害${match ? `（${match}）` : ""}。`;
   }
 
   // 执行职业技能效果，例如护盾、中毒、灼烧或连射。
@@ -142,16 +154,20 @@ export function createCombatRuntime(ctx) {
       return "你拉开距离，下回合更容易闪避。";
     }
     if (skill.type === "double") {
-      const d1 = dealDamage(enemy, t.atk * skill.power, "第一箭");
-      const d2 = dealDamage(enemy, t.atk * skill.power, "第二箭");
+      const element = currentWeaponElement();
+      const d1 = dealDamage(enemy, t.atk * skill.power, "第一箭", element);
+      const d2 = dealDamage(enemy, t.atk * skill.power, "第二箭", element);
       return `${d1} ${d2}`;
     }
     const base = skill.scale === "mag" ? t.mag : t.atk;
-    const text = dealDamage(enemy, base * skill.power + state.floor, skill.name);
+    const element = skill.element || currentWeaponElement();
+    const text = dealDamage(enemy, base * skill.power + state.floor, skill.name, element, {
+      pierceResist: skill.pierceResist
+    });
     if (["burn", "poison"].includes(skill.type)) {
-      const extra = 2 + Math.ceil(state.floor * 0.5);
+      const extra = 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
       enemy.hp = Math.max(0, Math.round(enemy.hp - extra));
-      setBattleFx("enemy", { type: skill.type, text: `-${extra}`, label: skill.name });
+      setBattleFx("enemy", { type: skill.type, element: skill.element, text: `-${extra}`, label: skill.name });
     }
     if (skill.type === "weaken") enemy.atk = Math.max(1, enemy.atk - 3);
     if (skill.type === "slow") enemy.atk = Math.max(1, enemy.atk - 2);
@@ -168,6 +184,12 @@ export function createCombatRuntime(ctx) {
       log(`${enemy.name}的攻击落空。`);
       return;
     }
+    const skill = chooseEnemySkill(enemy);
+    if (skill) {
+      enemySkillTurn(enemy, skill, t);
+      if (state.hp <= 0) death();
+      return;
+    }
     let damage = Math.max(1, Math.round(enemy.atk * 1.08 - t.def * 0.36 - t.res * 0.08));
     if (state._guard) {
       const guard = enemy.affix?.id === "shatter" ? Math.ceil(state._guard * 0.45) : state._guard;
@@ -179,10 +201,84 @@ export function createCombatRuntime(ctx) {
       const heal = Math.max(1, Math.round(damage * 0.22));
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
     }
-    setBattleFx("hero", { type: "hit", text: `-${damage}`, label: enemy.name });
+    setBattleFx("hero", { type: "hit", element: enemy.element, text: `-${damage}`, label: enemy.name });
     playSound("hurt");
     log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
     if (state.hp <= 0) death();
+  }
+
+  function currentWeaponElement() {
+    return state.equipment?.weapon?.element || null;
+  }
+
+  function chooseEnemySkill(enemy) {
+    if (!enemy?.skills?.length) return null;
+    const hpRatio = enemy.maxHp ? enemy.hp / enemy.maxHp : 1;
+    const baseChance = enemy.type === "boss" ? 0.54 : enemy.type === "elite" || enemy.roomBoss ? 0.42 : 0.24;
+    const candidates = enemy.skills.filter((skill) => {
+      if (skill.type === "heal" && hpRatio > 0.55) return false;
+      if (skill.type === "guard" && enemy._guard) return false;
+      return Math.random() < (skill.chance || baseChance);
+    });
+    if (!candidates.length && Math.random() < baseChance * 0.35) return choice(enemy.skills);
+    return candidates.length ? choice(candidates) : null;
+  }
+
+  function enemySkillTurn(enemy, skill, t) {
+    if (skill.type === "guard") {
+      const guard = Math.max(3, Math.round(3 + enemy.def + state.floor * 0.45));
+      enemy._guard = guard;
+      setBattleFx("enemy", { type: "shield", text: `+${guard}`, label: skill.name });
+      log(`${enemy.name}使用${skill.name}，下一次受到的伤害降低 ${guard} 点。`);
+      return;
+    }
+    if (skill.type === "heal") {
+      const missing = Math.max(0, enemy.maxHp - enemy.hp);
+      const heal = Math.max(2, Math.min(missing, Math.round(enemy.maxHp * (skill.power || 0.14))));
+      enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
+      setBattleFx("enemy", { type: "shield", text: `+${heal}`, label: skill.name });
+      log(`${enemy.name}使用${skill.name}，恢复 ${heal} 点生命。`);
+      return;
+    }
+
+    let damage = Math.max(
+      1,
+      Math.round(enemy.atk * (skill.power || 1) - t.def * 0.28 - t.res * 0.16)
+    );
+    const resistMultiplier = incomingElementMultiplier(skill.element);
+    damage = Math.max(1, Math.round(damage * resistMultiplier));
+    if (skill.type === "weaken") {
+      state._guard = 0;
+      damage = Math.max(1, Math.round(damage * 0.85));
+    }
+    if (state._guard) {
+      const guard = enemy.affix?.id === "shatter" ? Math.ceil(state._guard * 0.45) : state._guard;
+      damage = Math.max(0, damage - guard);
+      state._guard = 0;
+    }
+    state.hp -= damage;
+    if (skill.type === "drain" && damage > 0) {
+      const heal = Math.max(1, Math.round(damage * 0.28));
+      enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
+    }
+    const elementText = elementName(skill.element);
+    setBattleFx("hero", {
+      type: "hit",
+      element: skill.element,
+      text: `-${damage}`,
+      label: [skill.name, elementText].filter(Boolean).join("·")
+    });
+    playSound("hurt");
+    log(`${enemy.name}使用${skill.name}${elementText ? `（${elementText}）` : ""}，造成 ${damage} 点伤害${resistMultiplier < 1 ? "（装备抗性）" : ""}。`);
+  }
+
+  function incomingElementMultiplier(element) {
+    if (!element) return 1;
+    const resistances = new Set();
+    for (const eq of Object.values(state.equipment || {})) {
+      for (const entry of eq?.elementResistances || []) resistances.add(entry);
+    }
+    return resistances.has(element) ? PLAYER_ELEMENT_RESIST : 1;
   }
 
   function skillLevel(id) {
@@ -195,11 +291,17 @@ export function createCombatRuntime(ctx) {
 
   function upgradedSkill(skill) {
     const level = skillLevel(skill.id);
+    const branchId = state.skillBranches?.[skill.id];
+    const branch = skill.branches?.find((entry) => entry.id === branchId) || null;
     return {
       ...skill,
       level,
-      mp: skill.mp + Math.floor(level / 3),
-      power: Number((skill.power * (1 + level * 0.1)).toFixed(2))
+      branch,
+      mp: Math.max(1, skill.mp + Math.floor(level / 3) + (branch?.mpDelta || 0)),
+      power: Number((skill.power * (1 + level * 0.1) + (branch?.powerBonus || 0)).toFixed(2)),
+      element: branch?.element || skill.element,
+      statusBonus: branch?.statusBonus || 0,
+      pierceResist: !!branch?.pierceResist
     };
   }
 
@@ -218,11 +320,13 @@ export function createCombatRuntime(ctx) {
       return `两段伤害 ${damage} + ${damage}`;
     }
     const damage = Math.max(1, Math.round(base * skill.power + floor));
-    if (skill.type === "burn") return `伤害 ${damage} · 灼烧 ${2 + Math.ceil(floor * 0.5)}`;
-    if (skill.type === "poison") return `伤害 ${damage} · 中毒 ${2 + Math.ceil(floor * 0.5)}`;
-    if (skill.type === "weaken") return `伤害 ${damage} · 攻击 -3`;
-    if (skill.type === "slow") return `伤害 ${damage} · 攻击 -2`;
-    return `伤害 ${damage}`;
+    const elementText = elementName(skill.element);
+    const prefix = elementText ? `${elementText} · ` : "";
+    if (skill.type === "burn") return `${prefix}伤害 ${damage} · 灼烧 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+    if (skill.type === "poison") return `${prefix}伤害 ${damage} · 中毒 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+    if (skill.type === "weaken") return `${prefix}伤害 ${damage} · 攻击 -3`;
+    if (skill.type === "slow") return `${prefix}伤害 ${damage} · 攻击 -2`;
+    return `${prefix}伤害 ${damage}`;
   }
 
   function skillUpgradeCost(skillId) {
@@ -249,6 +353,8 @@ export function createCombatRuntime(ctx) {
     recordQuestKill(enemy, rewards);
     completeStairSeal(enemy, rewards);
     rewards.push(...maybeDrop(enemy));
+    const lore = discoverBattleLore(enemy);
+    if (lore) rewards.push(`残页：${lore.title}`);
     const levelBefore = state.level;
     while (state.xp >= state.xpNext) levelUp();
     if (state.level > levelBefore) rewards.push(`等级提升到 Lv.${state.level}`);
@@ -370,6 +476,15 @@ export function createCombatRuntime(ctx) {
     return drops;
   }
 
+  function discoverBattleLore(enemy) {
+    const source =
+      enemy.type === "boss" ? "boss" : enemy.type === "elite" || enemy.roomBoss ? "elite" : "";
+    if (!source) return null;
+    const page = discoverLorePage(state, source);
+    if (page) log(`发现地牢残页：${page.title}。`);
+    return page;
+  }
+
   function floorEffectReward() {
     return state?.map?.effect?.reward || 1;
   }
@@ -471,6 +586,9 @@ export function createCombatRuntime(ctx) {
     if (enemy.affix) {
       return { ...risk, allowed: false, reason: "带词缀敌人需要手动判断" };
     }
+    if (enemy.skills?.length) {
+      return { ...risk, allowed: false, reason: "会使用技能的敌人需要手动判断" };
+    }
     if (state.hp / hpMax < 0.65) {
       return { ...risk, allowed: false, reason: "生命低于安全线" };
     }
@@ -497,7 +615,8 @@ export function createCombatRuntime(ctx) {
   function battleRisk(enemy) {
     const t = totals();
     const heroPower = state.hp + state.mp * 0.35 + t.atk * 7 + t.mag * 6 + t.def * 6 + t.spd * 4;
-    const enemyPower = enemy.hp * 1.08 + enemy.atk * 12 + enemy.def * 8;
+    const skillPressure = (enemy.skills?.length || 0) * (enemy.type === "boss" ? 28 : enemy.type === "elite" ? 18 : 10);
+    const enemyPower = enemy.hp * 1.08 + enemy.atk * 12 + enemy.def * 8 + skillPressure;
     const score = heroPower / (heroPower + enemyPower);
     const label =
       score >= 0.75
@@ -532,6 +651,7 @@ export function createCombatRuntime(ctx) {
     completeStairSeal: withState(completeStairSeal),
     dealDamage: withState(dealDamage),
     death: withState(death),
+    enemySkillTurn: withState(enemySkillTurn),
     enemyTurn: withState(enemyTurn),
     executeAutoBattle: withState(executeAutoBattle),
     levelUp: withState(levelUp),

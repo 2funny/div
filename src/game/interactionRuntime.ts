@@ -3,6 +3,7 @@ import { RUNES, VISION_RADIUS } from "./data";
 import { cellsWithin, distance } from "./mapGeometry";
 import { choice, rand } from "./random";
 import { clearBattleFx } from "./combatFx";
+import { discoverLorePage } from "./lore";
 
 // 交互运行时负责玩家移动、视野刷新和地图物件触发，不直接生成 UI 标记。
 export function createInteractionRuntime(ctx) {
@@ -252,6 +253,8 @@ export function createInteractionRuntime(ctx) {
       message += "<br>额外发现：万能钥匙 +1";
       log("宝箱夹层里藏着一把万能钥匙。");
     }
+    const lore = discoverChestLore("chest");
+    if (lore) message += `<br>发现残页：${lore.title}`;
     cell.object = null;
     showEvent("打开宝箱", `<p>${message}</p>`, "收下");
   }
@@ -271,13 +274,20 @@ export function createInteractionRuntime(ctx) {
     state.inventory.push(loot);
     state.runes[rune] = (state.runes[rune] || 0) + 1;
     state.gold += gold;
+    const lore = discoverChestLore("lockedChest");
     cell.object = null;
     log(`打开上锁宝箱，获得${loot.name}、${rune}符文和 ${gold} 金币。`);
     showEvent(
       "打开上锁宝箱",
-      `<p>消耗 1 把符文钥匙。</p><p>获得装备：${loot.name}<br>获得符文：${rune}<br>金币 +${gold}</p>`,
+      `<p>消耗 1 把符文钥匙。</p><p>获得装备：${loot.name}<br>获得符文：${rune}<br>金币 +${gold}${lore ? `<br>发现残页：${lore.title}` : ""}</p>`,
       "收下"
     );
+  }
+
+  function discoverChestLore(source) {
+    const page = discoverLorePage(state, source);
+    if (page) log(`发现地牢残页：${page.title}。`);
+    return page;
   }
 
   function openLockedDoor(cell) {

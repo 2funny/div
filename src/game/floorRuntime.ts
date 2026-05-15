@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { FLOOR_EFFECTS, MAP_SIZE_MAX, MAP_SIZE_MIN, MAX_FLOOR, THEMES } from "./data";
 import { ENEMY_AFFIXES } from "./enemies";
+import { ELEMENTS } from "./elements";
 import { choice, rand } from "./random";
 import {
   cardinalNeighbors,
@@ -1195,19 +1196,123 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           ? ["矿洞蝙蝠", "诅咒矿工", "石像守卫"]
           : ["冰霜狼", "寒冰法徒", "冰晶魔像"];
     const elite = eliteOrBoss && !boss;
-    const hp = Math.round(boss ? 90 + floor * 8 : elite ? 22 + floor * 4.8 : 12 + floor * 2.6);
+    const hp = Math.round(boss ? 90 + floor * 8 : elite ? 22 + floor * 5.2 : 12 + floor * 3);
     const enemy = {
       type: boss ? "boss" : elite ? "elite" : "monster",
       name: boss ? "符文守王" : elite ? `精英${choice(names)}` : choice(names),
       hp,
       maxHp: hp,
-      atk: Math.round(boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.75 : 2 + floor * 0.45),
+      atk: Math.round(boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52),
       def: Math.round(boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08),
       xp: scaledReward(boss ? 160 + floor * 8 : 5 + floor * 2.2 + (elite ? 8 : 0)),
       gold: scaledReward(boss ? 220 + floor * 7 : rand(3, 6) + floor + (elite ? 5 : 0))
     };
+    assignEnemyElement(enemy, names);
+    assignEnemySkills(enemy);
     applyFloorEffectToEnemy(enemy);
     return maybeApplyEnemyAffix(enemy, eliteOrBoss);
+  }
+
+  function assignEnemyElement(enemy, names = []) {
+    const floor = state.floor || 1;
+    const profile = monsterProfileForName(enemy.name);
+    const byName =
+      enemy.name.includes("寒冰") || enemy.name.includes("冰霜") || enemy.name.includes("冰晶")
+        ? "ice"
+        : enemy.name.includes("矿") || enemy.name.includes("石像")
+          ? "thunder"
+          : enemy.name.includes("符文") || enemy.type === "boss"
+            ? "dark"
+            : enemy.name.includes("史莱姆")
+              ? "poison"
+              : "";
+    const themeElement =
+      currentFloorEffect()?.id === "lava"
+        ? "fire"
+        : currentFloorEffect()?.id === "snow"
+          ? "ice"
+          : currentFloorEffect()?.id === "rain"
+            ? "thunder"
+            : "";
+    const ladderElement =
+      floor >= 10
+        ? "dark"
+        : floor >= 7
+          ? "ice"
+          : floor >= 4
+            ? "thunder"
+            : choice(["fire", "poison", "dark"]);
+    const element = profile?.element || byName || themeElement || ladderElement;
+    const def = ELEMENTS[element] || ELEMENTS.poison;
+    enemy.element = def.value;
+    enemy.weaknesses = [...(profile?.weaknesses || def.weakAgainst)];
+    enemy.resistances = [...(profile?.resistances || def.strongAgainst)];
+    if (enemy.type === "boss" && !enemy.weaknesses.includes("holy")) enemy.weaknesses.push("holy");
+    if (enemy.type === "elite" && Math.random() < 0.35) {
+      enemy.resistances = [...new Set([...enemy.resistances, def.value])];
+    }
+    return enemy;
+  }
+
+  function monsterProfileForName(name = "") {
+    const profiles = [
+      { match: "史莱姆", element: "poison", weaknesses: ["thunder"], resistances: ["poison"] },
+      { match: "洞窟鼠", element: "dark", weaknesses: ["holy"], resistances: ["poison"] },
+      { match: "骷髅兵", element: "dark", weaknesses: ["holy", "fire"], resistances: ["poison", "dark"] },
+      { match: "矿洞蝙蝠", element: "thunder", weaknesses: ["ice"], resistances: ["thunder"] },
+      { match: "诅咒矿工", element: "dark", weaknesses: ["holy"], resistances: ["dark", "poison"] },
+      { match: "石像守卫", element: "thunder", weaknesses: ["ice"], resistances: ["thunder", "poison"] },
+      { match: "冰霜狼", element: "ice", weaknesses: ["fire"], resistances: ["ice"] },
+      { match: "寒冰法徒", element: "ice", weaknesses: ["fire", "thunder"], resistances: ["ice"] },
+      { match: "冰晶魔像", element: "ice", weaknesses: ["fire"], resistances: ["ice", "poison"] },
+      { match: "符文守王", element: "dark", weaknesses: ["holy"], resistances: ["dark", "thunder"] }
+    ];
+    return profiles.find((profile) => name.includes(profile.match));
+  }
+
+  function assignEnemySkills(enemy) {
+    const floor = state.floor || 1;
+    const skillChance =
+      enemy.type === "boss"
+        ? 1
+        : enemy.type === "elite" || enemy.roomBoss
+          ? floor >= 4
+            ? 0.9
+            : 0.45
+          : floor >= 6
+            ? Math.min(0.5, 0.16 + floor * 0.015)
+            : 0;
+    if (Math.random() > skillChance) return enemy;
+    const pool = enemySkillPool(enemy);
+    const skillCount = enemy.type === "boss" ? 3 : enemy.type === "elite" || enemy.roomBoss ? 2 : 1;
+    enemy.skills = [];
+    while (enemy.skills.length < skillCount && pool.length) {
+      const skill = choice(pool);
+      if (!enemy.skills.some((entry) => entry.id === skill.id)) enemy.skills.push(skill);
+      else pool.splice(pool.indexOf(skill), 1);
+    }
+    return enemy;
+  }
+
+  function enemySkillPool(enemy) {
+    const element = enemy.element || "dark";
+    const pool = [
+      { id: `${element}-strike`, name: `${ELEMENTS[element]?.name || "暗"}袭`, type: "damage", element, power: 1.12, chance: 0.34 },
+      { id: "harden", name: "硬化", type: "guard", power: 1, chance: 0.22 },
+      { id: "regenerate", name: "再生", type: "heal", power: 0.16, chance: 0.18 },
+      { id: "drain-touch", name: "汲取", type: "drain", element: "dark", power: 0.92, chance: 0.2 },
+      { id: "hex", name: "虚弱咒", type: "weaken", element: "dark", power: 0.82, chance: 0.18 }
+    ];
+    if (enemy.name.includes("石像") || enemy.name.includes("魔像")) {
+      pool.unshift({ id: "stone-skin", name: "石肤", type: "guard", power: 1, chance: 0.34 });
+    }
+    if (enemy.name.includes("法徒")) {
+      pool.unshift({ id: "ice-lance", name: "冰枪", type: "damage", element: "ice", power: 1.18, chance: 0.38 });
+    }
+    if (enemy.name.includes("诅咒") || enemy.name.includes("符文")) {
+      pool.unshift({ id: "dark-curse", name: "暗咒", type: "weaken", element: "dark", power: 0.88, chance: 0.3 });
+    }
+    return pool;
   }
 
   function applyFloorEffectToEnemy(enemy) {

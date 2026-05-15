@@ -203,6 +203,36 @@ vm.runInContext(
   assert(elite.affix, "elite enemies should carry a tactical affix");
   assert(enemyAffixText(elite).length > 0, "enemy affixes should have visible text");
 
+  const randomBeforeElementTest = Math.random;
+  Math.random = () => 0.99;
+  state = {
+    floor: 8,
+    classId: "mage",
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    stats: { atk: 10, mag: 20, def: 5, res: 5, spd: 5, luk: 0 },
+    equipment: emptyEquipment(),
+    currentEnemy: { type: "monster", name: "Ice Dummy", hp: 50, maxHp: 50, atk: 4, def: 1, element: "ice", weaknesses: ["fire"], resistances: ["ice"] },
+    log: []
+  };
+  dealDamage(state.currentEnemy, 10, "Element Probe", "fire");
+  assert.strictEqual(state.currentEnemy.hp, 35, "mage advantage should add a modest bonus on elemental weakness hits");
+  document.querySelector = (selector) => selector === ".map-wrap" ? getElement("mapWrap") : selector === ".map-stage" ? getElement("mapStage") : null;
+  renderBattleView();
+  assert(getElement("battleStage").innerHTML.includes("fx-element-fire"), "elemental damage should render a matching battle effect class");
+  assert(getElement("battleStage").innerHTML.includes("combat-fx-element-fire"), "elemental damage float text should carry a matching effect class");
+  Math.random = randomBeforeElementTest;
+
+  Math.random = () => 0.1;
+  state = { floor: 8 };
+  const skilledEnemy = makeEnemy(true);
+  assert(skilledEnemy.element, "generated enemies should carry an elemental identity");
+  assert(Array.isArray(skilledEnemy.weaknesses) && skilledEnemy.weaknesses.length > 0, "enemy elements should expose weaknesses");
+  assert(skilledEnemy.skills?.length > 0, "mid-floor elite enemies should have monster skills");
+  Math.random = randomBeforeElementTest;
+
   state = {
     floor: 8,
     hp: 180,
@@ -225,6 +255,9 @@ vm.runInContext(
   assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "elite enemies should require manual battle");
   state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
   assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "affixed enemies should require manual battle");
+  state.currentEnemy = { type: "monster", name: "Skilled Guard", hp: 20, maxHp: 20, atk: 4, def: 1, skills: [{ id: "harden", name: "Harden", type: "guard" }] };
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "skilled enemies should require manual battle");
+  state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
   let autoStarted = false;
   let autoWarning = null;
   executeAutoBattle = () => { autoStarted = true; };
@@ -415,6 +448,15 @@ vm.runInContext(
   const questList = renderQuestList();
   assert(questList.includes("quest-list"), "task tab should render a quest list");
   assert(questList.includes("已领取"), "claimed quests should remain visible in the task list");
+
+  state = { floor: 1, lore: { chapters: [], pages: [] }, quests: [], log: [] };
+  const unlockedLore = unlockLoreChaptersForFloor(state);
+  assert.strictEqual(unlockedLore[0]?.id, "threshold", "new adventures should unlock the opening lore chapter");
+  const firstPage = discoverLorePage(state, "chest");
+  assert.strictEqual(firstPage?.id, "threshold-scratch", "chests should be able to reveal eligible lore pages");
+  const loreList = renderQuestList();
+  assert(loreList.includes("地牢残页"), "task tab should include the lore archive");
+  assert(loreList.includes("入口刻痕"), "discovered lore pages should render in the task tab");
 
   const rescueSource = { type: "questNpc", questId: "rescueRoom", npcName: "救援斥候卡尔", roomId: "room-1-0", roomName: "1号房", rescueName: "矿工托兰", target: 1 };
   state.floor = 1;

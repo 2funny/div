@@ -1,5 +1,6 @@
 export interface BattleFxEntry {
   type?: string;
+  element?: string | null;
   text?: string;
   label?: string;
   seq?: string;

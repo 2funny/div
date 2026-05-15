@@ -32,6 +32,7 @@ export function starterEquipment(classId: string): EquipmentSet {
       : classId === "ranger"
         ? item("短弓", "weapon", "普通", { atk: 2, spd: 1 })
         : item("铁剑", "weapon", "普通", { atk: 2 });
+  weapon.weaponType = classId === "mage" ? "staff" : classId === "ranger" ? "bow" : "sword";
   return {
     weapon,
     armor: item("旧皮甲", "armor", "普通", { def: 1, hp: 4 }),

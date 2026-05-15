@@ -70,7 +70,7 @@ button:disabled:hover {
 }
 
 .shell {
-  width: min(1500px, calc(100vw - 20px));
+  width: min(1800px, calc(100vw - 20px));
   height: 100vh;
   margin: 0 auto;
   padding: 14px 0;
@@ -298,7 +298,7 @@ h2 {
 
 .game-view {
   display: grid;
-  grid-template-columns: 250px minmax(620px, 1fr) 410px;
+  grid-template-columns: 250px minmax(700px, 1fr) 410px;
   grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   flex: 1 1 auto;
@@ -400,6 +400,7 @@ h2 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
   min-height: 40px;
   padding: 0 10px;
   border: 1px solid var(--line);
@@ -407,7 +408,15 @@ h2 {
   background: #151a23;
 }
 
+.stat span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stat button {
+  flex: 0 0 auto;
   min-height: 26px;
   padding: 0 8px;
 }
@@ -782,8 +791,142 @@ h2 {
 .combatant.fx-hit .battle-sprite,
 .combatant.fx-crit .battle-sprite,
 .combatant.fx-burn .battle-sprite,
-.combatant.fx-poison .battle-sprite {
+.combatant.fx-poison .battle-sprite,
+.combatant[class*="fx-element-"] .battle-sprite {
   animation: impactShake 0.28s ease both;
+}
+
+.combatant[class*="fx-element-"] {
+  --element-wash:
+    radial-gradient(circle at 50% 54%, rgba(255, 255, 255, 0.18), transparent 38%),
+    radial-gradient(circle at 50% 72%, rgba(240, 195, 91, 0.18), transparent 54%);
+  --element-trace:
+    radial-gradient(circle at 28% 68%, rgba(255, 255, 255, 0.2) 0 2px, transparent 3px),
+    radial-gradient(circle at 72% 34%, rgba(255, 255, 255, 0.16) 0 2px, transparent 3px),
+    radial-gradient(circle at 52% 22%, rgba(255, 255, 255, 0.14) 0 1px, transparent 2px);
+  --element-glow: 0 0 30px rgba(240, 195, 91, 0.18);
+  --element-spark: #ffe6a8;
+  --element-spark-soft: rgba(255, 230, 168, 0.28);
+}
+
+.combatant[class*="fx-element-"]::before,
+.combatant[class*="fx-element-"]::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.combatant[class*="fx-element-"]::before {
+  inset: 30px 38px;
+  z-index: 1;
+  border-radius: 50%;
+  background: var(--element-trace);
+  opacity: 0;
+  filter: blur(0.15px);
+  mix-blend-mode: screen;
+  animation: elementTrace 0.9s cubic-bezier(0.18, 0.72, 0.22, 1) both;
+}
+
+.combatant[class*="fx-element-"]::after {
+  inset: 18px;
+  z-index: 2;
+  border-radius: 8px;
+  background: var(--element-wash);
+  box-shadow: var(--element-glow);
+  opacity: 0;
+  mix-blend-mode: screen;
+  animation: elementPulse 0.78s ease-out both;
+}
+
+.combatant.fx-element-fire {
+  --element-wash:
+    radial-gradient(ellipse at 52% 76%, rgba(255, 233, 145, 0.46), transparent 18%),
+    radial-gradient(ellipse at 38% 64%, rgba(255, 123, 58, 0.32), transparent 34%),
+    radial-gradient(ellipse at 70% 38%, rgba(255, 64, 32, 0.18), transparent 28%),
+    linear-gradient(0deg, rgba(255, 77, 30, 0.3), transparent 72%);
+  --element-trace:
+    radial-gradient(ellipse at 36% 82%, rgba(255, 196, 84, 0.78) 0 2px, transparent 4px),
+    radial-gradient(ellipse at 58% 70%, rgba(255, 104, 41, 0.58) 0 3px, transparent 6px),
+    radial-gradient(ellipse at 68% 48%, rgba(255, 225, 136, 0.36) 0 2px, transparent 5px),
+    linear-gradient(0deg, rgba(255, 90, 36, 0.22), transparent 56%);
+  --element-glow: 0 0 34px rgba(255, 118, 50, 0.3), inset 0 -28px 42px rgba(255, 76, 28, 0.14);
+  --element-spark: #ffc65c;
+  --element-spark-soft: rgba(255, 95, 38, 0.34);
+}
+
+.combatant.fx-element-ice {
+  --element-wash:
+    linear-gradient(135deg, transparent 39%, rgba(225, 252, 255, 0.64) 40%, transparent 43%),
+    linear-gradient(38deg, transparent 51%, rgba(116, 212, 255, 0.38) 52%, transparent 55%),
+    linear-gradient(156deg, transparent 57%, rgba(209, 246, 255, 0.34) 58%, transparent 61%),
+    radial-gradient(circle at 50% 52%, rgba(135, 219, 255, 0.24), transparent 62%);
+  --element-trace:
+    linear-gradient(125deg, transparent 42%, rgba(226, 252, 255, 0.52) 43%, transparent 45%),
+    linear-gradient(48deg, transparent 55%, rgba(109, 213, 255, 0.34) 56%, transparent 58%),
+    radial-gradient(circle at 36% 38%, rgba(211, 249, 255, 0.72) 0 1px, transparent 3px),
+    radial-gradient(circle at 68% 62%, rgba(149, 226, 255, 0.5) 0 1px, transparent 3px);
+  --element-glow: inset 0 0 0 1px rgba(184, 238, 255, 0.34), 0 0 32px rgba(112, 210, 255, 0.22);
+  --element-spark: #d7f8ff;
+  --element-spark-soft: rgba(111, 210, 255, 0.32);
+}
+
+.combatant.fx-element-thunder {
+  --element-wash:
+    linear-gradient(120deg, transparent 29%, rgba(255, 249, 145, 0.82) 30%, transparent 33%),
+    linear-gradient(72deg, transparent 55%, rgba(121, 219, 255, 0.58) 56%, transparent 58%),
+    linear-gradient(156deg, transparent 45%, rgba(255, 255, 255, 0.34) 46%, transparent 48%),
+    radial-gradient(circle at 54% 48%, rgba(255, 241, 102, 0.22), transparent 58%);
+  --element-trace:
+    linear-gradient(122deg, transparent 32%, rgba(255, 251, 156, 0.9) 33%, transparent 35%),
+    linear-gradient(68deg, transparent 58%, rgba(116, 223, 255, 0.54) 59%, transparent 61%),
+    radial-gradient(circle at 44% 42%, rgba(255, 245, 95, 0.76) 0 2px, transparent 4px);
+  --element-glow: 0 0 38px rgba(255, 235, 82, 0.32), inset 0 0 22px rgba(117, 217, 255, 0.13);
+  --element-spark: #fff66f;
+  --element-spark-soft: rgba(119, 220, 255, 0.32);
+  animation: thunderFrame 0.48s steps(2, end) both;
+}
+
+.combatant.fx-element-poison {
+  --element-wash:
+    radial-gradient(circle at 34% 62%, rgba(134, 255, 153, 0.32), transparent 22%),
+    radial-gradient(circle at 62% 38%, rgba(181, 113, 255, 0.24), transparent 25%),
+    radial-gradient(circle at 48% 76%, rgba(80, 224, 104, 0.2), transparent 50%),
+    linear-gradient(180deg, transparent, rgba(69, 151, 74, 0.14));
+  --element-trace:
+    radial-gradient(circle at 34% 62%, rgba(151, 255, 165, 0.64) 0 4px, transparent 7px),
+    radial-gradient(circle at 66% 44%, rgba(189, 132, 255, 0.42) 0 5px, transparent 9px),
+    radial-gradient(circle at 54% 72%, rgba(90, 237, 118, 0.34) 0 3px, transparent 7px);
+  --element-glow: 0 0 30px rgba(98, 232, 118, 0.22), inset 0 -22px 36px rgba(83, 221, 98, 0.1);
+  --element-spark: #9bf6a5;
+  --element-spark-soft: rgba(181, 113, 255, 0.28);
+}
+
+.combatant.fx-element-holy {
+  --element-wash:
+    linear-gradient(90deg, transparent 46%, rgba(255, 248, 202, 0.52) 48%, transparent 52%),
+    linear-gradient(0deg, transparent 45%, rgba(255, 224, 118, 0.38) 48%, transparent 54%),
+    radial-gradient(circle at 50% 50%, rgba(255, 237, 168, 0.34), transparent 56%),
+    radial-gradient(circle at 50% 50%, transparent 34%, rgba(255, 245, 186, 0.16) 35% 37%, transparent 39%);
+  --element-trace:
+    conic-gradient(from 45deg, transparent 0 18%, rgba(255, 245, 185, 0.36) 19% 21%, transparent 22% 48%, rgba(255, 225, 116, 0.3) 49% 51%, transparent 52% 100%),
+    radial-gradient(circle at 50% 50%, transparent 42%, rgba(255, 239, 163, 0.34) 43% 45%, transparent 47%);
+  --element-glow: 0 0 38px rgba(255, 221, 121, 0.28), inset 0 0 26px rgba(255, 246, 188, 0.12);
+  --element-spark: #fff0ae;
+  --element-spark-soft: rgba(255, 225, 119, 0.3);
+}
+
+.combatant.fx-element-dark {
+  --element-wash:
+    radial-gradient(circle at 50% 50%, rgba(157, 91, 255, 0.3), transparent 31%),
+    radial-gradient(circle at 50% 50%, transparent 37%, rgba(40, 18, 68, 0.5) 38%, transparent 64%),
+    radial-gradient(ellipse at 48% 74%, rgba(18, 8, 33, 0.36), transparent 44%);
+  --element-trace:
+    radial-gradient(circle at 50% 50%, transparent 28%, rgba(167, 104, 255, 0.38) 29% 31%, transparent 34%),
+    radial-gradient(circle at 42% 48%, rgba(207, 168, 255, 0.34) 0 2px, transparent 4px),
+    radial-gradient(circle at 63% 62%, rgba(95, 52, 178, 0.48) 0 3px, transparent 6px);
+  --element-glow: inset 0 0 30px rgba(134, 78, 255, 0.26), 0 0 32px rgba(86, 48, 150, 0.26);
+  --element-spark: #caa7ff;
+  --element-spark-soft: rgba(91, 51, 157, 0.36);
 }
 
 .combatant.fx-crit {
@@ -816,7 +959,137 @@ h2 {
   animation: floatDamage 0.9s ease-out both;
 }
 
+.element-burst {
+  position: absolute;
+  inset: -46px -62px;
+  z-index: 0;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.element-burst i {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: var(--spark-w, 6px);
+  height: var(--spark-h, 16px);
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--element-spark), transparent);
+  box-shadow:
+    0 0 10px var(--element-spark),
+    0 0 18px var(--element-spark-soft);
+  opacity: 0;
+  transform-origin: 50% 100%;
+  animation: elementSpark 0.78s cubic-bezier(0.12, 0.72, 0.24, 1) both;
+}
+
+.element-burst i:nth-child(1) {
+  --r: -76deg;
+  --d: 42px;
+  --spark-w: 5px;
+  animation-delay: 0.01s;
+}
+
+.element-burst i:nth-child(2) {
+  --r: -48deg;
+  --d: 58px;
+  --spark-h: 20px;
+  animation-delay: 0.04s;
+}
+
+.element-burst i:nth-child(3) {
+  --r: -18deg;
+  --d: 48px;
+  --spark-w: 4px;
+  animation-delay: 0.02s;
+}
+
+.element-burst i:nth-child(4) {
+  --r: 18deg;
+  --d: 56px;
+  animation-delay: 0.05s;
+}
+
+.element-burst i:nth-child(5) {
+  --r: 44deg;
+  --d: 46px;
+  --spark-w: 4px;
+  --spark-h: 13px;
+}
+
+.element-burst i:nth-child(6) {
+  --r: 70deg;
+  --d: 60px;
+  --spark-h: 18px;
+  animation-delay: 0.03s;
+}
+
+.element-burst i:nth-child(7) {
+  --r: 110deg;
+  --d: 38px;
+  --spark-w: 3px;
+  --spark-h: 12px;
+  animation-delay: 0.06s;
+}
+
+.element-burst i:nth-child(8) {
+  --r: -116deg;
+  --d: 40px;
+  --spark-w: 3px;
+  --spark-h: 12px;
+  animation-delay: 0.07s;
+}
+
+.combat-fx-element-fire .element-burst i,
+.combat-fx-burn .element-burst i {
+  border-radius: 65% 65% 45% 45%;
+  filter: blur(0.1px);
+}
+
+.combat-fx-element-ice .element-burst i {
+  width: 4px;
+  height: 18px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #f5fdff, rgba(111, 210, 255, 0.18));
+  clip-path: polygon(50% 0, 100% 42%, 64% 100%, 36% 100%, 0 42%);
+}
+
+.combat-fx-element-thunder .element-burst i {
+  width: 5px;
+  height: 22px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #fff, var(--element-spark) 45%, transparent);
+  clip-path: polygon(44% 0, 100% 0, 62% 42%, 100% 42%, 30% 100%, 48% 52%, 0 52%);
+}
+
+.combat-fx-element-poison .element-burst i,
+.combat-fx-poison .element-burst i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--element-spark) 0 34%, var(--element-spark-soft) 35% 58%, transparent 60%);
+}
+
+.combat-fx-element-holy .element-burst i {
+  width: 4px;
+  height: 18px;
+  background: linear-gradient(180deg, #fff, var(--element-spark) 52%, transparent);
+  box-shadow:
+    0 0 12px var(--element-spark),
+    0 0 24px var(--element-spark-soft);
+}
+
+.combat-fx-element-dark .element-burst i {
+  width: 8px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--element-spark) 0 18%, rgba(43, 18, 72, 0.82) 42%, transparent 68%);
+}
+
 .combat-fx b {
+  position: relative;
+  z-index: 2;
   color: #fff2bd;
   font-size: 30px;
   line-height: 1;
@@ -826,6 +1099,8 @@ h2 {
 }
 
 .combat-fx small {
+  position: relative;
+  z-index: 2;
   margin-top: 4px;
   padding: 2px 6px;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -853,6 +1128,50 @@ h2 {
 
 .combat-fx-poison b {
   color: #8ff2a3;
+}
+
+.combat-fx-element-fire b,
+.combat-fx-burn b {
+  color: #ffb26d;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 18px rgba(255, 111, 48, 0.65);
+}
+
+.combat-fx-element-ice b {
+  color: #bceeff;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 16px rgba(98, 207, 255, 0.58);
+}
+
+.combat-fx-element-thunder b {
+  color: #fff18c;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 20px rgba(255, 228, 66, 0.78);
+}
+
+.combat-fx-element-poison b,
+.combat-fx-poison b {
+  color: #9af6a5;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 16px rgba(95, 240, 117, 0.58);
+}
+
+.combat-fx-element-holy b {
+  color: #fff0ae;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 20px rgba(255, 225, 119, 0.66);
+}
+
+.combat-fx-element-dark b {
+  color: #caa7ff;
+  text-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.72),
+    0 0 18px rgba(146, 86, 255, 0.62);
 }
 
 .combatant h2 {
@@ -926,6 +1245,14 @@ h2 {
   display: block;
   min-height: 18px;
   color: #f5d37a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.enemy-element {
+  display: block;
+  min-height: 18px;
+  color: #9fd8ff;
   font-size: 12px;
   font-weight: 700;
 }
@@ -2999,7 +3326,8 @@ h2 {
 }
 
 .quest-panel,
-.quest-list {
+.quest-list,
+.lore-archive {
   display: grid;
   gap: 8px;
 }
@@ -3012,12 +3340,14 @@ h2 {
 }
 
 .quest-panel b,
-.quest-row b {
+.quest-row b,
+.lore-row b {
   color: #dbe8ff;
 }
 
 .quest-panel small,
-.quest-row small {
+.quest-row small,
+.lore-row small {
   display: block;
   color: var(--muted);
 }
@@ -3057,6 +3387,41 @@ h2 {
   color: #b8d5f4;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.lore-archive {
+  margin-top: 12px;
+}
+
+.lore-archive h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  color: #ffe6a8;
+  font-size: 14px;
+}
+
+.lore-archive h3 small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lore-row {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(240, 195, 91, 0.16);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(240, 195, 91, 0.07), rgba(255, 255, 255, 0.015)),
+    rgba(12, 16, 23, 0.66);
+}
+
+.lore-row small {
+  line-height: 1.45;
 }
 
 .forge-summary {
@@ -3275,6 +3640,68 @@ h2 {
   }
 }
 
+@keyframes elementPulse {
+  0% {
+    transform: scale(0.72) rotate(-1deg);
+    opacity: 0;
+    filter: saturate(1.1) brightness(1);
+  }
+  18% {
+    opacity: 0.82;
+    filter: saturate(1.38) brightness(1.18);
+  }
+  52% {
+    opacity: 0.46;
+    filter: saturate(1.2) brightness(1.08);
+  }
+  100% {
+    transform: scale(1.22) rotate(1deg);
+    opacity: 0;
+    filter: saturate(1) brightness(1);
+  }
+}
+
+@keyframes elementTrace {
+  0% {
+    transform: scale(0.62) rotate(-5deg);
+    opacity: 0;
+  }
+  22% {
+    opacity: 0.86;
+  }
+  100% {
+    transform: scale(1.2) rotate(8deg);
+    opacity: 0;
+  }
+}
+
+@keyframes elementSpark {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--r)) translateY(8px) scale(0.3);
+  }
+  18% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--r)) translateY(calc(-1 * var(--d))) scale(0.84);
+  }
+}
+
+@keyframes thunderFrame {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(1.55);
+  }
+  60% {
+    filter: brightness(0.92);
+  }
+}
+
 @keyframes floatDamage {
   0% {
     transform: translate(-50%, 12px) scale(0.82);
@@ -3307,7 +3734,18 @@ h2 {
   }
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1400px) {
+  .game-view {
+    grid-template-columns: 230px minmax(520px, 1fr) minmax(340px, 360px);
+  }
+
+  .action-panel {
+    width: 100%;
+    max-width: 360px;
+  }
+}
+
+@media (max-width: 1180px) {
   body {
     height: auto;
     min-height: 100vh;
@@ -3328,6 +3766,11 @@ h2 {
 
   .hero-panel {
     min-height: 0;
+  }
+
+  .action-panel {
+    width: 100%;
+    max-width: 100%;
   }
 
   .paperdoll {
@@ -3431,6 +3874,26 @@ h2 {
 .battle-consumable:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.branch-choice-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.branch-choice {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-height: 58px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.branch-choice small {
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 @media (max-width: 560px) {

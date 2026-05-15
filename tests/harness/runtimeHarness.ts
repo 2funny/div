@@ -31,8 +31,10 @@ function normalizeState(nextState: unknown) {
   state.keys ??= 0;
   state.log ??= [];
   state.quests ??= [];
+  state.lore ??= { chapters: [], pages: [] };
   state.floorStates ??= {};
   state.skillLevels ??= {};
+  state.skillBranches ??= {};
   state.statPoints ??= 0;
   state.skillPoints ??= 0;
   state.skillDust ??= 0;

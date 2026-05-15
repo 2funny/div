@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "./data";
+import { equipmentRestrictionText, isWeaponUsableByClass } from "./equipmentRules";
 import { cardinalNeighbors, cellsWithin, distance } from "./mapGeometry";
 
 // 背包运行时负责装备穿脱、消耗品、属性点、强化、商店和传送道具。
@@ -140,6 +141,10 @@ export function createInventoryRuntime(ctx) {
     const index = state.inventory.findIndex((entry) => entry.id === id);
     const entry = state.inventory[index];
     if (!entry || entry.kind !== "equip") return;
+    if (!isWeaponUsableByClass(entry, state.classId)) {
+      showEvent("无法装备", `<p>${equipmentRestrictionText(entry, state.classId)}。</p>`, "知道了");
+      return;
+    }
     const beforeHpMax = effectiveMaxHp();
     const beforeMpMax = effectiveMaxMp();
     const old = state.equipment[entry.slot];
@@ -154,6 +159,11 @@ export function createInventoryRuntime(ctx) {
   function confirmEquipItem(id) {
     const entry = state.inventory.find((item) => item.id === id);
     if (!entry) return;
+    const restriction = equipmentRestrictionText(entry, state.classId);
+    if (restriction) {
+      showEvent("无法装备", `<p>${restriction}。</p><p>可以出售或分解这件装备。</p>`, "知道了");
+      return;
+    }
     showConfirm(
       "装备确认",
       `<p>要装备 ${entry.name} 吗？当前同部位装备会放回背包。</p>${equipmentCompareText(entry)}`,
@@ -482,14 +492,20 @@ export function createInventoryRuntime(ctx) {
   }
 
   // 消耗技能点和技能尘提升指定技能等级。
-  function upgradeSkill(skillId) {
+  function upgradeSkill(skillId, branchId = null) {
     if (!canUpgradeSkill(skillId)) return;
     const cost = skillUpgradeCost(skillId);
     state.skillPoints -= cost.points;
     state.skillDust -= cost.dust;
     state.skillLevels[skillId] = skillLevel(skillId) + 1;
     const skill = skillById(skillId);
-    log(`${skill.name}提升到 Lv.${state.skillLevels[skillId]}。`);
+    const branch = branchId ? skill?.branches?.find((entry) => entry.id === branchId) : null;
+    if (branch) {
+      state.skillBranches = state.skillBranches || {};
+      state.skillBranches[skillId] = branch.id;
+    }
+    log(`${skill.name}提升到 Lv.${state.skillLevels[skillId]}${branch ? `，选择${branch.name}分支` : ""}。`);
+    if (branch) closeModal();
     render();
   }
 
@@ -497,13 +513,29 @@ export function createInventoryRuntime(ctx) {
     const skill = skillById(skillId);
     if (!skill || !canUpgradeSkill(skillId)) return;
     const cost = skillUpgradeCost(skillId);
-    const next = upgradedSkill({ ...skill, id: skill.id });
     const currentLevel = skillLevel(skillId);
-    const nextPower = Number((skill.power * (1 + (currentLevel + 1) * 0.14)).toFixed(2));
-    const nextMp = Math.max(1, skill.mp - Math.floor((currentLevel + 1) / 2));
+    const current = upgradedSkill(skill);
+    const nextLevel = currentLevel + 1;
+    const currentBranch = skill.branches?.find((entry) => entry.id === state.skillBranches?.[skillId]) || null;
+    const nextPower = Number((skill.power * (1 + nextLevel * 0.1) + (currentBranch?.powerBonus || 0)).toFixed(2));
+    const nextMp = Math.max(1, skill.mp + Math.floor(nextLevel / 3) + (currentBranch?.mpDelta || 0));
+    const shouldChooseBranch = nextLevel >= 3 && skill.branches?.length && !state.skillBranches?.[skillId];
+    if (shouldChooseBranch) {
+      showModal(
+        "技能分支选择",
+        `<p>将 ${skill.name} 升到 Lv.${nextLevel} 时，需要选择一个长期分支。</p><div class="branch-choice-list">${skill.branches
+          .map(
+            (branch) =>
+              `<button type="button" class="branch-choice" onclick="upgradeSkill('${skillId}', '${branch.id}')"><b>${branch.name}</b><small>${branch.desc}</small></button>`
+          )
+          .join("")}</div><p>消耗 ${cost.points} 点技能点和 ${cost.dust} 点技能尘。</p>`,
+        [{ text: "取消", action: closeModal }]
+      );
+      return;
+    }
     showConfirm(
       "技能升级确认",
-      `<p>消耗 ${cost.points} 点技能点和 ${cost.dust} 点技能尘，将 ${skill.name} 升到 Lv.${currentLevel + 1}。</p><p>倍率 ${next.power} → ${nextPower}，耗蓝 ${next.mp} → ${nextMp}。</p>`,
+      `<p>消耗 ${cost.points} 点技能点和 ${cost.dust} 点技能尘，将 ${skill.name} 升到 Lv.${nextLevel}。</p><p>倍率 ${current.power} → ${nextPower}，耗蓝 ${current.mp} → ${nextMp}。</p>`,
       "升级",
       () => upgradeSkill(skillId)
     );

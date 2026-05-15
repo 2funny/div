@@ -12,9 +12,20 @@ import {
   isValidMapSize
 } from "./data";
 import { getBattleFx } from "./combatFx";
+import { elementName, elementResistText, elementTags } from "./elements";
+import { equipmentRestrictionText, isWeaponUsableByClass, weaponTypeName } from "./equipmentRules";
+import {
+  LORE_CHAPTERS,
+  LORE_PAGES,
+  ensureLoreState,
+  loreChapterById,
+  lorePageById
+} from "./lore";
 import { cellsWithin, distance } from "./mapGeometry";
 import { QUEST_DEFS } from "./quests";
 import { syncWeatherCanvas } from "./weatherCanvas";
+
+const LORE_TOTAL = LORE_CHAPTERS.length + LORE_PAGES.length;
 
 // 渲染运行时集中生成 DOM 字符串和面板状态，不承担战斗、掉落等规则计算。
 export function createRenderRuntime(ctx) {
@@ -650,8 +661,9 @@ export function createRenderRuntime(ctx) {
         ${combatantFxMarkup("enemy")}
         <h2>${enemy.name}</h2>
         ${enemy.affix ? `<small class="enemy-affix">${enemyAffixText(enemy)}</small>` : ""}
+        ${elementTags(enemy) ? `<small class="enemy-element">${elementTags(enemy)}</small>` : ""}
         <div class="battle-meter enemy"><span style="width:${enemyPct}%"></span><b>${Math.max(0, Math.round(enemy.hp))}/${enemy.maxHp} HP</b></div>
-        <p>攻击 ${enemy.atk} · 防御 ${enemy.def}</p>
+        <p>攻击 ${enemy.atk} · 防御 ${enemy.def}${enemy.skills?.length ? ` · 技能 ${enemy.skills.map((skill) => skill.name).join("/")}` : ""}</p>
       </div>
     </div>
     ${renderBattleCommandPanel(mpMax)}
@@ -764,7 +776,9 @@ export function createRenderRuntime(ctx) {
         const disabled = hasMp ? "" : "disabled";
         if (mode === "battle") {
           const mpText = hasMp ? `${upgraded.mp} MP` : `${upgraded.mp} MP · MP不足`;
-          return `<button class="battle-skill-card" type="button" ${disabled} onclick="attackEnemy('skill', skillById('${skill.id}'))"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${skill.desc}</small></button>`;
+          const elementText = elementName(upgraded.element);
+          const branchText = upgraded.branch ? `${upgraded.branch.name} · ` : "";
+          return `<button class="battle-skill-card" type="button" ${disabled} onclick="attackEnemy('skill', skillById('${skill.id}'))"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}</small></button>`;
         }
         return `<button type="button" ${disabled} onclick="attackEnemy('skill', skillById('${skill.id}'))">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP</button>`;
       })
@@ -774,13 +788,21 @@ export function createRenderRuntime(ctx) {
   function battleFxClass(target) {
     const fx = getBattleFx()?.[target];
     if (!fx) return "";
-    return `fx-${fx.type}`;
+    return [`fx-${fx.type}`, fx.element ? `fx-element-${fx.element}` : ""].filter(Boolean).join(" ");
   }
 
   function combatantFxMarkup(target) {
     const fx = getBattleFx()?.[target];
     if (!fx) return "";
-    return `<span class="combat-fx combat-fx-${fx.type}" style="--fx-key:${fx.seq}"><b>${fx.text}</b><small>${fx.label}</small></span>`;
+    const classes = [`combat-fx`, `combat-fx-${fx.type}`, fx.element ? `combat-fx-element-${fx.element}` : ""]
+      .filter(Boolean)
+      .join(" ");
+    return `<span class="${classes}" style="--fx-key:${fx.seq}">${elementBurstMarkup(fx.element)}<b>${fx.text}</b><small>${fx.label}</small></span>`;
+  }
+
+  function elementBurstMarkup(element) {
+    if (!element) return "";
+    return `<i class="element-burst" aria-hidden="true">${Array.from({ length: 8 }, () => "<i></i>").join("")}</i>`;
   }
 
   function centerFxMarkup() {
@@ -981,8 +1003,9 @@ export function createRenderRuntime(ctx) {
 
   function renderQuestList() {
     const quests = ensureQuestList();
+    const lore = renderLoreArchive();
     if (!quests.length) {
-      return `<section class="quest-list"><p>暂无任务。和商人或委托人交谈后，可以在这里追踪目标。</p></section>`;
+      return `<section class="quest-list"><p>暂无任务。和商人或委托人交谈后，可以在这里追踪目标。</p></section>${lore}`;
     }
     const rows = quests
       .map((quest) => {
@@ -1029,7 +1052,43 @@ export function createRenderRuntime(ctx) {
     `;
       })
       .join("");
-    return `<section class="quest-list">${rows}</section>`;
+    return `<section class="quest-list">${rows}</section>${lore}`;
+  }
+
+  function renderLoreArchive() {
+    const lore = ensureLoreState(state);
+    const chapters = lore.chapters.map(loreChapterById).filter(Boolean);
+    const pages = lore.pages.map(lorePageById).filter(Boolean);
+    if (!chapters.length && !pages.length) return "";
+    const chapterRows = chapters
+      .map(
+        (entry) => `
+      <article class="lore-row inventory-card">
+        <span class="item-kicker">主线 · 第 ${entry.floor} 层</span>
+        <b>${entry.title}</b>
+        <small>${entry.text}</small>
+      </article>
+    `
+      )
+      .join("");
+    const pageRows = pages
+      .map(
+        (entry) => `
+      <article class="lore-row inventory-card">
+        <span class="item-kicker">残页 · 第 ${entry.minFloor} 层后</span>
+        <b>${entry.title}</b>
+        <small>${entry.text}</small>
+      </article>
+    `
+      )
+      .join("");
+    const count = chapters.length + pages.length;
+    return `
+    <section class="lore-archive">
+      <h3>地牢残页 <small>${count}/${LORE_TOTAL}</small></h3>
+      ${chapterRows}${pageRows}
+    </section>
+  `;
   }
 
   // 渲染背包列表和物品操作按钮。
@@ -1129,13 +1188,15 @@ export function createRenderRuntime(ctx) {
     const hasCurrent = !!state.equipment?.[entry.slot];
     const compare = hasCurrent ? equipmentScoreBadge(entry, "inline-equipment-compare") : "";
     const sellDisabled = canSellEquipmentHere() ? "" : `disabled title="需要在商人身边售出"`;
+    const restriction = equipmentRestrictionText(entry, state.classId);
+    const equipDisabled = restriction ? `disabled title="${restriction}"` : "";
     return `<div class="item-row equip-row equipment-card inventory-card ${better ? "better-equipment" : ""}">
-    <div class="item-main"><span class="item-kicker">${SLOT_NAMES[entry.slot]} · ${entry.quality}</span><b>${entry.name}</b>${equipmentSummary(entry)}</div>
+    <div class="item-main"><span class="item-kicker">${SLOT_NAMES[entry.slot]} · ${entry.quality}${restriction ? " · 职业不可用" : ""}</span><b>${entry.name}</b>${equipmentSummary(entry, restriction)}</div>
     <div class="item-side">
       ${compare ? `<div class="equipment-compare-corner">${compare}</div>` : ""}
       <div class="equipment-actions inventory-equipment-actions">
         <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
-        <button type="button" onclick="confirmEquipItem('${entry.id}')">装备</button>
+        <button type="button" ${equipDisabled} onclick="confirmEquipItem('${entry.id}')">装备</button>
         <button type="button" ${sellDisabled} onclick="confirmSellEquipment('${entry.id}')">售出</button>
       </div>
     </div>
@@ -1150,6 +1211,16 @@ export function createRenderRuntime(ctx) {
       showInventoryEquipmentDetail(id);
       return;
     }
+    const actions = [{ text: "关闭", action: closeModal }];
+    if (isWeaponUsableByClass(entry, state.classId)) {
+      actions.push({
+        text: "装备",
+        action: () => {
+          closeModal();
+          equipItem(id);
+        }
+      });
+    }
     showModal(
       `${entry.name} 对比`,
       `
@@ -1159,16 +1230,7 @@ export function createRenderRuntime(ctx) {
       <div class="detail-row"><b>差值</b><span>${equipmentCompareText(entry)}</span></div>
     </div>
   `,
-      [
-        { text: "关闭", action: closeModal },
-        {
-          text: "装备",
-          action: () => {
-            closeModal();
-            equipItem(id);
-          }
-        }
-      ]
+      actions
     );
   }
 
@@ -1181,16 +1243,20 @@ export function createRenderRuntime(ctx) {
     const compare = state.equipment?.[entry.slot]
       ? `<div class="detail-row"><b>对比</b><span>${equipmentCompareText(entry)}</span></div>`
       : "";
-    const actions = [
-      { text: "关闭", action: closeModal },
-      {
+    const restriction = equipmentRestrictionText(entry, state.classId);
+    const restrictionRow = restriction
+      ? `<div class="detail-row"><b>限制</b><span>${restriction}</span></div>`
+      : "";
+    const actions = [{ text: "关闭", action: closeModal }];
+    if (isWeaponUsableByClass(entry, state.classId)) {
+      actions.push({
         text: "装备",
         action: () => {
           closeModal();
           equipItem(id);
         }
-      }
-    ];
+      });
+    }
     if (canSellEquipmentHere())
       actions.splice(2, 0, {
         text: "售出",
@@ -1201,7 +1267,7 @@ export function createRenderRuntime(ctx) {
       });
     showModal(
       entry.name,
-      equipmentDetailMarkup(entry, SLOT_NAMES[entry.slot], runeText, compare),
+      equipmentDetailMarkup(entry, SLOT_NAMES[entry.slot], runeText, `${restrictionRow}${compare}`),
       actions
     );
   }
@@ -1266,7 +1332,7 @@ export function createRenderRuntime(ctx) {
         const upgraded = upgradedSkill(skill);
         const cost = skillUpgradeCost(skill.id);
         const disabled = canUpgradeSkill(skill.id) ? "" : "disabled";
-        return `<div class="item-row skill-row inventory-card"><div class="item-main"><span class="item-kicker">职业技能</span><b>${skill.name} Lv.${upgraded.level}</b><small>${skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>升级 ${cost.points} 点 / ${cost.dust} 尘</i></span></div><div class="item-actions"><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div></div>`;
+        return `<div class="item-row skill-row inventory-card"><div class="item-main"><span class="item-kicker">职业技能${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name} Lv.${upgraded.level}</b><small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>升级 ${cost.points} 点 / ${cost.dust} 尘</i></span></div><div class="item-actions"><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div></div>`;
       })
       .join("")}
   `;
@@ -1274,11 +1340,15 @@ export function createRenderRuntime(ctx) {
 
   // 格式化装备属性摘要。
   function statsText(eq) {
-    return Object.entries(eq.stats)
+    const stats = Object.entries(eq.stats)
       .map(([key, value]) => {
         const enhance = eq.level ? `(+${eq.level})` : "";
         return `${STAT_NAMES[key] || key}+${value}${enhance}`;
       })
+      .join(" ");
+    const elementText = elementName(eq.element);
+    return [elementText ? `${elementText}属性` : "", elementResistText(eq.elementResistances), stats]
+      .filter(Boolean)
       .join(" ");
   }
 
@@ -1288,6 +1358,7 @@ export function createRenderRuntime(ctx) {
     <span class="equipment-meta">
       <span>评分 ${itemScore(eq)}</span>
       <span>${SLOT_NAMES[eq.slot]}</span>
+      ${eq.weaponType ? `<span>${weaponTypeName(eq.weaponType)}</span>` : ""}
       <span class="quality-${eq.quality}">${eq.quality}</span>
       <span>强化 +${eq.level}</span>
       ${stateLabel ? `<span class="state-muted">${stateLabel}</span>` : ""}
@@ -1304,6 +1375,7 @@ export function createRenderRuntime(ctx) {
   function equipmentCompareText(item, extraClass = "") {
     if (!item || item.kind !== "equip") return "";
     const current = state.equipment[item.slot];
+    const restriction = equipmentRestrictionText(item, state.classId);
     const scoreDelta = itemScore(item) - itemScore(current);
     const direction = scoreDelta >= 0 ? "up" : "down";
     const arrow = scoreDelta >= 0 ? "↑" : "↓";
@@ -1325,6 +1397,7 @@ export function createRenderRuntime(ctx) {
       ${equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta)}
       <span class="compare-title">装备对比</span>
       <span class="${scoreClass}">评分差 ${scoreSign}${scoreDelta}</span>
+      ${restriction ? `<span class="compare-down">${restriction}</span>` : ""}
       ${statDeltas.join("")}
     </small>
   `;
@@ -1365,6 +1438,7 @@ export function createRenderRuntime(ctx) {
       <div class="equipment-meta">
         <span>评分 ${itemScore(eq)}</span>
         <span>${slotName}</span>
+        ${eq.weaponType ? `<span>${weaponTypeName(eq.weaponType)}</span>` : ""}
         <span class="quality-${eq.quality}">${eq.quality}</span>
         <span>强化 +${eq.level}</span>
       </div>
@@ -1387,12 +1461,17 @@ export function createRenderRuntime(ctx) {
       return sum + (weights[key] || 5) * (value + item.level);
     }, 0);
     const qualityScore = { 普通: 0, 优秀: 8, 稀有: 18, 史诗: 32, 传说: 50 }[item.quality] || 0;
-    const slotScore = (item.runeSlots || 0) * 6 + (item.runes?.length || 0) * 4;
+    const slotScore =
+      (item.runeSlots || 0) * 6 +
+      (item.runes?.length || 0) * 4 +
+      (item.element ? 10 : 0) +
+      (item.elementResistances?.length || 0) * 8;
     return Math.round(statScore + qualityScore + slotScore);
   }
 
   function isBetterThanEquipped(item) {
     if (item.kind !== "equip") return false;
+    if (!isWeaponUsableByClass(item, state.classId)) return false;
     return itemScore(item) > itemScore(state.equipment[item.slot]);
   }
 

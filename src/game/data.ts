@@ -19,7 +19,11 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "造成高额攻击伤害。",
         type: "damage",
         scale: "atk",
-        power: 1.35
+        power: 1.35,
+        branches: [
+          { id: "cleave", name: "裂斩", desc: "伤害更高，但耗蓝 +1。", powerBonus: 0.16, mpDelta: 1 },
+          { id: "breaker", name: "破甲", desc: "对抗性目标更稳定。", powerBonus: 0.04, pierceResist: true }
+        ]
       },
       {
         id: "guard",
@@ -27,7 +31,11 @@ export const CLASSES: Record<string, PlayerClass> = {
         mp: 3,
         desc: "本回合获得护盾并反击。",
         type: "guard",
-        power: 0.45
+        power: 0.45,
+        branches: [
+          { id: "bulwark", name: "壁垒", desc: "格挡反击更强。", powerBonus: 0.12 },
+          { id: "ward", name: "守势", desc: "耗蓝 -1。", mpDelta: -1 }
+        ]
       },
       {
         id: "roar",
@@ -36,7 +44,12 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "造成伤害并削弱敌人。",
         type: "weaken",
         scale: "atk",
-        power: 0.85
+        power: 0.85,
+        element: "dark",
+        branches: [
+          { id: "intimidate", name: "震慑", desc: "伤害略高。", powerBonus: 0.1 },
+          { id: "sunder", name: "碎抗", desc: "暗属性伤害可部分穿透抗性。", pierceResist: true }
+        ]
       }
     ]
   },
@@ -58,7 +71,12 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "造成高魔法伤害并灼烧。",
         type: "burn",
         scale: "mag",
-        power: 1.45
+        power: 1.45,
+        element: "fire",
+        branches: [
+          { id: "burst", name: "爆裂", desc: "伤害更高，但耗蓝 +1。", powerBonus: 0.18, mpDelta: 1 },
+          { id: "ember", name: "余烬", desc: "灼烧伤害提高。", powerBonus: -0.04, statusBonus: 3 }
+        ]
       },
       {
         id: "frost",
@@ -67,9 +85,25 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "造成伤害并减速。",
         type: "slow",
         scale: "mag",
-        power: 1.15
+        power: 1.15,
+        element: "ice",
+        branches: [
+          { id: "deep-freeze", name: "深寒", desc: "伤害提高。", powerBonus: 0.12 },
+          { id: "shatter-ice", name: "碎冰", desc: "冰属性伤害可部分穿透抗性。", pierceResist: true }
+        ]
       },
-      { id: "shield", name: "奥术护盾", mp: 5, desc: "获得大量护盾。", type: "shield", power: 1.3 }
+      {
+        id: "shield",
+        name: "奥术护盾",
+        mp: 5,
+        desc: "获得大量护盾。",
+        type: "shield",
+        power: 1.3,
+        branches: [
+          { id: "focus", name: "凝神", desc: "耗蓝 -1。", mpDelta: -1 },
+          { id: "aegis", name: "秘盾", desc: "护盾效果更强。", powerBonus: 0.15 }
+        ]
+      }
     ]
   },
   ranger: {
@@ -90,9 +124,24 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "连续攻击两次。",
         type: "double",
         scale: "atk",
-        power: 0.86
+        power: 0.86,
+        branches: [
+          { id: "rapid", name: "疾射", desc: "耗蓝 -1。", mpDelta: -1 },
+          { id: "charged", name: "蓄势", desc: "每箭伤害提高。", powerBonus: 0.08, mpDelta: 1 }
+        ]
       },
-      { id: "step", name: "闪避步", mp: 3, desc: "提高闪避并准备暴击。", type: "evade", power: 1 },
+      {
+        id: "step",
+        name: "闪避步",
+        mp: 3,
+        desc: "提高闪避并准备暴击。",
+        type: "evade",
+        power: 1,
+        branches: [
+          { id: "light-step", name: "轻步", desc: "耗蓝 -1。", mpDelta: -1 },
+          { id: "counter-step", name: "反击步", desc: "后续输出略强。", powerBonus: 0.1 }
+        ]
+      },
       {
         id: "poison",
         name: "毒箭",
@@ -100,7 +149,12 @@ export const CLASSES: Record<string, PlayerClass> = {
         desc: "造成伤害并中毒。",
         type: "poison",
         scale: "atk",
-        power: 1.05
+        power: 1.05,
+        element: "poison",
+        branches: [
+          { id: "corrode", name: "腐蚀", desc: "中毒伤害提高。", statusBonus: 3 },
+          { id: "venom-burst", name: "毒爆", desc: "伤害更高，但耗蓝 +1。", powerBonus: 0.16, mpDelta: 1 }
+        ]
       }
     ]
   }
