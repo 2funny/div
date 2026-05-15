@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Rune Dungeon icon">
+  <defs>
+    <linearGradient id="stone" x1="10" y1="4" x2="54" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a2029" />
+      <stop offset=".48" stop-color="#0b0f15" />
+      <stop offset="1" stop-color="#030508" />
+    </linearGradient>
+    <linearGradient id="metal" x1="16" y1="8" x2="49" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6c7888" />
+      <stop offset=".44" stop-color="#2b3544" />
+      <stop offset="1" stop-color="#0a0d12" />
+    </linearGradient>
+    <linearGradient id="rune" x1="27" y1="10" x2="39" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f0c36a" />
+      <stop offset=".42" stop-color="#b74132" />
+      <stop offset="1" stop-color="#4a1014" />
+    </linearGradient>
+    <filter id="ember" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation=".75" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="64" height="64" fill="#020305" />
+  <path d="M8 9 32 3l24 6 4 42-28 10L4 51Z" fill="url(#stone)" stroke="#222c38" stroke-width="2" />
+  <path d="M13 15h38M11 29h42M10 44h44M22 10l-2 15M43 10l2 15M32 27v16M20 43l-2 11M45 43l2 11" stroke="#242d38" stroke-width="2" opacity=".72" />
+  <path d="M17 53V29c0-10 6-18 15-18s15 8 15 18v24" fill="#070a0f" stroke="url(#metal)" stroke-width="4" />
+  <path d="M24 53V31c0-6 3-11 8-11s8 5 8 11v22" fill="#020305" stroke="#161d28" stroke-width="3" />
+  <path d="M32 12 37 24 32 34 27 24Z" fill="#070a0f" stroke="url(#rune)" stroke-width="3" stroke-linejoin="miter" filter="url(#ember)" />
+  <path d="M25 41h14M32 32v18M27 50h10" fill="none" stroke="url(#rune)" stroke-width="3" stroke-linecap="square" stroke-linejoin="miter" filter="url(#ember)" />
+  <path d="M16 54h32" stroke="#6f5a36" stroke-width="2" stroke-linecap="square" opacity=".78" />
+  <path d="M6 50 32 59l26-9" fill="none" stroke="#0a0d12" stroke-width="3" opacity=".75" />
+</svg>

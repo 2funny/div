@@ -1,10 +1,15 @@
 // @ts-nocheck
-import { CLASSES, MAX_FLOOR, RUNES, SLOTS } from "./data";
-import { PLAYER_ELEMENT_RESIST, elementMatchLabel, elementMultiplier, elementName } from "./elements";
-import { QUEST_DEFS } from "./quests";
+import { CLASSES, MAX_FLOOR, RUNES, SLOTS } from "../constants";
+import {
+  PLAYER_ELEMENT_RESIST,
+  elementMatchLabel,
+  elementMultiplier,
+  elementName
+} from "../elements";
+import { QUEST_DEFS } from "../quest/quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
-import { discoverLorePage } from "./lore";
-import { choice, rand } from "./random";
+import { discoverLorePage } from "../quest/lore";
+import { choice, rand } from "../random";
 
 // 战斗运行时聚合回合制战斗、技能升级、胜负结算和自动战斗策略。
 export function createCombatRuntime(ctx) {
@@ -140,7 +145,12 @@ export function createCombatRuntime(ctx) {
     const match = elementMatchLabel(multiplier);
     const elementText = elementName(element);
     const fxLabel = [label, elementText, match].filter(Boolean).join("·");
-    setBattleFx("enemy", { type: crit ? "crit" : "hit", element, text: `-${damage}`, label: fxLabel });
+    setBattleFx("enemy", {
+      type: crit ? "crit" : "hit",
+      element,
+      text: `-${damage}`,
+      label: fxLabel
+    });
     return `${label}${elementText ? `（${elementText}）` : ""}${crit ? "暴击" : ""}，造成 ${damage} 点伤害${match ? `（${match}）` : ""}。`;
   }
 
@@ -180,7 +190,12 @@ export function createCombatRuntime(ctx) {
     if (["burn", "poison"].includes(skill.type)) {
       const extra = 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
       enemy.hp = Math.max(0, Math.round(enemy.hp - extra));
-      setBattleFx("enemy", { type: skill.type, element: skill.element, text: `-${extra}`, label: skill.name });
+      setBattleFx("enemy", {
+        type: skill.type,
+        element: skill.element,
+        text: `-${extra}`,
+        label: skill.name
+      });
     }
     if (skill.type === "weaken") enemy.atk = Math.max(1, enemy.atk - 3);
     if (skill.type === "slow") enemy.atk = Math.max(1, enemy.atk - 2);
@@ -214,7 +229,12 @@ export function createCombatRuntime(ctx) {
       const heal = Math.max(1, Math.round(damage * 0.22));
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
     }
-    setBattleFx("hero", { type: "hit", element: enemy.element, text: `-${damage}`, label: enemy.name });
+    setBattleFx("hero", {
+      type: "hit",
+      element: enemy.element,
+      text: `-${damage}`,
+      label: enemy.name
+    });
     playSound("hurt");
     log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
     if (state.hp <= 0) death();
@@ -227,7 +247,8 @@ export function createCombatRuntime(ctx) {
   function chooseEnemySkill(enemy) {
     if (!enemy?.skills?.length) return null;
     const hpRatio = enemy.maxHp ? enemy.hp / enemy.maxHp : 1;
-    const baseChance = enemy.type === "boss" ? 0.54 : enemy.type === "elite" || enemy.roomBoss ? 0.42 : 0.24;
+    const baseChance =
+      enemy.type === "boss" ? 0.54 : enemy.type === "elite" || enemy.roomBoss ? 0.42 : 0.24;
     const candidates = enemy.skills.filter((skill) => {
       if (skill.type === "heal" && hpRatio > 0.55) return false;
       if (skill.type === "guard" && enemy._guard) return false;
@@ -282,7 +303,9 @@ export function createCombatRuntime(ctx) {
       label: [skill.name, elementText].filter(Boolean).join("·")
     });
     playSound("hurt");
-    log(`${enemy.name}使用${skill.name}${elementText ? `（${elementText}）` : ""}，造成 ${damage} 点伤害${resistMultiplier < 1 ? "（装备抗性）" : ""}。`);
+    log(
+      `${enemy.name}使用${skill.name}${elementText ? `（${elementText}）` : ""}，造成 ${damage} 点伤害${resistMultiplier < 1 ? "（装备抗性）" : ""}。`
+    );
   }
 
   function incomingElementMultiplier(element) {
@@ -335,8 +358,10 @@ export function createCombatRuntime(ctx) {
     const damage = Math.max(1, Math.round(base * skill.power + floor));
     const elementText = elementName(skill.element);
     const prefix = elementText ? `${elementText} · ` : "";
-    if (skill.type === "burn") return `${prefix}伤害 ${damage} · 灼烧 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
-    if (skill.type === "poison") return `${prefix}伤害 ${damage} · 中毒 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+    if (skill.type === "burn")
+      return `${prefix}伤害 ${damage} · 灼烧 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+    if (skill.type === "poison")
+      return `${prefix}伤害 ${damage} · 中毒 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
     if (skill.type === "weaken") return `${prefix}伤害 ${damage} · 攻击 -3`;
     if (skill.type === "slow") return `${prefix}伤害 ${damage} · 攻击 -2`;
     return `${prefix}伤害 ${damage}`;
@@ -611,7 +636,8 @@ export function createCombatRuntime(ctx) {
   function battleRisk(enemy) {
     const t = totals();
     const heroPower = state.hp + state.mp * 0.35 + t.atk * 7 + t.mag * 6 + t.def * 6 + t.spd * 4;
-    const skillPressure = (enemy.skills?.length || 0) * (enemy.type === "boss" ? 28 : enemy.type === "elite" ? 18 : 10);
+    const skillPressure =
+      (enemy.skills?.length || 0) * (enemy.type === "boss" ? 28 : enemy.type === "elite" ? 18 : 10);
     const enemyPower = enemy.hp * 1.08 + enemy.atk * 12 + enemy.def * 8 + skillPressure;
     const score = heroPower / (heroPower + enemyPower);
     const label =

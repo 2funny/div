@@ -1,4 +1,4 @@
-import { SAVE_KEY } from "./data";
+import { SAVE_KEY } from "../constants";
 
 export const SAVE_INDEX_KEY = `${SAVE_KEY}-index-v2`;
 export const SAVE_SLOT_LIMIT = 4;
@@ -45,4 +45,4 @@ export {
   saveGame,
   saveGameToSlot,
   saveSlots
-} from "./runtime";
+} from "../runtime";

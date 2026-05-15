@@ -1,4 +1,4 @@
-import type { Cell } from "./types";
+import type { Cell } from "../types";
 
 // 地图几何工具保持纯函数，供生成、交互、渲染和传送逻辑共享。
 export function cardinalNeighbors<T extends Cell>(map: T[][], x: number, y: number): T[] {

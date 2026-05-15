@@ -8,6 +8,7 @@ Rune Dungeon is a Vite + TypeScript browser RPG. The game is mostly plain DOM, C
 
 - Keep files UTF-8 without BOM.
 - Chinese UI copy is expected.
+- When adding or modifying code, pay attention to code quality, existing project conventions, and clear responsibility boundaries between modules. Avoid putting dictionaries, domain rules, rendering, persistence, or runtime orchestration into the wrong layer.
 - If Java files are added later: entity classes need Swagger annotations, Lombok `@Data @AllArgsConstructor @NoArgsConstructor`, author `zhoubh`.
 - Enum classes should contain `value` and `name` fields and provide lookup by `value`.
 
@@ -17,17 +18,16 @@ Rune Dungeon is a Vite + TypeScript browser RPG. The game is mostly plain DOM, C
 - `index.html`: static DOM shell.
 - `src/styles.css`: layout, panels, map tiles, weather, special floor visuals.
 - `src/game/runtime.ts`: top-level game runtime composition and exported browser handlers.
-- `src/game/renderRuntime.ts`: main UI rendering, map rendering, battle UI, side panels.
-- `src/game/audioRuntime.ts`: sound toggle, sound effects, dungeon BGM, battle BGM.
-- `src/game/audioProfiles.ts`: short sound effect profiles.
-- `src/game/audioEngine.ts`: low-level Web Audio helpers.
-- `src/game/data.ts`: classes, assets, constants, themes, floor effects.
-- `src/game/floorRuntime.ts`: floor generation, map generation, rooms, special floor terrain.
-- `src/game/interactionRuntime.ts`: movement and tile interactions.
-- `src/game/combatRuntime.ts`: combat actions and combat resolution.
+- `src/game/render/`: main UI rendering, map rendering, battle UI, side panels, modals, weather canvas.
+- `src/game/audio/`: sound toggle, sound effects, dungeon BGM, battle BGM, profiles, and low-level Web Audio helpers.
+- `src/game/constants/`: classes, assets, equipment labels, system constants, themes, floor effects.
+- `src/game/equipment/`: equipment factories, starter gear, weapon rules, and equipment name dictionaries.
+- `src/game/floor/`: floor generation, map generation, map geometry, rooms, special floor terrain.
+- `src/game/interaction/`: movement, visibility, and tile interactions.
+- `src/game/combat/`: combat actions, combat resolution, enemy affixes, and battle FX state.
 - `src/game/inventoryRuntime.ts`: inventory, equipment, shop, forge, item use.
-- `src/game/questRuntime.ts`: quest state and quest rewards.
-- `src/game/saveRuntime.ts`: save slots and persistence.
+- `src/game/quest/`: quest state, quest rewards, quest definitions, and lore.
+- `src/game/save/`: save slots, save keys, save index, and persistence.
 - `src/ui/dom.ts`: `byId` and `requiredById`.
 - `src/ui/bindEvents.ts`: static event binding and global input handlers.
 - `tests/*.test.js`: Node-based behavior tests using the Vite test harness build.
@@ -36,12 +36,12 @@ Rune Dungeon is a Vite + TypeScript browser RPG. The game is mostly plain DOM, C
 
 - Weather visuals: `.map-stage.effect-rain`, `.effect-snow`, `.effect-lava` in `src/styles.css`.
 - Lava/snow/rain tile treatment: `.lava`, `.effect-snow .floor`, `.effect-rain .floor`, `.effect-lava .floor` in `src/styles.css`.
-- BGM: `scheduleDungeonMotif()` and `scheduleBattlePulse()` in `src/game/audioRuntime.ts`.
-- Short sound effects: `src/game/audioProfiles.ts`.
-- Map tile HTML: `renderMap()` in `src/game/renderRuntime.ts`.
-- Battle screen: `renderBattleView()` and `renderBattleCommandPanel()` in `src/game/renderRuntime.ts`.
-- Floor effect definitions: `FLOOR_EFFECTS` in `src/game/data.ts`.
-- Floor effect generation/application: `chooseFloorEffect()` and effect terrain helpers in `src/game/floorRuntime.ts`.
+- BGM: `scheduleDungeonMotif()` and `scheduleBattlePulse()` in `src/game/audio/audioRuntime.ts`.
+- Short sound effects: `src/game/audio/audioProfiles.ts`.
+- Map tile HTML: `renderMap()` in `src/game/render/renderRuntime.ts`.
+- Battle screen: `renderBattleView()` and `renderBattleCommandPanel()` in `src/game/render/renderRuntime.ts`.
+- Floor effect definitions: `FLOOR_EFFECTS` in `src/game/constants/world.ts`.
+- Floor effect generation/application: `chooseFloorEffect()` and effect terrain helpers in `src/game/floor/floorRuntime.ts`.
 
 ## DOM Rules
 

@@ -15,11 +15,17 @@ import {
   STAT_NAMES,
   THEMES,
   VISION_RADIUS
-} from "./data";
-import { ENEMY_AFFIXES } from "./enemies";
+} from "./constants";
+import { ENEMY_AFFIXES } from "./combat/enemies";
 import { ELEMENT_IDS, elementName } from "./elements";
-import { WEAPON_TYPES, randomWeaponTypeForClass, weaponPrimaryStat, weaponTypeName } from "./equipmentRules";
-import { QUEST_DEFS } from "./quests";
+import {
+  WEAPON_TYPES,
+  randomWeaponTypeForClass,
+  weaponPrimaryStat,
+  weaponTypeName
+} from "./equipment/equipmentRules";
+import { equipmentName } from "./equipment/equipmentNames";
+import { QUEST_DEFS } from "./quest/quests";
 import { choice, rand, uid } from "./random";
 import {
   SAVE_SLOT_LIMIT,
@@ -28,13 +34,9 @@ import {
   formatSaveTime,
   readSaveIndex,
   writeSaveIndex
-} from "./save";
-import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
-import {
-  discoverLorePage,
-  ensureLoreState,
-  unlockLoreChaptersForFloor
-} from "./lore";
+} from "./save/save";
+import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combat/combatFx";
+import { discoverLorePage, ensureLoreState, unlockLoreChaptersForFloor } from "./quest/lore";
 import {
   emptyEquipment,
   item,
@@ -42,18 +44,24 @@ import {
   starterEquipment,
   starterInventory,
   teleportBeacon
-} from "./inventory";
-import { cardinalNeighbors, cellsWithin, distance, floorNeighborCount, validRoomDoor } from "./map";
+} from "./equipment/inventory";
+import {
+  cardinalNeighbors,
+  cellsWithin,
+  distance,
+  floorNeighborCount,
+  validRoomDoor
+} from "./floor/map";
 import { requiredById } from "../ui/dom";
-import { createAudioRuntime } from "./audioRuntime";
-import { createModalRuntime } from "./modalRuntime";
-import { createFloorRuntime } from "./floorRuntime";
-import { createRenderRuntime } from "./renderRuntime";
-import { createCombatRuntime } from "./combatRuntime";
+import { createAudioRuntime } from "./audio/audioRuntime";
+import { createModalRuntime } from "./render/modalRuntime";
+import { createFloorRuntime } from "./floor/floorRuntime";
+import { createRenderRuntime } from "./render/renderRuntime";
+import { createCombatRuntime } from "./combat/combatRuntime";
 import { createInventoryRuntime } from "./inventoryRuntime";
-import { createSaveRuntime } from "./saveRuntime";
-import { createQuestRuntime } from "./questRuntime";
-import { createInteractionRuntime } from "./interactionRuntime";
+import { createSaveRuntime } from "./save/saveRuntime";
+import { createQuestRuntime } from "./quest/questRuntime";
+import { createInteractionRuntime } from "./interaction/interactionRuntime";
 import type { GameState } from "./types";
 
 let state: GameState | null = null;
@@ -268,10 +276,6 @@ function randomEquipment() {
   const slot = choice(SLOTS);
   const quality = qualityRoll();
   const weaponType = slot === "weapon" ? randomWeaponTypeForClass(state.classId || "warrior") : "";
-  const prefix =
-    slot === "weapon"
-      ? weaponTypeName(weaponType)
-      : { armor: "守望", boots: "疾行", ring: "秘银", amulet: "星纹" }[slot];
   const main =
     slot === "weapon"
       ? weaponPrimaryStat(weaponType)
@@ -286,14 +290,18 @@ function randomEquipment() {
   const stats = { [main]: bonus };
   if (slot === "armor") stats.hp = 4 + state.floor;
   const equipment = item(
-    `${quality}${prefix}${SLOT_NAMES[slot]}`,
+    equipmentName(slot, quality, weaponType),
     slot,
     quality,
     stats,
     quality === "普通" ? 0 : quality === "优秀" ? 1 : 2
   );
   if (weaponType) equipment.weaponType = weaponType;
-  if (slot === "weapon" && (state.floor >= 4 || quality !== "普通") && Math.random() < weaponElementChance(quality)) {
+  if (
+    slot === "weapon" &&
+    (state.floor >= 4 || quality !== "普通") &&
+    Math.random() < weaponElementChance(quality)
+  ) {
     equipment.element = choice(ELEMENT_IDS);
     equipment.name = `${elementName(equipment.element)}纹${equipment.name}`;
   }
@@ -804,6 +812,7 @@ const {
   canUnequipSlot,
   clampVital,
   confirmAddStat,
+  confirmBuyMerchantEquipment,
   confirmCraftRune,
   confirmDisassembleEquipment,
   confirmEnhance,
@@ -822,9 +831,11 @@ const {
   isBlockingInteraction,
   knownTeleportTargets,
   landingNear,
+  merchantSellRows,
   merchantSalvageRows,
   openForge,
   openMerchant,
+  openMerchantSell,
   openMerchantShop,
   openStatAllocator,
   openTeleportBeacon,
@@ -1047,6 +1058,7 @@ Object.assign(inventoryApi, {
   playSound,
   potion,
   questDefinitionsForGiver,
+  randomEquipment,
   render,
   renderCraft,
   renderEquipment,
@@ -1174,6 +1186,7 @@ const runtimeApi = {
   closeModal,
   completeStairSeal,
   confirmAddStat,
+  confirmBuyMerchantEquipment,
   confirmBuy,
   confirmCraftRune,
   confirmDeleteSaveSlot,
@@ -1220,6 +1233,7 @@ const runtimeApi = {
   makeEnemy,
   makeEnemyWithVariant,
   maybeDrop,
+  merchantSellRows,
   modalAction,
   move,
   nextFloor,
@@ -1230,6 +1244,7 @@ const runtimeApi = {
   openLockedDoor,
   openLockedChest,
   openMerchant,
+  openMerchantSell,
   openMerchantShop,
   openQuestNpc,
   openRescueNpc,
@@ -1338,6 +1353,7 @@ export {
   closeModal,
   completeStairSeal,
   confirmAddStat,
+  confirmBuyMerchantEquipment,
   confirmBuy,
   confirmCraftRune,
   confirmDeleteSaveSlot,
@@ -1379,6 +1395,7 @@ export {
   makeEnemy,
   makeEnemyWithVariant,
   maybeDrop,
+  merchantSellRows,
   mapViewBounds,
   modalAction,
   move,
@@ -1392,6 +1409,7 @@ export {
   openLockedDoor,
   openLockedChest,
   openMerchant,
+  openMerchantSell,
   openMerchantShop,
   openQuestNpc,
   openRescueNpc,

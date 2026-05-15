@@ -1,6 +1,6 @@
-import * as data from "../../src/game/data";
+import * as data from "../../src/game/constants";
 import * as runtime from "../../src/game/runtime";
-import { saveSlotKey } from "../../src/game/save";
+import { saveSlotKey } from "../../src/game/save/save";
 
 const target = globalThis as typeof globalThis & Record<string, unknown>;
 

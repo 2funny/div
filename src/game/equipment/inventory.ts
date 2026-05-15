@@ -1,6 +1,6 @@
-import { RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "./data";
-import { uid } from "./random";
-import type { EquipmentSet, Item, SlotKey, StatKey, Stats } from "./types";
+import { RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "../constants";
+import { uid } from "../random";
+import type { EquipmentSet, Item, SlotKey, StatKey, Stats } from "../types";
 
 export function emptyEquipment(): EquipmentSet {
   return Object.fromEntries(SLOTS.map((slot) => [slot, null])) as EquipmentSet;
@@ -57,7 +57,7 @@ export {
   sellEquipment,
   unequipItem,
   useItem
-} from "./runtime";
+} from "../runtime";
 
 export { RUNES, SLOT_NAMES, SLOTS, STAT_NAMES };
 export type { Item, SlotKey, StatKey, Stats };

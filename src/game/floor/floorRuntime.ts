@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { FLOOR_EFFECTS, MAP_SIZE_MAX, MAP_SIZE_MIN, MAX_FLOOR, THEMES } from "./data";
-import { ENEMY_AFFIXES } from "./enemies";
-import { ELEMENTS } from "./elements";
-import { choice, rand } from "./random";
+import { FLOOR_EFFECTS, MAP_SIZE_MAX, MAP_SIZE_MIN, MAX_FLOOR, THEMES } from "../constants";
+import { ENEMY_AFFIXES } from "../combat/enemies";
+import { ELEMENTS } from "../elements";
+import { choice, rand } from "../random";
 import {
   cardinalNeighbors,
   cellsWithin,
@@ -84,7 +84,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       });
       scatter(map, "trap", trapCountForFloor(), { minObjectDistance: 3 });
       scatter(map, "altar", 2, { preferRooms: true, minObjectDistance: 6 });
-      if (state.floor % 3 === 1) scatter(map, "shop", 1, { minObjectDistance: 5 });
+      if (shouldPlaceMerchant()) scatter(map, "shop", 1, { minObjectDistance: 5 });
       if (state.floor % 3 === 2) scatter(map, "forge", 1, { minObjectDistance: 5 });
       resolveOutdoorFeatureCrowding(map);
       normalizeRoomDoors(map);
@@ -188,6 +188,12 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       6,
       2 + Math.floor(state.floor / 4) + (currentFloorEffect()?.id === "lava" ? 1 : 0)
     );
+  }
+
+  function shouldPlaceMerchant() {
+    const earlyFloorBonus = state.floor <= 2 ? 0.08 : 0;
+    const deepFloorBonus = Math.min(0.08, state.floor * 0.002);
+    return Math.random() < Math.min(0.86, 0.74 + earlyFloorBonus + deepFloorBonus);
   }
 
   // 判断当前楼层是否为最终 Boss 层。
@@ -1258,10 +1264,20 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const profiles = [
       { match: "史莱姆", element: "poison", weaknesses: ["thunder"], resistances: ["poison"] },
       { match: "洞窟鼠", element: "dark", weaknesses: ["holy"], resistances: ["poison"] },
-      { match: "骷髅兵", element: "dark", weaknesses: ["holy", "fire"], resistances: ["poison", "dark"] },
+      {
+        match: "骷髅兵",
+        element: "dark",
+        weaknesses: ["holy", "fire"],
+        resistances: ["poison", "dark"]
+      },
       { match: "矿洞蝙蝠", element: "thunder", weaknesses: ["ice"], resistances: ["thunder"] },
       { match: "诅咒矿工", element: "dark", weaknesses: ["holy"], resistances: ["dark", "poison"] },
-      { match: "石像守卫", element: "thunder", weaknesses: ["ice"], resistances: ["thunder", "poison"] },
+      {
+        match: "石像守卫",
+        element: "thunder",
+        weaknesses: ["ice"],
+        resistances: ["thunder", "poison"]
+      },
       { match: "冰霜狼", element: "ice", weaknesses: ["fire"], resistances: ["ice"] },
       { match: "寒冰法徒", element: "ice", weaknesses: ["fire", "thunder"], resistances: ["ice"] },
       { match: "冰晶魔像", element: "ice", weaknesses: ["fire"], resistances: ["ice", "poison"] },
@@ -1297,7 +1313,14 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function enemySkillPool(enemy) {
     const element = enemy.element || "dark";
     const pool = [
-      { id: `${element}-strike`, name: `${ELEMENTS[element]?.name || "暗"}袭`, type: "damage", element, power: 1.12, chance: 0.34 },
+      {
+        id: `${element}-strike`,
+        name: `${ELEMENTS[element]?.name || "暗"}袭`,
+        type: "damage",
+        element,
+        power: 1.12,
+        chance: 0.34
+      },
       { id: "harden", name: "硬化", type: "guard", power: 1, chance: 0.22 },
       { id: "regenerate", name: "再生", type: "heal", power: 0.16, chance: 0.18 },
       { id: "drain-touch", name: "汲取", type: "drain", element: "dark", power: 0.92, chance: 0.2 },
@@ -1307,10 +1330,24 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       pool.unshift({ id: "stone-skin", name: "石肤", type: "guard", power: 1, chance: 0.34 });
     }
     if (enemy.name.includes("法徒")) {
-      pool.unshift({ id: "ice-lance", name: "冰枪", type: "damage", element: "ice", power: 1.18, chance: 0.38 });
+      pool.unshift({
+        id: "ice-lance",
+        name: "冰枪",
+        type: "damage",
+        element: "ice",
+        power: 1.18,
+        chance: 0.38
+      });
     }
     if (enemy.name.includes("诅咒") || enemy.name.includes("符文")) {
-      pool.unshift({ id: "dark-curse", name: "暗咒", type: "weaken", element: "dark", power: 0.88, chance: 0.3 });
+      pool.unshift({
+        id: "dark-curse",
+        name: "暗咒",
+        type: "weaken",
+        element: "dark",
+        power: 0.88,
+        chance: 0.3
+      });
     }
     return pool;
   }

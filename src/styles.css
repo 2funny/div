@@ -906,10 +906,27 @@ h2 {
     linear-gradient(90deg, transparent 46%, rgba(255, 248, 202, 0.52) 48%, transparent 52%),
     linear-gradient(0deg, transparent 45%, rgba(255, 224, 118, 0.38) 48%, transparent 54%),
     radial-gradient(circle at 50% 50%, rgba(255, 237, 168, 0.34), transparent 56%),
-    radial-gradient(circle at 50% 50%, transparent 34%, rgba(255, 245, 186, 0.16) 35% 37%, transparent 39%);
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 34%,
+      rgba(255, 245, 186, 0.16) 35% 37%,
+      transparent 39%
+    );
   --element-trace:
-    conic-gradient(from 45deg, transparent 0 18%, rgba(255, 245, 185, 0.36) 19% 21%, transparent 22% 48%, rgba(255, 225, 116, 0.3) 49% 51%, transparent 52% 100%),
-    radial-gradient(circle at 50% 50%, transparent 42%, rgba(255, 239, 163, 0.34) 43% 45%, transparent 47%);
+    conic-gradient(
+      from 45deg,
+      transparent 0 18%,
+      rgba(255, 245, 185, 0.36) 19% 21%,
+      transparent 22% 48%,
+      rgba(255, 225, 116, 0.3) 49% 51%,
+      transparent 52% 100%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 42%,
+      rgba(255, 239, 163, 0.34) 43% 45%,
+      transparent 47%
+    );
   --element-glow: 0 0 38px rgba(255, 221, 121, 0.28), inset 0 0 26px rgba(255, 246, 188, 0.12);
   --element-spark: #fff0ae;
   --element-spark-soft: rgba(255, 225, 119, 0.3);
@@ -921,7 +938,12 @@ h2 {
     radial-gradient(circle at 50% 50%, transparent 37%, rgba(40, 18, 68, 0.5) 38%, transparent 64%),
     radial-gradient(ellipse at 48% 74%, rgba(18, 8, 33, 0.36), transparent 44%);
   --element-trace:
-    radial-gradient(circle at 50% 50%, transparent 28%, rgba(167, 104, 255, 0.38) 29% 31%, transparent 34%),
+    radial-gradient(
+      circle at 50% 50%,
+      transparent 28%,
+      rgba(167, 104, 255, 0.38) 29% 31%,
+      transparent 34%
+    ),
     radial-gradient(circle at 42% 48%, rgba(207, 168, 255, 0.34) 0 2px, transparent 4px),
     radial-gradient(circle at 63% 62%, rgba(95, 52, 178, 0.48) 0 3px, transparent 6px);
   --element-glow: inset 0 0 30px rgba(134, 78, 255, 0.26), 0 0 32px rgba(86, 48, 150, 0.26);
@@ -1068,7 +1090,12 @@ h2 {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--element-spark) 0 34%, var(--element-spark-soft) 35% 58%, transparent 60%);
+  background: radial-gradient(
+    circle,
+    var(--element-spark) 0 34%,
+    var(--element-spark-soft) 35% 58%,
+    transparent 60%
+  );
 }
 
 .combat-fx-element-holy .element-burst i {
@@ -1084,7 +1111,12 @@ h2 {
   width: 8px;
   height: 14px;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--element-spark) 0 18%, rgba(43, 18, 72, 0.82) 42%, transparent 68%);
+  background: radial-gradient(
+    circle,
+    var(--element-spark) 0 18%,
+    rgba(43, 18, 72, 0.82) 42%,
+    transparent 68%
+  );
 }
 
 .combat-fx b {
@@ -2205,6 +2237,12 @@ h2 {
   pointer-events: none;
 }
 
+.moss .floor {
+  background-color: #6f806a;
+}
+.moss .wall {
+  background-color: #10131a;
+}
 .mine .floor {
   background-color: #80684d;
 }
@@ -2216,6 +2254,48 @@ h2 {
 }
 .frost .wall {
   background-color: #151d27;
+}
+.fungal .floor {
+  background-color: #63795f;
+}
+.fungal .wall {
+  background-color: #151a16;
+}
+.cistern .floor {
+  background-color: #5f7b82;
+}
+.cistern .wall {
+  background-color: #121b20;
+}
+.ember .floor {
+  background-color: #835345;
+}
+.ember .wall {
+  background-color: #1d1110;
+}
+.archive .floor {
+  background-color: #7c7262;
+}
+.archive .wall {
+  background-color: #181612;
+}
+.astral .floor {
+  background-color: #6a6f92;
+}
+.astral .wall {
+  background-color: #141622;
+}
+.shadow .floor {
+  background-color: #615b70;
+}
+.shadow .wall {
+  background-color: #15131c;
+}
+.void .floor {
+  background-color: #55536f;
+}
+.void .wall {
+  background-color: #11111b;
 }
 .throne .floor {
   background-color: #76648f;

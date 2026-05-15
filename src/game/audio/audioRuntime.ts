@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { MASTER_VOLUME } from "./data";
-import { choice, rand } from "./random";
+import { MASTER_VOLUME } from "../constants";
+import { choice, rand } from "../random";
 import { soundProfile } from "./audioProfiles";
 import { playNoiseLayer, playToneLayer } from "./audioEngine";
 

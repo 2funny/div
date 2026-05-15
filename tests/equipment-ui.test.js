@@ -92,7 +92,7 @@ vm.runInContext(
   assert(!runesMarkup.includes("数量 3"), "rune counts should not be written into the attribute text");
   activeInventoryTab = "equipment";
   assert(!inventory.includes("confirmDisassembleEquipment"), "inventory equipment rows should not keep a persistent disassemble action");
-  assert(inventory.includes("confirmSellEquipment"), "inventory equipment rows should support selling");
+  assert(!inventory.includes("confirmSellEquipment"), "inventory equipment rows should not expose selling outside merchant dialogue");
   render = () => {};
   showEvent = (title, body) => { eventTitle = title; eventBody = body; };
   let eventTitle = "";
@@ -233,9 +233,9 @@ vm.runInContext(
 const css = fs.readFileSync("src/styles.css", "utf8");
 const runtimeSource = fs.readFileSync("src/game/runtime.ts", "utf8");
 const bindEventsSource = fs.readFileSync("src/ui/bindEvents.ts", "utf8");
-const audioRuntimeSource = fs.readFileSync("src/game/audioRuntime.ts", "utf8");
-const audioSource = fs.readFileSync("src/game/audioProfiles.ts", "utf8");
-const weatherSource = fs.readFileSync("src/game/weatherCanvas.ts", "utf8");
+const audioRuntimeSource = fs.readFileSync("src/game/audio/audioRuntime.ts", "utf8");
+const audioSource = fs.readFileSync("src/game/audio/audioProfiles.ts", "utf8");
+const weatherSource = fs.readFileSync("src/game/render/weatherCanvas.ts", "utf8");
 assert(
   !css.includes(".tile.reachable::after"),
   "movable tiles should not render a persistent reachable highlight dot"
@@ -255,7 +255,7 @@ assert(
 );
 assert(
   audioSource.includes("export const MASTER_VOLUME = 0.92") ||
-    fs.readFileSync("src/game/data.ts", "utf8").includes("MASTER_VOLUME = 0.92"),
+    fs.readFileSync("src/game/constants/system.ts", "utf8").includes("MASTER_VOLUME = 0.92"),
   "master audio should be louder than the previous quiet mix"
 );
 assert(

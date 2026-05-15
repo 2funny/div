@@ -2,7 +2,6 @@
 import {
   ASSETS,
   CLASSES,
-  DEFAULT_CLASS_ID,
   LEGEND_ITEMS,
   MAP_VIEW_SIZE,
   RUNES,
@@ -10,19 +9,23 @@ import {
   SLOTS,
   STAT_NAMES,
   isValidMapSize
-} from "./data";
-import { getBattleFx } from "./combatFx";
-import { elementName, elementResistText, elementTags } from "./elements";
-import { equipmentRestrictionText, isWeaponUsableByClass, weaponTypeName } from "./equipmentRules";
+} from "../constants";
+import { getBattleFx } from "../combat/combatFx";
+import { elementName, elementResistText, elementTags } from "../elements";
+import {
+  equipmentRestrictionText,
+  isWeaponUsableByClass,
+  weaponTypeName
+} from "../equipment/equipmentRules";
 import {
   LORE_CHAPTERS,
   LORE_PAGES,
   ensureLoreState,
   loreChapterById,
   lorePageById
-} from "./lore";
-import { cellsWithin, distance } from "./mapGeometry";
-import { QUEST_DEFS } from "./quests";
+} from "../quest/lore";
+import { cellsWithin, distance } from "../floor/mapGeometry";
+import { QUEST_DEFS } from "../quest/quests";
 import { syncWeatherCanvas } from "./weatherCanvas";
 
 const LORE_TOTAL = LORE_CHAPTERS.length + LORE_PAGES.length;
@@ -42,7 +45,6 @@ export function createRenderRuntime(ctx) {
   const battleRisk = (...args) => api.battleRisk(...args);
   const buy = (...args) => api.buy(...args);
   const canEnhance = (...args) => api.canEnhance(...args);
-  const canSellEquipmentHere = (...args) => api.canSellEquipmentHere(...args);
   const canUpgradeSkill = (...args) => api.canUpgradeSkill(...args);
   const canUnequipSlot = (...args) => api.canUnequipSlot(...args);
   const closeModal = (...args) => api.closeModal(...args);
@@ -69,7 +71,6 @@ export function createRenderRuntime(ctx) {
   const saveGame = (...args) => api.saveGame(...args);
   const formatSaveTime = (...args) => api.formatSaveTime(...args);
   const saveSlots = (...args) => api.saveSlots(...args);
-  const sellEquipment = (...args) => api.sellEquipment(...args);
   const showConfirm = (...args) => api.showConfirm(...args);
   const showEvent = (...args) => api.showEvent(...args);
   const showModal = (...args) => api.showModal(...args);
@@ -95,14 +96,14 @@ export function createRenderRuntime(ctx) {
         <div>
           <span>冒险入口</span>
           <h2>符文地牢</h2>
-          <p>开启一局新的地牢探索，或从已有存档继续。</p>
+          <p>选择职业开启新的地牢探索，或从已有存档继续。</p>
         </div>
       </header>
       <div class="start-actions">
         <button type="button" onclick="startNewGame()">新游戏</button>
         <button type="button" ${occupied.length ? "" : "disabled"} onclick="renderContinueSlots()">继续</button>
       </div>
-      ${occupied.length ? `<p class="start-note">继续会打开存档列表；新游戏会自动创建一个新存档。</p>` : `<p class="start-note">暂无存档，直接开始就是新游戏。</p>`}
+      ${occupied.length ? `<p class="start-note">继续会打开存档列表；新游戏会先选择职业，再写入一个新存档。</p>` : `<p class="start-note">暂无存档，开始新游戏后先选择职业。</p>`}
     </article>
   `;
   }
@@ -180,7 +181,7 @@ export function createRenderRuntime(ctx) {
       return;
     }
     closeModal();
-    startGame(DEFAULT_CLASS_ID, slotId);
+    renderClassSelect(slotId);
   }
 
   function newGameInSlot(slotId) {
@@ -788,13 +789,19 @@ export function createRenderRuntime(ctx) {
   function battleFxClass(target) {
     const fx = getBattleFx()?.[target];
     if (!fx) return "";
-    return [`fx-${fx.type}`, fx.element ? `fx-element-${fx.element}` : ""].filter(Boolean).join(" ");
+    return [`fx-${fx.type}`, fx.element ? `fx-element-${fx.element}` : ""]
+      .filter(Boolean)
+      .join(" ");
   }
 
   function combatantFxMarkup(target) {
     const fx = getBattleFx()?.[target];
     if (!fx) return "";
-    const classes = [`combat-fx`, `combat-fx-${fx.type}`, fx.element ? `combat-fx-element-${fx.element}` : ""]
+    const classes = [
+      `combat-fx`,
+      `combat-fx-${fx.type}`,
+      fx.element ? `combat-fx-element-${fx.element}` : ""
+    ]
       .filter(Boolean)
       .join(" ");
     return `<span class="${classes}" style="--fx-key:${fx.seq}">${elementBurstMarkup(fx.element)}<b>${fx.text}</b><small>${fx.label}</small></span>`;
@@ -975,8 +982,8 @@ export function createRenderRuntime(ctx) {
     if (cell.object?.type === "shop") {
       $("contextTitle").textContent = "商人";
       $("contextBody").innerHTML = `
-      <div class="tile-info">商人会打开交易弹窗，补给不会挤在右侧面板里。</div>
-      <button type="button" onclick="openMerchant()">打开商店</button>
+      <div class="tile-info">商人会打开交易弹窗，可购买补给、售出装备；装备分解也在商人交易窗口里。</div>
+      <button type="button" onclick="openMerchant()">和商人交谈</button>
     `;
     } else if (cell.object?.type === "forge") {
       $("contextTitle").textContent = "合成台";
@@ -1187,7 +1194,6 @@ export function createRenderRuntime(ctx) {
     const better = isBetterThanEquipped(entry);
     const hasCurrent = !!state.equipment?.[entry.slot];
     const compare = hasCurrent ? equipmentScoreBadge(entry, "inline-equipment-compare") : "";
-    const sellDisabled = canSellEquipmentHere() ? "" : `disabled title="需要在商人身边售出"`;
     const restriction = equipmentRestrictionText(entry, state.classId);
     const equipDisabled = restriction ? `disabled title="${restriction}"` : "";
     return `<div class="item-row equip-row equipment-card inventory-card ${better ? "better-equipment" : ""}">
@@ -1197,7 +1203,6 @@ export function createRenderRuntime(ctx) {
       <div class="equipment-actions inventory-equipment-actions">
         <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
         <button type="button" ${equipDisabled} onclick="confirmEquipItem('${entry.id}')">装备</button>
-        <button type="button" ${sellDisabled} onclick="confirmSellEquipment('${entry.id}')">售出</button>
       </div>
     </div>
   </div>`;
@@ -1257,14 +1262,6 @@ export function createRenderRuntime(ctx) {
         }
       });
     }
-    if (canSellEquipmentHere())
-      actions.splice(2, 0, {
-        text: "售出",
-        action: () => {
-          closeModal();
-          sellEquipment(id);
-        }
-      });
     showModal(
       entry.name,
       equipmentDetailMarkup(entry, SLOT_NAMES[entry.slot], runeText, `${restrictionRow}${compare}`),
@@ -1347,7 +1344,11 @@ export function createRenderRuntime(ctx) {
       })
       .join(" ");
     const elementText = elementName(eq.element);
-    return [elementText ? `${elementText}属性` : "", elementResistText(eq.elementResistances), stats]
+    return [
+      elementText ? `${elementText}属性` : "",
+      elementResistText(eq.elementResistances),
+      stats
+    ]
       .filter(Boolean)
       .join(" ");
   }

@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "./data";
-import { equipmentRestrictionText, isWeaponUsableByClass } from "./equipmentRules";
-import { cardinalNeighbors, cellsWithin, distance } from "./mapGeometry";
+import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "./constants";
+import { equipmentRestrictionText, isWeaponUsableByClass } from "./equipment/equipmentRules";
+import { cardinalNeighbors, cellsWithin, distance } from "./floor/mapGeometry";
 
 // 背包运行时负责装备穿脱、消耗品、属性点、强化、商店和传送道具。
 export function createInventoryRuntime(ctx) {
@@ -26,6 +26,7 @@ export function createInventoryRuntime(ctx) {
   const playSound = (...args) => api.playSound(...args);
   const potion = (...args) => api.potion(...args);
   const questDefinitionsForGiver = (...args) => api.questDefinitionsForGiver(...args);
+  const randomEquipment = (...args) => api.randomEquipment(...args);
   const render = (...args) => api.render(...args);
   const renderCraft = (...args) => api.renderCraft(...args);
   const renderEquipment = (...args) => api.renderEquipment(...args);
@@ -197,7 +198,11 @@ export function createInventoryRuntime(ctx) {
   // 出售背包装备，只有在商人附近才允许执行。
   function sellEquipment(id) {
     if (!canSellEquipmentHere()) {
-      showEvent("需要商人", "<p>售出装备需要在商人身边进行。分解装备可以随时操作。</p>", "知道了");
+      showEvent(
+        "需要商人",
+        "<p>售出装备需要和商人交谈，在商人对话里的“售出装备”处理。装备分解也在商人交易窗口里。</p>",
+        "知道了"
+      );
       return;
     }
     const index = state.inventory.findIndex((entry) => entry.id === id && entry.kind === "equip");
@@ -231,7 +236,11 @@ export function createInventoryRuntime(ctx) {
     const entry = state.inventory.find((item) => item.id === id && item.kind === "equip");
     if (!entry) return;
     if (!canSellEquipmentHere()) {
-      showEvent("需要商人", "<p>售出装备需要在商人身边进行。分解装备可以随时操作。</p>", "知道了");
+      showEvent(
+        "需要商人",
+        "<p>售出装备需要和商人交谈，在商人对话里的“售出装备”处理。装备分解也在商人交易窗口里。</p>",
+        "知道了"
+      );
       return;
     }
     showConfirm(
@@ -504,7 +513,9 @@ export function createInventoryRuntime(ctx) {
       state.skillBranches = state.skillBranches || {};
       state.skillBranches[skillId] = branch.id;
     }
-    log(`${skill.name}提升到 Lv.${state.skillLevels[skillId]}${branch ? `，选择${branch.name}分支` : ""}。`);
+    log(
+      `${skill.name}提升到 Lv.${state.skillLevels[skillId]}${branch ? `，选择${branch.name}分支` : ""}。`
+    );
     if (branch) closeModal();
     render();
   }
@@ -516,10 +527,17 @@ export function createInventoryRuntime(ctx) {
     const currentLevel = skillLevel(skillId);
     const current = upgradedSkill(skill);
     const nextLevel = currentLevel + 1;
-    const currentBranch = skill.branches?.find((entry) => entry.id === state.skillBranches?.[skillId]) || null;
-    const nextPower = Number((skill.power * (1 + nextLevel * 0.1) + (currentBranch?.powerBonus || 0)).toFixed(2));
-    const nextMp = Math.max(1, skill.mp + Math.floor(nextLevel / 3) + (currentBranch?.mpDelta || 0));
-    const shouldChooseBranch = nextLevel >= 3 && skill.branches?.length && !state.skillBranches?.[skillId];
+    const currentBranch =
+      skill.branches?.find((entry) => entry.id === state.skillBranches?.[skillId]) || null;
+    const nextPower = Number(
+      (skill.power * (1 + nextLevel * 0.1) + (currentBranch?.powerBonus || 0)).toFixed(2)
+    );
+    const nextMp = Math.max(
+      1,
+      skill.mp + Math.floor(nextLevel / 3) + (currentBranch?.mpDelta || 0)
+    );
+    const shouldChooseBranch =
+      nextLevel >= 3 && skill.branches?.length && !state.skillBranches?.[skillId];
     if (shouldChooseBranch) {
       showModal(
         "技能分支选择",
@@ -582,14 +600,15 @@ export function createInventoryRuntime(ctx) {
     render();
   }
 
-  // 打开商人主弹窗，商人既能交易也可能提供任务。
-  // 商人弹窗提供购买入口，装备出售入口由背包列表根据距离动态开放。
+  // 打开商人主弹窗，商人既能交易、收购装备，也可能提供任务。
   function openMerchant() {
     const hasTask = questDefinitionsForGiver("shop").length > 0;
-    if (!hasTask) {
-      openMerchantShop();
-      return;
-    }
+    const actions = [
+      { text: "打开商店", action: openMerchantShop },
+      { text: "售出装备", action: openMerchantSell }
+    ];
+    if (hasTask) actions.push({ text: "查看任务", action: () => openQuestFromGiver("shop") });
+    actions.push({ text: "离开", action: closeModal });
     showModal(
       "流动商队",
       `
@@ -598,23 +617,20 @@ export function createInventoryRuntime(ctx) {
         <div class="merchant-portrait">${sprite("merchant", ASSETS.shop, "商人")}</div>
         <div class="merchant-copy">
           <b>流动补给</b>
-          <small>商人拦住去路，既能交易，也有需要冒险者处理的路面麻烦。</small>
+          <small>商人拦住去路。购买、售出和分解都要在这里处理；偶尔也会带来路面委托。</small>
         </div>
       </div>
     </div>
   `,
-      [
-        { text: "打开商店", action: openMerchantShop },
-        { text: "查看任务", action: () => openQuestFromGiver("shop") },
-        { text: "离开", action: closeModal }
-      ]
+      actions
     );
   }
 
-  // 打开商店商品和装备分解列表。
+  // 打开商店商品、随机装备和装备分解列表。
   function openMerchantShop() {
     const salvageRows = merchantSalvageRows();
     const merchant = currentMerchant();
+    const equipmentRows = merchantEquipmentRows(merchant);
     const sellsUniversalKey = merchantSellsUniversalKey(merchant);
     const universalKeyRow = sellsUniversalKey
       ? `<button type="button" ${merchant.universalKeySold ? "disabled" : ""} onclick="confirmBuy('universalKey')"><span>万能钥匙</span><small>${merchant.universalKeySold ? "已售出" : `打开任意上锁房门 · ${universalKeyPrice()} 金币`}</small></button>`
@@ -627,7 +643,7 @@ export function createInventoryRuntime(ctx) {
         <div class="merchant-portrait">${sprite("merchant", ASSETS.shop, "商人")}</div>
         <div class="merchant-copy">
           <b>流动补给</b>
-          <small>金币 ${state.gold}。商人挡住去路，交易后可从旁边绕行。</small>
+          <small>金币 ${state.gold}。货物会随楼层进度随机刷新，好装备只会偶尔出现。</small>
         </div>
       </div>
       <div class="merchant-goods">
@@ -635,14 +651,41 @@ export function createInventoryRuntime(ctx) {
         <button type="button" onclick="confirmBuy('mp')"><span>小型法力药水</span><small>恢复 12 MP · 12 金币</small></button>
         <button type="button" onclick="confirmBuy('beacon')"><span>商路信标</span><small>传送到已探索设施 · 45 金币</small></button>
         ${universalKeyRow}
+        ${equipmentRows}
       </div>
       <div class="merchant-salvage-list">
         <b>装备分解</b>
+        <small>分解在商人交易窗口里进行，会获得魔尘，少数装备会返还强化石。</small>
         ${salvageRows}
       </div>
     </div>
   `,
       [{ text: "离开", action: closeModal }]
+    );
+  }
+
+  function openMerchantSell() {
+    showModal(
+      "售出装备",
+      `
+    <div class="merchant-panel">
+      <div class="merchant-hero">
+        <div class="merchant-portrait">${sprite("merchant", ASSETS.shop, "商人")}</div>
+        <div class="merchant-copy">
+          <b>装备收购</b>
+          <small>售出只在和商人交谈时开放，装备栏里不会再显示售出按钮。</small>
+        </div>
+      </div>
+      <div class="merchant-salvage-list">
+        <b>装备售出</b>
+        ${merchantSellRows()}
+      </div>
+    </div>
+  `,
+      [
+        { text: "返回商队", action: openMerchant },
+        { text: "离开", action: closeModal }
+      ]
     );
   }
 
@@ -669,6 +712,92 @@ export function createInventoryRuntime(ctx) {
 
   function universalKeyPrice() {
     return 58;
+  }
+
+  function ensureMerchantStock(merchant = currentMerchant()) {
+    if (!merchant) return [];
+    if (!merchant.stock) {
+      merchant.stock = Array.from({ length: merchantStockCount() }, () => {
+        const goods = randomEquipment();
+        return {
+          id: goods.id,
+          item: goods,
+          price: merchantEquipmentPrice(goods),
+          sold: false
+        };
+      });
+    }
+    return merchant.stock;
+  }
+
+  function merchantStockCount() {
+    return 1 + (Math.random() < 0.7 ? 1 : 0) + (state.floor >= 5 && Math.random() < 0.35 ? 1 : 0);
+  }
+
+  function merchantEquipmentPrice(entry) {
+    const qualityBonus = { 普通: 0, 优秀: 8, 稀有: 22, 史诗: 48, 传说: 90 }[entry.quality] || 0;
+    return Math.max(24, Math.round(itemScore(entry) * 1.45 + state.floor * 5 + qualityBonus));
+  }
+
+  function merchantStockItem(id) {
+    const stock = ensureMerchantStock();
+    return stock.find((entry) => entry.id === id);
+  }
+
+  function merchantEquipmentRows(merchant = currentMerchant()) {
+    const stock = ensureMerchantStock(merchant).filter((entry) => !entry.sold);
+    if (!stock.length) return `<p>今天没有合适装备。</p>`;
+    return stock
+      .map(({ id, item: goods, price }) => {
+        const summary = [
+          SLOT_NAMES[goods.slot],
+          goods.quality,
+          statsText(goods) || "无属性",
+          `${price} 金币`
+        ].join(" · ");
+        return `<button type="button" onclick="confirmBuyMerchantEquipment('${id}')"><span>${goods.name}</span><small>${summary}</small></button>`;
+      })
+      .join("");
+  }
+
+  function confirmBuyMerchantEquipment(id) {
+    const entry = merchantStockItem(id);
+    if (!entry || entry.sold) {
+      showEvent("货物已售", "<p>这件装备已经不在商人的货架上了。</p>", "知道了");
+      return;
+    }
+    showConfirm(
+      "购买装备",
+      `<p>花费 ${entry.price} 金币购买 ${entry.item.name}？</p><p>${statsText(entry.item) || "无属性"}</p>`,
+      "购买",
+      () => buyMerchantEquipment(id)
+    );
+  }
+
+  function buyMerchantEquipment(id) {
+    const entry = merchantStockItem(id);
+    if (!entry || entry.sold) return;
+    if ((state.gold || 0) < entry.price) {
+      log("金币不足，交易没有完成。");
+      render();
+      return;
+    }
+    state.gold -= entry.price;
+    entry.sold = true;
+    state.inventory.push(entry.item);
+    log(`购买${entry.item.name}。`);
+    render();
+  }
+
+  function merchantSellRows() {
+    const equipment = (state.inventory || []).filter((entry) => entry.kind === "equip");
+    if (!equipment.length) return `<p>暂无可售出装备。</p>`;
+    return equipment
+      .map((entry) => {
+        const price = equipmentSellValue(entry);
+        return `<div class="merchant-salvage-row"><span>${entry.name}<small>${SLOT_NAMES[entry.slot]} · ${entry.quality} · ${price} 金币</small></span><button type="button" onclick="confirmSellEquipment('${entry.id}')">售出</button></div>`;
+      })
+      .join("");
   }
 
   function merchantSalvageRows() {
@@ -726,6 +855,7 @@ export function createInventoryRuntime(ctx) {
     canUnequipSlot: withState(canUnequipSlot),
     clampVital,
     confirmAddStat: withState(confirmAddStat),
+    confirmBuyMerchantEquipment: withState(confirmBuyMerchantEquipment),
     confirmCraftRune: withState(confirmCraftRune),
     confirmDisassembleEquipment: withState(confirmDisassembleEquipment),
     confirmEnhance: withState(confirmEnhance),
@@ -744,9 +874,11 @@ export function createInventoryRuntime(ctx) {
     isBlockingInteraction,
     knownTeleportTargets: withState(knownTeleportTargets),
     landingNear,
+    merchantSellRows: withState(merchantSellRows),
     merchantSalvageRows: withState(merchantSalvageRows),
     openForge: withState(openForge),
     openMerchant: withState(openMerchant),
+    openMerchantSell: withState(openMerchantSell),
     openMerchantShop: withState(openMerchantShop),
     openStatAllocator: withState(openStatAllocator),
     openTeleportBeacon: withState(openTeleportBeacon),

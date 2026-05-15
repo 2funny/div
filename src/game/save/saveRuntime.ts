@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { CLASSES, SAVE_KEY, isValidMapSize } from "./data";
+import { CLASSES, SAVE_KEY, isValidMapSize } from "../constants";
 import {
   SAVE_SLOT_LIMIT,
   formatSaveTime,
@@ -8,7 +8,7 @@ import {
   saveSlotLabel,
   writeSaveIndex
 } from "./save";
-import { ensureLoreState, unlockLoreChaptersForFloor } from "./lore";
+import { ensureLoreState, unlockLoreChaptersForFloor } from "../quest/lore";
 
 // 存档运行时封装多槽 localStorage 读写、旧存档迁移和存档元信息维护。
 export function createSaveRuntime(ctx) {

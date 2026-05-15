@@ -25,6 +25,18 @@ vm.runInContext(
     return visited.size;
   }
 
+  const themeCoverage = new Map();
+  for (const theme of THEMES) {
+    assert(theme.name && theme.colorClass, "floor themes should define display names and map color classes");
+    for (const floor of theme.floors) {
+      assert(!themeCoverage.has(floor), "floor themes should not overlap floor ranges");
+      themeCoverage.set(floor, theme);
+    }
+  }
+  assert.strictEqual(themeCoverage.size, MAX_FLOOR, "floor themes should cover every configured floor");
+  assert.strictEqual(themeCoverage.get(MAX_FLOOR).name, "符文王座", "final floor should keep the throne theme");
+  assert(new Set(THEMES.map((theme) => theme.name)).size >= 8, "long runs should use varied floor theme names");
+
   state = {
     floor: 3,
     facing: "down",

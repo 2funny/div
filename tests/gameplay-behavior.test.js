@@ -60,6 +60,27 @@ vm.runInContext(
   assert.strictEqual(state.keys, 0, "opening a locked chest should consume one key");
   assert(state.inventory.length > 0, "locked chest should grant equipment");
 
+  const originalRandom = Math.random;
+  try {
+    state = { classId: "warrior", floor: 1, keys: 1, inventory: [], runes: {}, gold: 0, stats: { luk: 0 }, log: [] };
+    Math.random = () => 0.01;
+    openLockedChest({ object: { type: "lockedChest" } });
+    const starterLoot = state.inventory[0];
+    assert.strictEqual(starterLoot.name, "木剑", "common equipment names should use material plus concrete item type");
+    assert(!starterLoot.name.includes(starterLoot.quality), "equipment names should not repeat the quality label");
+    assert(!starterLoot.name.includes(SLOT_NAMES[starterLoot.slot]), "equipment names should not repeat the UI slot label");
+
+    state = { classId: "warrior", floor: 12, keys: 1, inventory: [], runes: {}, gold: 0, stats: { luk: 0 }, log: [] };
+    Math.random = () => 0.99;
+    openLockedChest({ object: { type: "lockedChest" } });
+    const legendaryLoot = state.inventory[0];
+    assert.strictEqual(legendaryLoot.quality, "传说", "high rolls should still produce legendary gear");
+    assert.strictEqual(legendaryLoot.name, "星陨先知符", "legendary equipment should use special named loot");
+    assert(!legendaryLoot.name.includes(legendaryLoot.quality), "legendary names should not repeat the quality label");
+  } finally {
+    Math.random = originalRandom;
+  }
+
   const lockedDoorCell = { terrain: "door", object: { type: "lockedDoor", keyId: "door-a", keyName: "1号房钥匙", roomName: "1号房" } };
   state.doorKeys = {};
   state.doorKeyNames = {};
@@ -332,6 +353,7 @@ vm.runInContext(
     facing: "left",
     currentEnemy: null,
     map: {
+      size: 3,
       cells: Array.from({ length: 3 }, (_, y) => Array.from({ length: 3 }, (_, x) => ({
         x, y, terrain: "floor", object: null, seen: true, visible: true
       })))
@@ -553,12 +575,15 @@ vm.runInContext(
   openMerchant = realOpenMerchant;
   openMerchant();
   assert(modalState().actions.some((action) => action.text.includes("商店")), "merchant with a task should keep a shop action");
+  assert(modalState().actions.some((action) => action.text.includes("售出")), "merchant dialogue should expose equipment selling");
   assert(modalState().actions.some((action) => action.text.includes("任务")), "merchant with a task should offer a task action");
   modalState().actions.find((action) => action.text.includes("任务")).action();
   assert(modalState().actions.some((action) => action.text.includes("接受")), "merchant task action should open an accept flow");
   openMerchantShop();
   assert(modalState().body.includes("merchant-salvage-list"), "merchant shop should include an equipment salvage list");
   assert(modalState().body.includes("confirmDisassembleEquipment"), "merchant shop should offer equipment disassembly");
+  openMerchantSell();
+  assert(modalState().body.includes("confirmSellEquipment"), "merchant sell view should offer equipment selling");
 `,
   context
 );

@@ -1,4 +1,4 @@
-import type { Item, StatKey } from "./types";
+import type { Item, StatKey } from "../types";
 
 export const WEAPON_TYPES = {
   sword: { name: "剑", stat: "atk", classes: ["warrior"] },
@@ -21,11 +21,15 @@ export const CLASS_WEAPON_TYPES: Record<string, WeaponType[]> = {
 };
 
 export function weaponTypeName(type?: string | null) {
-  return type && WEAPON_TYPES[type as WeaponType]?.name ? WEAPON_TYPES[type as WeaponType].name : "";
+  return type && WEAPON_TYPES[type as WeaponType]?.name
+    ? WEAPON_TYPES[type as WeaponType].name
+    : "";
 }
 
 export function weaponPrimaryStat(type?: string | null): StatKey {
-  return (type && WEAPON_TYPES[type as WeaponType]?.stat ? WEAPON_TYPES[type as WeaponType].stat : "atk") as StatKey;
+  return (
+    type && WEAPON_TYPES[type as WeaponType]?.stat ? WEAPON_TYPES[type as WeaponType].stat : "atk"
+  ) as StatKey;
 }
 
 export function isWeaponUsableByClass(item?: Item | null, classId?: string | null) {

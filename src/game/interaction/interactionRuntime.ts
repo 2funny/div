@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { RUNES, VISION_RADIUS } from "./data";
-import { cellsWithin, distance } from "./mapGeometry";
-import { choice, rand } from "./random";
-import { clearBattleFx } from "./combatFx";
-import { discoverLorePage } from "./lore";
+import { RUNES, VISION_RADIUS } from "../constants";
+import { cellsWithin, distance } from "../floor/mapGeometry";
+import { choice, rand } from "../random";
+import { clearBattleFx } from "../combat/combatFx";
+import { discoverLorePage } from "../quest/lore";
 
 // 交互运行时负责玩家移动、视野刷新和地图物件触发，不直接生成 UI 标记。
 export function createInteractionRuntime(ctx) {

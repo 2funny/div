@@ -13,7 +13,7 @@ export {
   renderMap,
   renderMinimap,
   updateVisibility
-} from "./runtime";
+} from "../runtime";
 
 export {
   MAP_SIZE,
@@ -23,4 +23,4 @@ export {
   MAX_FLOOR,
   VISION_RADIUS,
   isValidMapSize
-} from "./data";
+} from "../constants";
