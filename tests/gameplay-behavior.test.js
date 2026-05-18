@@ -6,12 +6,19 @@ const { createTestContext } = require("./helpers/test-context");
 const context = createTestContext(assert);
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context, {
+  filename: "tests/.generated/runtime-harness.js"
+});
 vm.runInContext(
   `
   const empty = emptyEquipment();
   assert(SLOTS.every((slot) => empty[slot] === null), "new heroes should start with empty equipment slots");
   assert.strictEqual(starterInventory("warrior").filter((entry) => entry.kind === "equip").length, Object.values(starterEquipment("warrior")).filter(Boolean).length, "starter gear should be placed in inventory");
+  setRandomSeed("stable-seed");
+  const seededRolls = [rand(1, 100), rand(1, 100), rand(1, 100)];
+  setRandomSeed("stable-seed");
+  assert.deepStrictEqual([rand(1, 100), rand(1, 100), rand(1, 100)], seededRolls, "seeded RNG should make core random helpers reproducible");
+  resetRandomSource();
 
   const seenMonster = { x: 1, y: 1, terrain: "floor", seen: true, visible: false, object: { type: "monster" } };
   assert.strictEqual(shouldShowMapObject(seenMonster), true, "seen monsters should remain visible while they are still on the main viewport");
@@ -26,7 +33,8 @@ vm.runInContext(
     gold: 0,
     stats: { luk: 0 },
     map: {
-      cells: Array.from({ length: 5 }, (_, y) => Array.from({ length: 5 }, (_, x) => ({
+      size: 23,
+      cells: Array.from({ length: 23 }, (_, y) => Array.from({ length: 23 }, (_, x) => ({
         x, y, terrain: "floor", object: null, seen: true, visible: true
       })))
     },
@@ -41,6 +49,17 @@ vm.runInContext(
   assert(state.hp < 100, "trap should still damage the player");
   assert(state.map.cells.flat().some((cell) => ["monster", "elite"].includes(cell.object?.type)), "trap should summon or alert a nearby guard");
   assert(["monster", "elite"].includes(state.currentEnemy?.type), "trap-summoned guards should force an immediate battle");
+  assert(state._battleCell, "trap-summoned battle should remember the guard's map cell");
+  const trapGuardCell = state.map.cells[state._battleCell.y][state._battleCell.x];
+  assert(["monster", "elite"].includes(trapGuardCell.object?.type), "tracked trap guard cell should still contain the guard before victory");
+  state.currentEnemy.hp = 1;
+  state.stats.atk = 50;
+  const realDateNowForTrapBattle = Date.now;
+  Date.now = () => realDateNowForTrapBattle() + 1000;
+  attackEnemy("attack", null, true);
+  Date.now = realDateNowForTrapBattle;
+  assert.strictEqual(trapGuardCell.object, null, "defeated trap-summoned guards should be cleared from their original cell");
+  assert.strictEqual(state.currentEnemy, null, "trap-summoned battle should end after the guard is defeated");
 
   let lastEvent = null;
   showEvent = (title, body) => { lastEvent = { title, body }; };
@@ -152,7 +171,7 @@ vm.runInContext(
   };
   playSound = () => {};
   render = () => {};
-  useBattlePotion(state.inventory[0].id);
+  useBattlePotion(state.inventory[0].id, true);
   assert.strictEqual(state.inventory.length, 0, "battle potion use should consume the potion");
   assert(state.hp > 50, "battle potion should heal before the enemy response");
   assert(state.hp < 90, "battle potion should spend the player action and allow an enemy response");
@@ -173,10 +192,81 @@ vm.runInContext(
   };
   const realDateNowForSkill = Date.now;
   Date.now = () => realDateNowForSkill() + 1000;
-  attackEnemy("skill", "heavy");
+  attackEnemy("skill", "heavy", true);
   Date.now = realDateNowForSkill;
   assert(state.mp < 12, "battle skills should spend mp when invoked by skill id");
   assert(state.currentEnemy.hp < 40, "battle skills invoked by id should damage the enemy");
+
+  const randomBeforeCombatRules = Math.random;
+  try {
+    Math.random = () => 0.99;
+    state = {
+      classId: "warrior",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 20, mag: 0, def: 30, res: 0, spd: 100, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      currentEnemy: { type: "monster", name: "Attack Dummy", hp: 20, maxHp: 20, atk: 1, def: 0 },
+      log: []
+    };
+    const realDateNowForAttackFormula = Date.now;
+    Date.now = () => realDateNowForAttackFormula() + 1000;
+    attackEnemy("attack", null, true);
+    Date.now = realDateNowForAttackFormula;
+    assert.strictEqual(state.currentEnemy, null, "normal attack damage should come from atk and enemy def, not speed scaling");
+
+    const comboRolls = [0.99, 0.01, 0.99, 0.99];
+    Math.random = () => comboRolls.shift() ?? 0.99;
+    state = {
+      classId: "ranger",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 10, mag: 0, def: 30, res: 0, spd: 40, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      currentEnemy: { type: "monster", name: "Combo Dummy", hp: 50, maxHp: 50, atk: 1, def: 0 },
+      log: []
+    };
+    Date.now = () => realDateNowForAttackFormula() + 1000;
+    attackEnemy("attack", null, true);
+    Date.now = realDateNowForAttackFormula;
+    assert.strictEqual(state.currentEnemy.hp, 30, "ranger normal attacks should be able to trigger one extra normal attack");
+  } finally {
+    Math.random = randomBeforeCombatRules;
+  }
+
+  state = {
+    classId: "warrior",
+    floor: 2,
+    hp: 90,
+    maxHp: 100,
+    mp: 12,
+    maxMp: 20,
+    stats: { atk: 14, mag: 0, def: 80, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    skillLevels: {},
+    skillBranches: {},
+    skillCooldowns: {},
+    currentEnemy: { type: "monster", name: "Cooldown Dummy", hp: 200, maxHp: 200, atk: 1, def: 0 },
+    log: []
+  };
+  Math.random = () => 0.99;
+  const realDateNowForCooldown = Date.now;
+  Date.now = () => realDateNowForCooldown() + 1000;
+  attackEnemy("skill", "heavy", true);
+  const mpAfterHeavy = state.mp;
+  assert.strictEqual(state.skillCooldowns.heavy, 1, "skills should keep turn-based cooldown after the enemy response");
+  attackEnemy("skill", "heavy", true);
+  Date.now = realDateNowForCooldown;
+  Math.random = randomBeforeCombatRules;
+  assert.strictEqual(state.mp, mpAfterHeavy, "skills on cooldown should not spend mp again");
 
   state = {
     floor: 3,
@@ -194,6 +284,8 @@ vm.runInContext(
   generateFloor();
   const originalTheme = state.map.theme;
   state.map.cells[2][2].object = { type: "chest", marker: "persistent" };
+  state.player = { x: 4, y: 5 };
+  state.facing = "left";
   saveCurrentFloor();
   state.floor = 4;
   generateFloor();
@@ -201,6 +293,8 @@ vm.runInContext(
   enterFloor("up");
   assert.strictEqual(state.map.theme, originalTheme, "returning to an explored floor should restore its saved map");
   assert.strictEqual(state.map.cells[2][2].object?.marker, "persistent", "returning to an explored floor should preserve objects");
+  assert.deepStrictEqual(state.player, { x: 4, y: 5 }, "returning to an explored floor should restore the saved player position");
+  assert.strictEqual(state.facing, "left", "returning to an explored floor should restore the saved facing");
 
   state = {
     floor: 8,
@@ -339,6 +433,12 @@ vm.runInContext(
   assert.strictEqual(dangerModal, null, "ordinary elite monsters should not show an encounter confirmation modal");
 
   state.currentEnemy = null;
+  const overwhelmingElite = { type: "elite", name: "Overwhelming Elite", hp: 300, maxHp: 300, atk: 60, def: 18 };
+  resolveCell({ object: overwhelmingElite });
+  assert.strictEqual(state.currentEnemy, overwhelmingElite, "non-special elite monsters should enter battle even when dangerous");
+  assert.strictEqual(dangerModal, null, "risk score alone should not trigger an encounter confirmation modal");
+
+  state.currentEnemy = null;
   const keyGuardianEncounter = { type: "elite", name: "Key Guardian", hp: 120, maxHp: 120, atk: 28, def: 10, roomBoss: true };
   resolveCell({ object: keyGuardianEncounter });
   assert.strictEqual(state.currentEnemy, null, "special elite monsters should wait for confirmation before battle");
@@ -367,6 +467,7 @@ vm.runInContext(
 
   state.currentEnemy = { type: "monster", name: "Stale Slime", hp: 0, maxHp: 10, atk: 2, def: 0 };
   state.player = { x: 1, y: 1 };
+  state.map.cells[1][2].object = null;
   move(1, 0);
   assert.deepStrictEqual(state.player, { x: 2, y: 1 }, "movement should recover from a stale defeated current enemy instead of freezing");
   assert.strictEqual(state.currentEnemy, null, "stale defeated current enemy should be cleared during movement recovery");
@@ -584,6 +685,30 @@ vm.runInContext(
   assert(modalState().body.includes("confirmDisassembleEquipment"), "merchant shop should offer equipment disassembly");
   openMerchantSell();
   assert(modalState().body.includes("confirmSellEquipment"), "merchant sell view should offer equipment selling");
+
+  state = {
+    floor: 1,
+    classId: "warrior",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 1, mag: 0, def: 20, res: 10, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    currentEnemy: { type: "monster", name: "Turn Dummy", hp: 200, maxHp: 200, atk: 1, def: 0 },
+    log: []
+  };
+  render = () => {};
+  const realDateNowForTurnLock = Date.now;
+  Date.now = () => realDateNowForTurnLock() + 3000;
+  attackEnemy("attack");
+  const waitingAfterPlayerAction = renderBattleCommandPanel();
+  Date.now = realDateNowForTurnLock;
+  state.currentEnemy = null;
+  assert(waitingAfterPlayerAction.includes("battle-turn-banner waiting enemy"), "battle command panel should switch to the enemy turn after player damage");
+  assert(waitingAfterPlayerAction.includes("准备反击"), "battle command panel should tell the player that the enemy is preparing to respond");
+  assert(waitingAfterPlayerAction.includes("disabled title="), "battle actions should be disabled right after the player action ends");
 `,
   context
 );

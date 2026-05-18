@@ -9,7 +9,8 @@
     "format": "prettier --write \"index.html\" \"src/**/*.{ts,css}\" \"tests/**/*.js\" \"vite*.ts\" \"package.json\" \"tsconfig.json\" \".prettierrc\"",
     "format:check": "prettier --check \"index.html\" \"src/**/*.{ts,css}\" \"tests/**/*.js\" \"vite*.ts\" \"package.json\" \"tsconfig.json\" \".prettierrc\"",
     "preview": "vite preview",
-    "test": "npm run build:test-harness && node tests/map-generation.test.js && node tests/equipment-ui.test.js && node tests/gameplay-behavior.test.js"
+    "test": "npm run build:test-harness && node tests/map-generation.test.js && node tests/equipment-ui.test.js && node tests/gameplay-behavior.test.js",
+    "test:coverage": "node scripts/coverage-report.mjs"
   },
   "devDependencies": {
     "prettier": "^3.8.3",

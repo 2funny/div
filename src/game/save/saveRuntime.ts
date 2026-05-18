@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { CLASSES, SAVE_KEY, isValidMapSize } from "../constants";
 import {
   SAVE_SLOT_LIMIT,
@@ -9,6 +8,20 @@ import {
   writeSaveIndex
 } from "./save";
 import { ensureLoreState, unlockLoreChaptersForFloor } from "../quest/lore";
+import { escapeHtml } from "../render/html";
+import type { GameState } from "../types";
+
+const MAX_SAVED_FLOOR_STATES = 12;
+type SaveSlotMeta = {
+  classId?: string;
+  className?: string;
+  floor?: number;
+  level?: number;
+  hp?: number;
+  maxHp?: number;
+  gold?: number;
+  updatedAt?: string;
+};
 
 // 存档运行时封装多槽 localStorage 读写、旧存档迁移和存档元信息维护。
 export function createSaveRuntime(ctx) {
@@ -62,8 +75,8 @@ export function createSaveRuntime(ctx) {
     }
   }
 
-  function saveMetaFromState(snapshot) {
-    const cls = CLASSES[snapshot?.classId] || {};
+  function saveMetaFromState(snapshot: Partial<GameState> = {}): SaveSlotMeta {
+    const cls = CLASSES[snapshot?.classId || ""] || CLASSES.warrior;
     return {
       classId: snapshot?.classId || "",
       className: cls.name || "冒险者",
@@ -130,8 +143,9 @@ export function createSaveRuntime(ctx) {
   function saveGameToSlot(slotId) {
     if (!state) return;
     const slot = saveSlots().find((entry) => entry.id === slotId);
+    const meta = slot?.meta as SaveSlotMeta | undefined;
     const targetText = slot?.meta
-      ? `<p>${slot.label} 已有 ${slot.meta.className || "冒险者"} Lv.${slot.meta.level || 1}。</p><p>确定把当前冒险保存到这里吗？</p>`
+      ? `<p>${slot.label} 已有 ${meta?.className || "冒险者"} Lv.${meta?.level || 1}。</p><p>确定把当前冒险保存到这里吗？</p>`
       : `<p>确定把当前冒险保存到 ${saveSlotLabel(slotId)} 吗？</p>`;
     showConfirm("确认保存", targetText, "确定", () => saveGame(true, slotId));
   }
@@ -142,9 +156,23 @@ export function createSaveRuntime(ctx) {
     slots.current = slotId;
     slots.pending = slotId;
     if (show) log(`${saveSlotLabel(slotId)}已保存。`);
-    localStorage.setItem(saveSlotKey(slotId), JSON.stringify(state));
+    compactFloorStates(state, MAX_SAVED_FLOOR_STATES);
+    const snapshot = cloneSaveSnapshot(state);
+    let payload = JSON.stringify(snapshot);
+    try {
+      localStorage.setItem(saveSlotKey(slotId), payload);
+    } catch {
+      compactFloorStates(snapshot, Math.floor(MAX_SAVED_FLOOR_STATES / 2));
+      payload = JSON.stringify(snapshot);
+      try {
+        localStorage.setItem(saveSlotKey(slotId), payload);
+      } catch {
+        snapshot.floorStates = {};
+        localStorage.setItem(saveSlotKey(slotId), JSON.stringify(snapshot));
+      }
+    }
     localStorage.setItem(`${SAVE_KEY}-current`, slotId);
-    updateSaveSlotMeta(slotId, state);
+    updateSaveSlotMeta(slotId, snapshot);
     if (show) {
       if (state.currentEnemy) renderLog();
       else render();
@@ -152,6 +180,32 @@ export function createSaveRuntime(ctx) {
   }
 
   // 从 localStorage 恢复存档，并补齐新版字段的默认值。
+  function cloneSaveSnapshot(snapshot) {
+    return JSON.parse(JSON.stringify(snapshot));
+  }
+
+  function compactFloorStates(snapshot, limit = MAX_SAVED_FLOOR_STATES) {
+    const floorStates = snapshot?.floorStates || {};
+    const entries = Object.entries(floorStates);
+    if (entries.length <= limit) return snapshot;
+    const currentFloor = Number(snapshot.floor || 1);
+    const keep = new Set(
+      entries
+        .sort(([floorA], [floorB]) => {
+          const distanceA = Math.abs(Number(floorA) - currentFloor);
+          const distanceB = Math.abs(Number(floorB) - currentFloor);
+          if (distanceA !== distanceB) return distanceA - distanceB;
+          return Number(floorB) - Number(floorA);
+        })
+        .slice(0, limit)
+        .map(([floor]) => floor)
+    );
+    for (const floor of Object.keys(floorStates)) {
+      if (!keep.has(floor)) delete floorStates[floor];
+    }
+    return snapshot;
+  }
+
   function loadGame(slotId = slots.current || "slot-1") {
     migrateLegacySave();
     const raw = localStorage.getItem(saveSlotKey(slotId));
@@ -174,6 +228,7 @@ export function createSaveRuntime(ctx) {
     state.floorStates = state.floorStates || {};
     state.skillLevels = state.skillLevels || {};
     state.skillBranches = state.skillBranches || {};
+    state.skillCooldowns = state.skillCooldowns || {};
     for (const skill of CLASSES[state.classId].skills) {
       state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
     }

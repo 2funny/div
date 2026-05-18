@@ -1,0 +1,43 @@
+import type { Player, SlotKey, Stats } from "./core";
+import type { Enemy } from "./combat";
+import type { Item } from "./item";
+import type { GameMap } from "./map";
+import type { LoreState, QuestState } from "./quest";
+
+export interface GameState {
+  floor: number;
+  classId?: string;
+  player: Player;
+  facing?: string;
+  map: GameMap;
+  floorStates?: Record<string, Partial<GameState>>;
+  inventory: Item[];
+  equipment?: Partial<Record<SlotKey, Item | null>>;
+  currentEnemy?: Enemy | null;
+  gold?: number;
+  keys?: number;
+  universalKeys?: number;
+  doorKeys?: Record<string, number>;
+  doorKeyNames?: Record<string, string>;
+  hp?: number;
+  maxHp?: number;
+  mp?: number;
+  maxMp?: number;
+  stats?: Stats;
+  materials?: Record<string, number>;
+  runes?: Record<string, number>;
+  xp?: number;
+  xpNext?: number;
+  level?: number;
+  statPoints?: number;
+  skillPoints?: number;
+  skillDust?: number;
+  skillLevels?: Record<string, number>;
+  skillBranches?: Record<string, string>;
+  skillCooldowns?: Record<string, number>;
+  quest?: QuestState;
+  quests?: QuestState[];
+  lore?: LoreState;
+  log: string[];
+  [key: string]: unknown;
+}

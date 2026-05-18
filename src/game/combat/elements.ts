@@ -49,6 +49,7 @@ export function elementMultiplier(
 export function elementMatchLabel(multiplier: number) {
   if (multiplier >= ELEMENT_ADVANTAGE) return "克制";
   if (multiplier <= ELEMENT_RESIST) return "抗性";
+  if (multiplier === 0.9) return "穿透抗性";
   if (multiplier < 1) return "同属性";
   return "";
 }

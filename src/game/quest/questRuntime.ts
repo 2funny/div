@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { QUEST_DEFS } from "./quests";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
@@ -82,7 +81,7 @@ export function createQuestRuntime(ctx) {
 
   // 获取某类任务发布者可提供的任务定义。
   function questDefinitionsForGiver(giver) {
-    return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver);
+    return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver) as any[];
   }
 
   // 确保新版多任务列表存在，兼容旧存档。

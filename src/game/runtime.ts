@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   ASSETS,
   CLASSES,
@@ -17,7 +16,7 @@ import {
   VISION_RADIUS
 } from "./constants";
 import { ENEMY_AFFIXES } from "./combat/enemies";
-import { ELEMENT_IDS, elementName } from "./elements";
+import { ELEMENT_IDS, elementName } from "./combat/elements";
 import {
   WEAPON_TYPES,
   randomWeaponTypeForClass,
@@ -26,7 +25,7 @@ import {
 } from "./equipment/equipmentRules";
 import { equipmentName } from "./equipment/equipmentNames";
 import { QUEST_DEFS } from "./quest/quests";
-import { choice, rand, uid } from "./random";
+import { choice, rand, random, uid } from "./random";
 import {
   SAVE_SLOT_LIMIT,
   saveSlotKey,
@@ -58,11 +57,11 @@ import { createModalRuntime } from "./render/modalRuntime";
 import { createFloorRuntime } from "./floor/floorRuntime";
 import { createRenderRuntime } from "./render/renderRuntime";
 import { createCombatRuntime } from "./combat/combatRuntime";
-import { createInventoryRuntime } from "./inventoryRuntime";
+import { createInventoryRuntime } from "./inventory/inventoryRuntime";
 import { createSaveRuntime } from "./save/saveRuntime";
 import { createQuestRuntime } from "./quest/questRuntime";
 import { createInteractionRuntime } from "./interaction/interactionRuntime";
-import type { GameState } from "./types";
+import type { CellObject, GameState, Item, Stats } from "./types";
 
 let state: GameState | null = null;
 let activeTab = "inventory";
@@ -75,6 +74,9 @@ let currentSaveSlot = localStorage.getItem(`${SAVE_KEY}-current`) || "slot-1";
 let pendingSaveSlot = currentSaveSlot;
 
 const $ = requiredById;
+const mutableElementIds = () => [...ELEMENT_IDS];
+const inputValue = (id: string, fallback = "") =>
+  (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value || fallback;
 
 // 主运行时持有跨模块共享状态，并把可变 UI 状态包装成 getter/setter 传给子运行时。
 const battleState = {
@@ -83,7 +85,10 @@ const battleState = {
   },
   set inputLockedUntil(value) {
     battleInputLockedUntil = value;
-  }
+  },
+  phase: "idle",
+  message: "",
+  actor: ""
 };
 
 const uiState = {
@@ -141,7 +146,7 @@ const uiState = {
 const audioRuntime = createAudioRuntime({
   $,
   getState: () => state,
-  isDefeatedEnemy: (...args) => isDefeatedEnemy(...args)
+  isDefeatedEnemy: (enemy) => isDefeatedEnemy(enemy)
 });
 const { initAudio, playSound, syncMusicToGame, toggleAudio, updateSoundButton } = audioRuntime;
 
@@ -184,6 +189,7 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     lore: { chapters: [], pages: [] },
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     skillBranches: {},
+    skillCooldowns: {},
     inventory: [
       potion("小型生命药水", "hp", 18),
       potion("小型法力药水", "mp", 12),
@@ -300,13 +306,13 @@ function randomEquipment() {
   if (
     slot === "weapon" &&
     (state.floor >= 4 || quality !== "普通") &&
-    Math.random() < weaponElementChance(quality)
+    random() < weaponElementChance(quality)
   ) {
-    equipment.element = choice(ELEMENT_IDS);
+    equipment.element = choice(mutableElementIds());
     equipment.name = `${elementName(equipment.element)}纹${equipment.name}`;
   }
-  if (slot !== "weapon" && state.floor >= 4 && Math.random() < elementResistanceChance(quality)) {
-    const resistance = choice(ELEMENT_IDS);
+  if (slot !== "weapon" && state.floor >= 4 && random() < elementResistanceChance(quality)) {
+    const resistance = choice(mutableElementIds());
     equipment.elementResistances = [resistance];
     equipment.name = `${elementName(resistance)}抗${equipment.name}`;
   }
@@ -321,9 +327,9 @@ function elementResistanceChance(quality) {
   return { 普通: 0.08, 优秀: 0.16, 稀有: 0.28, 史诗: 0.42, 传说: 0.58 }[quality] || 0.16;
 }
 
-// 抽取装备品质，幸运值和楼层会略微提高高品质概率。
+// 抽取装备品质，楼层会略微提高高品质概率；幸运只保留给战斗暴击率。
 function qualityRoll() {
-  const r = Math.random() + state.stats.luk * 0.004 + Math.min(0.12, state.floor * 0.012);
+  const r = random() + Math.min(0.12, state.floor * 0.012);
   if (r > 0.96) return "传说";
   if (r > 0.86) return "史诗";
   if (r > 0.68) return "稀有";
@@ -352,9 +358,10 @@ function nextFloor() {
   if (state.floor >= MAX_FLOOR) return;
   const stair = currentStairsDown();
   if (stair?.locked) {
+    const seal = (stair.seal || {}) as { targetFloor?: number; targetName?: string };
     showEvent(
       "楼梯封印",
-      `<p>下行楼梯被符文封住了。</p><p>解除条件：击败第 ${stair.seal?.targetFloor || state.floor} 层的${stair.seal?.targetName || "封印守卫"}。</p>`,
+      `<p>下行楼梯被符文封住了。</p><p>解除条件：击败第 ${seal.targetFloor || state.floor} 层的${seal.targetName || "封印守卫"}。</p>`,
       "继续探索"
     );
     return;
@@ -374,7 +381,7 @@ function nextFloor() {
 // 获取玩家当前脚下的下行楼梯对象。
 function currentStairsDown() {
   const cell = state?.map?.cells?.[state.player?.y]?.[state.player?.x];
-  return cell?.object?.type === "stairsDown" ? cell.object : null;
+  return cell?.object?.type === "stairsDown" ? (cell.object as CellObject) : null;
 }
 
 // 返回上一层，并从楼层缓存恢复地图状态。
@@ -415,7 +422,8 @@ function enterFloor(direction) {
   const saved = state.floorStates[state.floor];
   if (saved?.map) {
     state.map = cloneFloorMap(saved.map);
-    state.player = entryPositionForDirection(direction);
+    state.player = saved.player ? { ...saved.player } : entryPositionForDirection(direction);
+    state.facing = saved.facing || state.facing || (direction === "up" ? "up" : "down");
     updateVisibility();
     return;
   }
@@ -445,8 +453,8 @@ function findMapObject(type) {
 // 汇总基础属性、装备属性、强化等级和符文效果。
 // 汇总基础属性、装备、强化和符文效果；战斗和 UI 都以这里为准。
 function totals() {
-  const total = { ...state.stats, hp: 0, mp: 0 };
-  for (const eq of Object.values(state.equipment || {})) {
+  const total: Stats = { ...(state.stats || {}), hp: 0, mp: 0 };
+  for (const eq of Object.values(state.equipment || {}) as Array<Item | null>) {
     if (!eq) continue;
     for (const [key, value] of Object.entries(eq.stats))
       total[key] = (total[key] || 0) + value + eq.level;
@@ -466,7 +474,7 @@ function effectiveMaxMp() {
 }
 
 // 把符文效果写入汇总属性对象。
-function applyRune(total, rune) {
+function applyRune(total: Stats, rune: string) {
   const level = Number(rune.match(/\d+$/)?.[0] || 1);
   const value = 2 * level;
   if (rune.startsWith("火焰")) total.atk += value;
@@ -477,7 +485,7 @@ function applyRune(total, rune) {
   if (rune.startsWith("迅捷")) total.spd += value;
 }
 
-function runeEffectText(rune) {
+function runeEffectText(rune: string) {
   const level = Number(rune.match(/\d+$/)?.[0] || 1);
   const value = 2 * level;
   if (rune.startsWith("火焰")) return `镶嵌后攻击 +${value}`;
@@ -591,14 +599,14 @@ function openAdminPanel() {
 
 function adminApplyFloorEffect() {
   if (!state?.map) return;
-  const effectId = document.getElementById("adminEffect")?.value || "none";
+  const effectId = inputValue("adminEffect", "none");
   const difficulty = clampAdminNumber(
-    document.getElementById("adminDifficulty")?.value,
+    inputValue("adminDifficulty"),
     0.8,
     1.5,
     1
   );
-  const reward = clampAdminNumber(document.getElementById("adminReward")?.value, 0.8, 2, 1);
+  const reward = clampAdminNumber(inputValue("adminReward"), 0.8, 2, 1);
   if (effectId === "none") {
     state.map.effect = null;
     applyAdminEffectTerrain();
@@ -624,7 +632,7 @@ function applyAdminEffectTerrain() {
   const candidates = floorCells
     .filter((cell) => !cell.object && !cell.roomId && !cell.mainPath)
     .filter((cell) => distance(cell, state.player || { x: 1, y: 1 }) > 4)
-    .sort(() => Math.random() - 0.5);
+    .sort(() => random() - 0.5);
   for (const cell of candidates) {
     if (placed >= target) break;
     cell.terrain = "lava";
@@ -638,13 +646,13 @@ function adminPlayableAreaIsConnected() {
   if (!map?.length) return false;
   const passable = (cell) => ["floor", "door"].includes(cell.terrain);
   const start = map[state.player?.y || 1]?.[state.player?.x || 1] || map[1]?.[1];
-  const total = map.flat().filter(passable).length;
+  const total = countMapCells(map, passable);
   if (!start || !passable(start) || total <= 0) return false;
   const key = (cell) => `${cell.x},${cell.y}`;
   const visited = new Set([key(start)]);
   const queue = [start];
-  while (queue.length) {
-    const cell = queue.shift();
+  for (let i = 0; i < queue.length; i++) {
+    const cell = queue[i];
     for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
       if (!passable(next) || visited.has(key(next))) continue;
       visited.add(key(next));
@@ -658,6 +666,16 @@ function clampAdminNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, number));
+}
+
+function countMapCells(map, predicate) {
+  let count = 0;
+  for (const row of map) {
+    for (const cell of row) {
+      if (predicate(cell)) count++;
+    }
+  }
+  return count;
 }
 
 function adminAddGold(amount = 100) {
@@ -720,7 +738,7 @@ function adminAddItem(kind) {
 }
 
 function adminAddSelectedRune() {
-  const rune = document.getElementById("adminRune")?.value || "火焰1";
+  const rune = inputValue("adminRune", "火焰1");
   adminAddRune(rune, 1);
 }
 
@@ -738,8 +756,8 @@ function adminApplyWeaponDebug() {
     showToast("当前没有已装备武器");
     return;
   }
-  const element = document.getElementById("adminWeaponElement")?.value || "none";
-  const weaponType = document.getElementById("adminWeaponType")?.value || "none";
+  const element = inputValue("adminWeaponElement", "none");
+  const weaponType = inputValue("adminWeaponType", "none");
   if (element === "none") delete weapon.element;
   else weapon.element = element;
   if (weaponType === "none") delete weapon.weaponType;
@@ -851,9 +869,10 @@ const {
 } = inventoryRuntime;
 
 const renderApi = {};
-const renderRuntime = createRenderRuntime({
+const renderRuntime = (createRenderRuntime as any)({
   $,
   api: renderApi,
+  battle: battleState,
   getState: () => state,
   setState: (nextState) => {
     state = nextState;
@@ -940,7 +959,7 @@ const {
 } = renderRuntime;
 
 const saveApi = {};
-const saveRuntime = createSaveRuntime({
+const saveRuntime = (createSaveRuntime as any)({
   api: saveApi,
   getState: () => state,
   setState: (nextState) => {
@@ -1051,7 +1070,6 @@ Object.assign(inventoryApi, {
   equipmentCompareText,
   equipmentDetailMarkup,
   equipmentSummary,
-  itemScore,
   cloneFloorMap,
   log,
   openQuestFromGiver,
@@ -1108,6 +1126,7 @@ Object.assign(interactionApi, {
   battleRisk,
   closeModal,
   currentStairsDown,
+  enemyTurn,
   getAudioEnabled,
   initAudio,
   isBlockingInteraction,
@@ -1125,6 +1144,7 @@ Object.assign(interactionApi, {
   showEvent,
   showModal,
   syncMusicToGame,
+  totals,
   useAltar
 });
 

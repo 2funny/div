@@ -1,4 +1,4 @@
-import { choice } from "../random";
+import { choice, random } from "../random";
 import type { SlotKey } from "../types";
 
 type EquipmentNameDef = {
@@ -176,7 +176,7 @@ export function equipmentName(slot: SlotKey, quality: string, weaponType = ""): 
       ? WEAPON_NAME_POOLS[weaponType] || WEAPON_NAME_POOLS.sword
       : SLOT_NAME_POOLS[slot] || SLOT_NAME_POOLS.armor;
   if (quality === "传说") return choice(def.legendary);
-  if (quality === "史诗" && Math.random() < 0.65) return choice(def.epic);
+  if (quality === "史诗" && random() < 0.65) return choice(def.epic);
   const material = choice(materialsForQuality(def, quality));
   return `${material}${def.base}`;
 }

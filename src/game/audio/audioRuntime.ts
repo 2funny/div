@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { MASTER_VOLUME } from "../constants";
 import { choice, rand } from "../random";
 import { soundProfile } from "./audioProfiles";
@@ -92,9 +91,9 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
       audioState.drone = null;
     }
     if (audioState.battlePulse) {
-      audioState.battlePulse.low.stop();
-      audioState.battlePulse.mid.stop();
-      audioState.battlePulse.tick.stop();
+      audioState.battlePulse.low?.stop();
+      audioState.battlePulse.mid?.stop();
+      audioState.battlePulse.tick?.stop();
       audioState.battlePulse = null;
     }
     if (audioState.music) {
@@ -249,7 +248,7 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     frequency,
     duration,
     volume,
-    type = "sine",
+    type: OscillatorType = "sine",
     filterFrequency = 1200,
     delay = 0
   ) {
@@ -278,7 +277,7 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     end,
     duration,
     volume,
-    type = "sine",
+    type: OscillatorType = "sine",
     filterFrequency = 1200,
     delay = 0
   ) {
@@ -310,47 +309,17 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     stopMusicLayer();
     const { ctx, master } = audioState;
     const music = ctx.createGain();
-    const pulse = ctx.createGain();
-    const low = ctx.createOscillator();
-    const mid = ctx.createOscillator();
-    const tick = ctx.createOscillator();
-    const filter = ctx.createBiquadFilter();
-    const tickFilter = ctx.createBiquadFilter();
-    const now = ctx.currentTime;
-    music.gain.value = 0.17;
-    pulse.gain.setValueAtTime(0.0001, now);
-    pulse.gain.linearRampToValueAtTime(0.065, now + 0.08);
-    low.type = "sawtooth";
-    mid.type = "square";
-    tick.type = "triangle";
-    low.frequency.value = 73.42;
-    mid.frequency.value = 220;
-    tick.frequency.value = 293.66;
-    filter.type = "lowpass";
-    filter.frequency.value = 620;
-    tickFilter.type = "bandpass";
-    tickFilter.frequency.value = 1280;
-    low.connect(filter);
-    mid.connect(filter);
-    filter.connect(pulse);
-    tick.connect(tickFilter);
-    tickFilter.connect(pulse);
-    pulse.connect(music);
+    music.gain.value = 0.145;
     music.connect(master);
-    low.start();
-    mid.start();
-    tick.start();
     audioState.music = music;
     audioState.musicMode = "battle";
     audioState.musicStep = 0;
-    audioState.battlePulse = { low, mid, tick, pulse };
+    audioState.battlePulse = {};
     scheduleBattlePulse();
   }
 
   function scheduleBattlePulse() {
     if (!audioState?.battlePulse || audioState.musicMode !== "battle") return;
-    const { ctx, battlePulse } = audioState;
-    const now = ctx.currentTime;
     const phrases = [
       [293.66, 349.23, 440, 587.33, 523.25, 440, 392, 349.23, 311.13, 349.23, 440, 523.25],
       [293.66, 220, 293.66, 349.23, 440, 523.25, 587.33, 523.25, 466.16, 440, 349.23, 311.13],
@@ -370,37 +339,27 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
     const bass = bassPatterns[phraseIndex % bassPatterns.length];
     const rhythm = [0, 0.16, 0.32, 0.5, 0.72, 0.88, 1.04, 1.24, 1.46, 1.62, 1.82, 2.1];
     const bassRhythm = [0, 0.32, 0.64, 0.96, 1.28, 1.6, 1.92, 2.16];
-    battlePulse.pulse.gain.cancelScheduledValues(now);
-    battlePulse.pulse.gain.setValueAtTime(0.014, now);
-    bassRhythm.forEach((delay, index) => {
-      const hitAt = now + delay;
-      battlePulse.pulse.gain.linearRampToValueAtTime(
-        index === 0 || index === 4 ? 0.105 : 0.066,
-        hitAt + 0.035
-      );
-      battlePulse.pulse.gain.exponentialRampToValueAtTime(0.018, hitAt + 0.22);
-    });
     phrase.forEach((note, index) => {
       const delay = rhythm[index];
       const strong = index === 0 || index === 3 || index === 7 || index === 11;
       playMusicNote(
         note,
-        strong ? 0.19 : 0.12,
-        strong ? 0.085 : 0.052,
-        strong ? "square" : "triangle",
-        strong ? 1750 : 1320,
+        strong ? 0.16 : 0.105,
+        strong ? 0.062 : 0.038,
+        strong ? "triangle" : "sine",
+        strong ? 1600 : 1250,
         delay
       );
       if (index === 3 || index === 10)
-        playMusicNote(note / 2, 0.34, 0.035, "triangle", 720, delay + 0.055);
+        playMusicNote(note / 2, 0.22, 0.02, "sine", 560, delay + 0.055);
     });
     bass.forEach((note, index) => {
       playMusicNote(
         note,
-        index % 2 ? 0.18 : 0.28,
-        index % 2 ? 0.045 : 0.068,
-        index % 2 ? "square" : "sawtooth",
-        620,
+        index % 2 ? 0.12 : 0.18,
+        index % 2 ? 0.022 : 0.038,
+        "sine",
+        360,
         bassRhythm[index]
       );
     });
@@ -409,7 +368,14 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
       { notes: [130.81, 196, 261.63], delay: 1.28 }
     ].forEach((stab) => {
       stab.notes.forEach((note, index) =>
-        playMusicNote(note, 0.22, index ? 0.028 : 0.045, "square", 880, stab.delay + index * 0.025)
+        playMusicNote(
+          note,
+          0.16,
+          index ? 0.018 : 0.026,
+          "triangle",
+          720,
+          stab.delay + index * 0.025
+        )
       );
     });
     playBattleDrums();
@@ -420,14 +386,14 @@ export function createAudioRuntime({ $, getState, isDefeatedEnemy }) {
   function playBattleDrums() {
     if (!audioState?.music || audioState.musicMode !== "battle") return;
     [0, 0.64, 1.28, 1.92].forEach((delay) => {
-      playMusicSweep(92, 45, 0.18, 0.072, "sine", 520, delay);
+      playMusicSweep(82, 46, 0.13, 0.05, "sine", 360, delay);
     });
     [0.48, 1.48, 2.18].forEach((delay) => {
-      playMusicNoise(0.11, 0.032, 2400, delay);
-      playMusicSweep(220, 150, 0.08, 0.018, "triangle", 900, delay);
+      playMusicNoise(0.08, 0.022, 2400, delay);
+      playMusicSweep(210, 150, 0.055, 0.012, "triangle", 900, delay);
     });
     [0.16, 0.32, 0.8, 0.96, 1.12, 1.66, 1.82, 2.32].forEach((delay) => {
-      playMusicNoise(0.035, 0.014, 5600, delay);
+      playMusicNoise(0.026, 0.01, 5600, delay);
     });
   }
 

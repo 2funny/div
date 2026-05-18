@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { FLOOR_EFFECTS, MAP_SIZE_MAX, MAP_SIZE_MIN, MAX_FLOOR, THEMES } from "../constants";
 import { ENEMY_AFFIXES } from "../combat/enemies";
-import { ELEMENTS } from "../elements";
-import { choice, rand } from "../random";
+import { ELEMENTS } from "../combat/elements";
+import { choice, rand, random } from "../random";
+import type { Cell } from "../types";
 import {
   cardinalNeighbors,
   cellsWithin,
@@ -10,6 +10,22 @@ import {
   floorNeighborCount,
   validRoomDoor
 } from "./mapGeometry";
+
+type ScatterOptions = {
+  rooms?: Array<{ id: string; threat?: string }>;
+  preferRooms?: boolean;
+  minObjectDistance?: number;
+};
+
+type QuestNpcSource = {
+  [key: string]: unknown;
+  questId: string;
+  npcName: string;
+  avoidRoomId?: string;
+  roomName?: string;
+  targetFloor?: number;
+  targetRoomName?: string | null;
+};
 
 // 楼层运行时负责地图拓扑、房间标签、怪物/宝藏/任务点投放和楼梯封印。
 export function createFloorRuntime({ getState, updateVisibility, ensureQuestList }) {
@@ -36,7 +52,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const theme = themeForFloor(state.floor);
     const effect = chooseFloorEffect(theme);
     state._floorEffectDraft = effect;
-    const map = Array.from({ length: size }, (_, y) =>
+    const map: Cell[][] = Array.from({ length: size }, (_, y) =>
       Array.from({ length: size }, (_, x) => ({
         x,
         y,
@@ -103,6 +119,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       }
       pruneDisconnectedFloors(map);
       rooms = assignRoomLabels(map);
+      normalizeQuestTargetRooms(rooms);
       placeLavaFields(map);
       const rescueQuest = placeRescueQuest(map, rooms);
       ensureQuestRoomEncounters(map, rooms);
@@ -144,7 +161,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (isFinalFloor()) return FLOOR_EFFECTS.find((effect) => effect.id === "lava");
     if (state.floor < 4) return null;
     const chance = Math.min(0.26, 0.12 + state.floor * 0.006);
-    if (Math.random() > chance) return null;
+    if (random() > chance) return null;
     const available = FLOOR_EFFECTS.filter((effect) => state.floor >= effect.minFloor);
     if (!available.length) return null;
     if (theme.id === "frost") {
@@ -193,7 +210,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function shouldPlaceMerchant() {
     const earlyFloorBonus = state.floor <= 2 ? 0.08 : 0;
     const deepFloorBonus = Math.min(0.08, state.floor * 0.002);
-    return Math.random() < Math.min(0.86, 0.74 + earlyFloorBonus + deepFloorBonus);
+    return random() < Math.min(0.86, 0.74 + earlyFloorBonus + deepFloorBonus);
   }
 
   // 判断当前楼层是否为最终 Boss 层。
@@ -246,7 +263,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const room = cell.roomId ? 22 : 0;
     const door = cell.terrain === "door" ? 8 : 0;
     const mainPathPenalty = cell.mainPath && kind === "down" ? -10 : 0;
-    return distance(cell, origin) * 2 + endpoint + room + door + mainPathPenalty + Math.random();
+    return distance(cell, origin) * 2 + endpoint + room + door + mainPathPenalty + random();
   }
 
   // 偶尔给下楼梯添加封印，并在附近生成封印守卫作为解锁目标。
@@ -279,7 +296,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     let y = sy;
     while (x !== tx || y !== ty) {
       map[y][x].terrain = "floor";
-      if (x !== tx && (y === ty || Math.random() > 0.45)) x += Math.sign(tx - x);
+      if (x !== tx && (y === ty || random() > 0.45)) x += Math.sign(tx - x);
       else if (y !== ty) y += Math.sign(ty - y);
     }
     map[ty][tx].terrain = "floor";
@@ -290,11 +307,11 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const path = [];
     let x = sx;
     let y = sy;
-    let horizontalBias = Math.random() > 0.5;
+    let horizontalBias = random() > 0.5;
     while (x !== tx || y !== ty) {
       carveMainCell(map, x, y, path);
       if (x !== tx && y !== ty) {
-        if (Math.random() < 0.22) horizontalBias = !horizontalBias;
+        if (random() < 0.22) horizontalBias = !horizontalBias;
         if (horizontalBias) x += Math.sign(tx - x);
         else y += Math.sign(ty - y);
       } else if (x !== tx) {
@@ -378,7 +395,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       { x: 0, y: 1 },
       { x: 0, y: -1 }
     ];
-    return dirs.sort(() => Math.random() - 0.5);
+    return dirs.sort(() => random() - 0.5);
   }
 
   // 生成带门和房间编号的结构化房间，供任务和宝藏使用。
@@ -482,7 +499,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
 
   function expandOpenSpace(map, targetRatio) {
     const target = Math.ceil(map.length * map.length * targetRatio);
-    let floorCount = map.flat().filter((cell) => cell.terrain === "floor").length;
+    let floorCount = countCells(map, (cell) => cell.terrain === "floor");
     let attempts = 0;
     while (floorCount < target && attempts < 240) {
       attempts++;
@@ -504,8 +521,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   // 为所有房间统计可通行格子数量，并生成展示用房间名。
   // 扫描同一 roomId 的格子集合，并生成房间展示名和内部威胁等级。
   function assignRoomLabels(map) {
-    const rooms = {};
-    for (const cell of map.flat()) {
+    const rooms: Record<string, { id: string; cells: number }> = {};
+    for (const cell of mapCells(map)) {
       if (!cell.roomId || cell.terrain === "wall") continue;
       rooms[cell.roomId] = rooms[cell.roomId] || { id: cell.roomId, cells: 0 };
       rooms[cell.roomId].cells++;
@@ -535,8 +552,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const key = (cell) => `${cell.x},${cell.y}`;
     const visited = new Set([key(start)]);
     const queue = [start];
-    while (queue.length) {
-      const cell = queue.shift();
+    for (let i = 0; i < queue.length; i++) {
+      const cell = queue[i];
       for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
         if (!passable(next) || visited.has(key(next))) continue;
         visited.add(key(next));
@@ -568,14 +585,15 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
 
   function placeLockedRoomDoors(map, rooms) {
     if (state.floor < 2 || !rooms?.length) return 0;
+    const allCells = mapCells(map);
     const candidates = rooms
       .map((room) => {
-        const door = map
-          .flat()
-          .find((cell) => cell.terrain === "door" && cell.roomId === room.id && !cell.object);
-        const cells = map
-          .flat()
-          .filter((cell) => cell.roomId === room.id && cell.terrain === "floor");
+        const door = allCells.find(
+          (cell) => cell.terrain === "door" && cell.roomId === room.id && !cell.object
+        );
+        const cells = allCells.filter(
+          (cell) => cell.roomId === room.id && cell.terrain === "floor"
+        );
         return { ...room, door, cells };
       })
       .filter((room) => room.door && room.cells.length >= 4)
@@ -588,7 +606,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           )
       )
       .sort((a, b) => lockedRoomScore(b) - lockedRoomScore(a));
-    const target = Math.min(candidates.length, state.floor >= 8 && Math.random() < 0.45 ? 2 : 1);
+    const target = Math.min(candidates.length, state.floor >= 8 && random() < 0.45 ? 2 : 1);
     let placed = 0;
     for (const room of candidates) {
       if (placed >= target) break;
@@ -642,12 +660,12 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function lockedRoomScore(room) {
     const priority = { sealed: 5, treasure: 4, danger: 3, quiet: 1 }[room.threat] || 1;
     const center = roomCenter(room.cells);
-    return priority * 16 + distance(center, { x: 1, y: 1 }) + Math.random();
+    return priority * 16 + distance(center, { x: 1, y: 1 }) + random();
   }
 
   // 在空地面上散布怪物或地图物件，并按规则控制密度。
   // 在可通行格中散布对象，可按房间偏好、距离和拥挤度过滤候选点。
-  function scatter(map, type, count, options = {}) {
+  function scatter(map, type, count, options: ScatterOptions = {}) {
     let placed = 0;
     let attempts = 0;
     const max = map.length - 2;
@@ -665,7 +683,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         const threat = roomThreatFromRooms(options.rooms, cell.roomId);
         const eliteChance = eliteChanceForThreat(threat);
         const object =
-          type === "monster" ? makeEnemyWithVariant(Math.random() < eliteChance) : { type };
+          type === "monster" ? makeEnemyWithVariant(random() < eliteChance) : { type };
         if (cell.roomId) object.roomId = cell.roomId;
         cell.object = object;
         placed++;
@@ -673,8 +691,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     }
   }
 
-  function isObjectCrowded(map, cell, options = {}) {
-    if (options.preferRooms && !cell.roomId && Math.random() < 0.72) return true;
+  function isObjectCrowded(map, cell, options: ScatterOptions = {}) {
+    if (options.preferRooms && !cell.roomId && random() < 0.72) return true;
     const minDistance = options.minObjectDistance || 0;
     if (!minDistance) return false;
     return cellsWithin(map, cell.x, cell.y, minDistance).some(
@@ -865,7 +883,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
     const guard = candidates[0];
     if (!guard) return false;
-    guard.object = makeEnemyWithVariant(eliteChance && Math.random() < 0.35);
+    guard.object = makeEnemyWithVariant(eliteChance && random() < 0.35);
     if (guard.roomId) guard.object.roomId = guard.roomId;
     return true;
   }
@@ -883,7 +901,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   // 为某个房间生成救援任务：放置被困者、怪物和任务发布者。
-  function placeRescueQuest(map, rooms) {
+  function placeRescueQuest(map: Cell[][], rooms: Array<{ id: string; name: string; cells: number }>) {
     const room = rooms
       .map((entry) => ({
         ...entry,
@@ -908,7 +926,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const monsterCells = room.cells.filter((cell) => cell !== prisoner).slice(0, 3);
     const targetCount = Math.min(monsterCells.length, 1 + Math.floor((state.floor + 2) / 4));
     for (const cell of monsterCells.slice(0, targetCount)) {
-      cell.object = makeEnemyWithVariant(state.floor >= 5 && Math.random() < 0.18);
+      cell.object = makeEnemyWithVariant(state.floor >= 5 && random() < 0.18);
       cell.object.roomId = room.id;
     }
     const giver = placeQuestNpc(map, {
@@ -932,7 +950,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   // 计算一组格子的中心点，用于选择远离入口的任务房。
-  function roomCenter(cells) {
+  function roomCenter(cells: Cell[]) {
     const total = cells.reduce((sum, cell) => ({ x: sum.x + cell.x, y: sum.y + cell.y }), {
       x: 0,
       y: 0
@@ -941,7 +959,10 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   // 在地图上放置任务 NPC，并给旧版单任务字段保留兼容默认值。
-  function placeQuestNpc(map, source = { questId: "wardenErrand", npcName: "巡夜人" }) {
+  function placeQuestNpc(
+    map: Cell[][],
+    source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人" }
+  ) {
     const { avoidRoomId, ...objectSource } = source;
     const candidates = interiorCells(map)
       .filter(
@@ -976,8 +997,24 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   function crossFloorTargetRoomName(targetFloor) {
-    const roomNumber = Math.max(1, Math.min(7, 1 + Math.floor(targetFloor / 3)));
-    return `${roomNumber}号房`;
+    return null;
+  }
+
+  function normalizeQuestTargetRooms(rooms) {
+    if (!rooms?.length) return;
+    const roomNames = new Set(rooms.map((room) => room.name));
+    for (const quest of ensureQuestList()) {
+      if (!quest.accepted || quest.claimed || quest.completed) continue;
+      if (quest.id === "rescueRoom" || quest.targetFloor !== state.floor) continue;
+      if (quest.targetRoomName && roomNames.has(quest.targetRoomName)) continue;
+      quest.targetRoomName = boundedRoomName(quest.targetRoomName, rooms);
+    }
+  }
+
+  function boundedRoomName(name, rooms) {
+    const number = Number(name?.match(/\d+/)?.[0] || 1);
+    const index = Math.max(0, Math.min(rooms.length - 1, number - 1));
+    return rooms[index]?.name || rooms[0].name;
   }
 
   function ensureQuestRoomEncounters(map, rooms) {
@@ -1018,7 +1055,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       .filter(
         (cell) => cell.x > 3 && cell.y > 3 && cell.x < map.length - 4 && cell.y < map.length - 4
       )
-      .sort(() => Math.random() - 0.5);
+      .sort(() => random() - 0.5);
     for (const center of centers) {
       if (placed >= needed) break;
       let roomId = `room-${state.floor}-fallback-${serial++}`;
@@ -1068,11 +1105,25 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   function interiorCells(map) {
-    return map
-      .flat()
-      .filter(
-        (cell) => cell.x > 0 && cell.y > 0 && cell.x < map.length - 1 && cell.y < map.length - 1
-      );
+    return mapCells(map).filter(
+      (cell) => cell.x > 0 && cell.y > 0 && cell.x < map.length - 1 && cell.y < map.length - 1
+    );
+  }
+
+  function mapCells(map) {
+    const cells = [];
+    for (const row of map) cells.push(...row);
+    return cells;
+  }
+
+  function countCells(map, predicate) {
+    let count = 0;
+    for (const row of map) {
+      for (const cell of row) {
+        if (predicate(cell)) count++;
+      }
+    }
+    return count;
   }
 
   function canUseTreasureCell(map, x, y) {
@@ -1116,9 +1167,9 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const shouldAffix =
       eliteOrBoss ||
       enemy.roomBoss ||
-      (state.floor >= 6 && Math.random() < Math.min(0.18, 0.06 + state.floor * 0.01));
+      (state.floor >= 6 && random() < Math.min(0.18, 0.06 + state.floor * 0.01));
     if (!shouldAffix) return enemy;
-    const affix = choice(ENEMY_AFFIXES);
+      const affix = choice([...ENEMY_AFFIXES]);
     enemy.affix = affix;
     enemy.name = `${affix.name}${enemy.name}`;
     if (affix.id === "armored") {
@@ -1159,7 +1210,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const candidates = floorCells
       .filter((cell) => !cell.object && !cell.roomId && !cell.mainPath)
       .filter((cell) => distance(cell, { x: 1, y: 1 }) > 5)
-      .sort(() => Math.random() - 0.5);
+      .sort(() => random() - 0.5);
     for (const cell of candidates) {
       if (placed >= target) break;
       cell.terrain = "lava";
@@ -1175,13 +1226,13 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function playableAreaIsConnected(map) {
     const passable = (cell) => ["floor", "door"].includes(cell.terrain);
     const start = map[1]?.[1];
-    const total = map.flat().filter(passable).length;
+    const total = countCells(map, passable);
     if (!start || !passable(start) || total <= 0) return false;
     const key = (cell) => `${cell.x},${cell.y}`;
     const visited = new Set([key(start)]);
     const queue = [start];
-    while (queue.length) {
-      const cell = queue.shift();
+    for (let i = 0; i < queue.length; i++) {
+      const cell = queue[i];
       for (const next of cardinalNeighbors(map, cell.x, cell.y)) {
         if (!passable(next) || visited.has(key(next))) continue;
         visited.add(key(next));
@@ -1210,6 +1261,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       maxHp: hp,
       atk: Math.round(boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52),
       def: Math.round(boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08),
+      spd: Math.round(boss ? 8 + floor * 0.45 : elite ? 4 + floor * 0.5 : 2 + floor * 0.35),
       xp: scaledReward(boss ? 160 + floor * 8 : 5 + floor * 2.2 + (elite ? 8 : 0)),
       gold: scaledReward(boss ? 220 + floor * 7 : rand(3, 6) + floor + (elite ? 5 : 0))
     };
@@ -1254,7 +1306,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     enemy.weaknesses = [...(profile?.weaknesses || def.weakAgainst)];
     enemy.resistances = [...(profile?.resistances || def.strongAgainst)];
     if (enemy.type === "boss" && !enemy.weaknesses.includes("holy")) enemy.weaknesses.push("holy");
-    if (enemy.type === "elite" && Math.random() < 0.35) {
+    if (enemy.type === "elite" && random() < 0.35) {
       enemy.resistances = [...new Set([...enemy.resistances, def.value])];
     }
     return enemy;
@@ -1263,7 +1315,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function monsterProfileForName(name = "") {
     const profiles = [
       { match: "史莱姆", element: "poison", weaknesses: ["thunder"], resistances: ["poison"] },
-      { match: "洞窟鼠", element: "dark", weaknesses: ["holy"], resistances: ["poison"] },
+      { match: "洞穴鼠", element: "dark", weaknesses: ["holy"], resistances: ["poison"] },
       {
         match: "骷髅兵",
         element: "dark",
@@ -1298,7 +1350,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           : floor >= 6
             ? Math.min(0.5, 0.16 + floor * 0.015)
             : 0;
-    if (Math.random() > skillChance) return enemy;
+    if (random() > skillChance) return enemy;
     const pool = enemySkillPool(enemy);
     const skillCount = enemy.type === "boss" ? 3 : enemy.type === "elite" || enemy.roomBoss ? 2 : 1;
     enemy.skills = [];

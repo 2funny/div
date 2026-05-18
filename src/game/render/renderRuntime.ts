@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   ASSETS,
   CLASSES,
@@ -11,12 +10,13 @@ import {
   isValidMapSize
 } from "../constants";
 import { getBattleFx } from "../combat/combatFx";
-import { elementName, elementResistText, elementTags } from "../elements";
+import { elementName, elementResistText, elementTags } from "../combat/elements";
 import {
   equipmentRestrictionText,
   isWeaponUsableByClass,
   weaponTypeName
 } from "../equipment/equipmentRules";
+import { effectiveItemStat, itemScore } from "../equipment/equipmentScoring";
 import {
   LORE_CHAPTERS,
   LORE_PAGES,
@@ -27,13 +27,17 @@ import {
 import { cellsWithin, distance } from "../floor/mapGeometry";
 import { QUEST_DEFS } from "../quest/quests";
 import { syncWeatherCanvas } from "./weatherCanvas";
+import { escapeHtml } from "./html";
+import type { StatKey } from "../types";
 
 const LORE_TOTAL = LORE_CHAPTERS.length + LORE_PAGES.length;
 
 // 渲染运行时集中生成 DOM 字符串和面板状态，不承担战斗、掉落等规则计算。
 export function createRenderRuntime(ctx) {
   const { $, ui, api } = ctx;
+  const battle = ctx.battle || { inputLockedUntil: 0 };
   let state = ctx.getState();
+  let battleUnlockRenderTimer = null;
   const syncState = () => {
     state = ctx.getState();
     return state;
@@ -90,6 +94,7 @@ export function createRenderRuntime(ctx) {
   function renderStartScreen() {
     const slots = saveSlots();
     const occupied = slots.filter((slot) => slot.meta);
+    $("homeBtn").disabled = true;
     $("classSelect").innerHTML = `
     <article class="start-hub">
       <header class="start-hero">
@@ -103,13 +108,14 @@ export function createRenderRuntime(ctx) {
         <button type="button" onclick="startNewGame()">新游戏</button>
         <button type="button" ${occupied.length ? "" : "disabled"} onclick="renderContinueSlots()">继续</button>
       </div>
-      ${occupied.length ? `<p class="start-note">继续会打开存档列表；新游戏会先选择职业，再写入一个新存档。</p>` : `<p class="start-note">暂无存档，开始新游戏后先选择职业。</p>`}
+      ${occupied.length ? `<p class="start-note">继续会打开存档列表；新游戏会自动使用一个空存档。</p>` : `<p class="start-note">暂无存档，开始新游戏后先选择职业。</p>`}
     </article>
   `;
   }
 
   function renderContinueSlots() {
     const slots = saveSlots().filter((slot) => slot.meta);
+    $("homeBtn").disabled = false;
     $("classSelect").innerHTML = `
     <article class="start-hub">
       <header class="start-hero">
@@ -121,7 +127,7 @@ export function createRenderRuntime(ctx) {
         <button type="button" onclick="renderStartScreen()">返回</button>
       </header>
       <div class="save-slot-grid">
-        ${slots.map(saveSlotCard).join("")}
+        ${slots.length ? slots.map(saveSlotCard).join("") : `<p class="start-note">暂无可继续的存档。</p>`}
       </div>
     </article>
   `;
@@ -135,6 +141,7 @@ export function createRenderRuntime(ctx) {
 
   function saveSlotCard(slot) {
     const meta = slot.meta;
+    const className = escapeHtml(meta?.className || "鍐掗櫓鑰?");
     if (!meta) {
       return `
       <article class="save-slot empty">
@@ -143,7 +150,7 @@ export function createRenderRuntime(ctx) {
           <b>空存档</b>
           <small>创建一个新的地牢角色。</small>
         </div>
-        <button type="button" onclick="newGameInSlot('${slot.id}')">创建</button>
+        <button type="button" onclick="newGameInSlot('${slot.id}')">开始</button>
       </article>
     `;
     }
@@ -151,7 +158,7 @@ export function createRenderRuntime(ctx) {
     <article class="save-slot ${slot.id === ui.currentSaveSlot ? "active" : ""}">
       <div class="save-slot-main">
         <span>${slot.label} · ${formatSaveTime(meta.updatedAt)}${slot.id === ui.currentSaveSlot ? " · 当前" : ""}</span>
-        <b>${meta.className || "冒险者"} Lv.${meta.level || 1}</b>
+        <b>${className} Lv.${meta.level || 1}</b>
         <small>第 ${meta.floor || 1} 层 · 金币 ${meta.gold || 0} · HP ${meta.hp || 0}/${meta.maxHp || 0}</small>
       </div>
       <div class="save-slot-actions">
@@ -168,7 +175,7 @@ export function createRenderRuntime(ctx) {
 
   function startNewGame(slotId = nextNewGameSlot()) {
     if (!slotId) {
-      showModal("存档已满", "<p>四个存档槽都已有记录。请先删除一个旧存档，再开始新游戏。</p>", [
+      showModal("存档已满", "<p>所有存档槽都已有记录。请先删除一个旧存档，再开始新游戏。</p>", [
         { text: "取消", action: closeModal },
         {
           text: "查看存档",
@@ -189,7 +196,7 @@ export function createRenderRuntime(ctx) {
     if (slot?.meta) {
       showConfirm(
         "覆盖存档",
-        `<p>${slot.label} 已有 ${slot.meta.className || "冒险者"} Lv.${slot.meta.level || 1}，新游戏会覆盖该槽。</p>`,
+        `<p>${escapeHtml(slot.label)} 已有 ${escapeHtml(slot.meta.className || "冒险者")} Lv.${slot.meta.level || 1}，新游戏会覆盖该槽。</p>`,
         "继续创建",
         () => {
           closeModal();
@@ -206,14 +213,14 @@ export function createRenderRuntime(ctx) {
     if (!slot?.meta) return;
     showConfirm(
       "删除存档",
-      `<p>删除 ${slot.label} 的 ${slot.meta.className || "冒险者"} Lv.${slot.meta.level || 1}？此操作不会影响其他存档。</p>`,
+      `<p>删除 ${escapeHtml(slot.label)} 的 ${escapeHtml(slot.meta.className || "冒险者")} Lv.${slot.meta.level || 1}？此操作不会影响其他存档。</p>`,
       "删除",
       () => {
         deleteSaveSlot(slotId);
         closeModal();
         if (state && ui.currentSaveSlot === slotId) ctx.setState(null);
-        renderStartScreen();
         render();
+        renderContinueSlots();
       }
     );
   }
@@ -222,6 +229,7 @@ export function createRenderRuntime(ctx) {
   function renderClassSelect(slotId = ui.pendingSaveSlot || ui.currentSaveSlot || "slot-1") {
     ui.pendingSaveSlot = slotId;
     const slotLabel = saveSlotLabel(slotId);
+    $("homeBtn").disabled = false;
     $("classSelect").innerHTML =
       Object.entries(CLASSES)
         .map(
@@ -231,12 +239,12 @@ export function createRenderRuntime(ctx) {
       <small>${cls.role || "职业"} · 主属性 ${cls.primary || "均衡"}</small>
       <p>${cls.desc}</p>
       <ul>${cls.skills.map((skill) => `<li>${skill.name}：${skill.desc}</li>`).join("")}</ul>
-      <button type="button" onclick="startGame('${id}', '${slotId}')">写入${slotLabel}</button>
+      <button type="button" onclick="startGame('${id}', '${slotId}')">开始</button>
     </article>
   `
         )
         .join("") +
-      `<article class="class-card class-back-card"><h2>${slotLabel}</h2><p>返回存档列表可以切换槽位，或选择其他存档继续。</p><button type="button" onclick="renderStartScreen()">返回存档</button></article>`;
+      `<article class="class-card class-back-card"><h2>选择职业</h2><p>新角色会保存在一个空存档中。</p><button type="button" onclick="renderStartScreen()">返回</button></article>`;
   }
 
   // 根据当前状态渲染完整 UI，并把快照持久化到 localStorage。
@@ -675,20 +683,33 @@ export function createRenderRuntime(ctx) {
   function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
     const policy = state.currentEnemy ? autoBattlePolicy(state.currentEnemy) : null;
     const winRate = policy ? percentScore(policy.score) : null;
+    const turn = currentBattleTurnState();
+    const locked = turn.locked;
+    const lockAttrs = locked ? `disabled title="${turn.disabledTitle}"` : "";
+    const autoDisabled = locked || !policy?.allowed ? "disabled" : "";
+    if (locked) scheduleBattleUnlockRender();
     return `
     <div class="battle-command-panel">
+      <div class="battle-turn-banner ${turn.className}">
+        <div class="battle-turn-copy"><b>${turn.title}</b><span>${turn.detail}</span></div>
+        <div class="battle-turn-track" aria-hidden="true">
+          <i class="hero-step">你</i>
+          <em></em>
+          <i class="enemy-step">敌</i>
+        </div>
+      </div>
       <div class="battle-command-layout">
         <div class="battle-basic-actions battle-command-section">
           <div class="battle-panel-title">
             <span>行动</span>
-            <small>本回合</small>
+            <small>${turn.actionLabel}</small>
           </div>
           <div class="battle-action-grid">
-            <button class="battle-action battle-action-attack" type="button" onclick="attackEnemy('attack')">
+            <button class="battle-action battle-action-attack" type="button" ${lockAttrs} onclick="attackEnemy('attack')">
               <span class="battle-action-mark" aria-hidden="true">攻</span>
               <span class="battle-action-copy"><b>普通攻击</b><small>稳定造成武器伤害</small></span>
             </button>
-            <button class="battle-action battle-action-guard" type="button" onclick="attackEnemy('defend')">
+            <button class="battle-action battle-action-guard" type="button" ${lockAttrs} onclick="attackEnemy('defend')">
               <span class="battle-action-mark" aria-hidden="true">守</span>
               <span class="battle-action-copy"><b>防御</b><small>本回合减少伤害</small></span>
             </button>
@@ -718,9 +739,9 @@ export function createRenderRuntime(ctx) {
               <span>战术</span>
               ${policy ? `<small>${policy.label}</small>` : "<small>评估</small>"}
             </div>
-            <button class="battle-action auto" type="button" ${policy?.allowed ? "" : "disabled"} onclick="autoBattle()">
+            <button class="battle-action auto" type="button" ${autoDisabled} ${locked ? `title="${turn.disabledTitle}"` : ""} onclick="autoBattle()">
               <span class="battle-action-head"><b>一键战斗</b>${policy ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
-              <small>${policy?.allowed ? "低风险普通怪可自动结算 3 回合" : policy?.reason || "需要评估"}</small>
+              <small>${locked ? turn.shortHint : policy?.allowed ? "低风险普通怪可自动结算 3 回合" : policy?.reason || "需要评估"}</small>
             </button>
           </div>
         </div>
@@ -735,6 +756,56 @@ export function createRenderRuntime(ctx) {
 
   function percentScore(score) {
     return Math.max(0, Math.min(100, Math.round(Number.isFinite(score) ? score * 100 : 0)));
+  }
+
+  function isBattleInputLocked() {
+    return !!state?.currentEnemy && Date.now() < Number(battle.inputLockedUntil || 0);
+  }
+
+  function currentBattleTurnState() {
+    const locked = isBattleInputLocked();
+    const phase = locked ? battle.phase || "waiting" : "player-turn";
+    if (!locked) {
+      return {
+        locked,
+        className: "ready",
+        title: "你的回合",
+        detail: "选择一次行动。",
+        actionLabel: "本回合",
+        disabledTitle: "",
+        shortHint: ""
+      };
+    }
+    if (phase === "enemy-turn") {
+      return {
+        locked,
+        className: "waiting enemy",
+        title: battle.message || "敌方行动中",
+        detail: "对方回合，等待敌人行动。",
+        actionLabel: "敌方回合",
+        disabledTitle: "敌方行动中",
+        shortHint: "敌方行动中，稍后再选择战术"
+      };
+    }
+    return {
+      locked,
+      className: "preparing",
+      title: "准备行动",
+      detail: "战斗刚开始，马上轮到你。",
+      actionLabel: "准备",
+      disabledTitle: "准备行动中",
+      shortHint: "准备行动中"
+    };
+  }
+
+  function scheduleBattleUnlockRender() {
+    if (battleUnlockRenderTimer) clearTimeout(battleUnlockRenderTimer);
+    const delay = Math.max(0, Number(battle.inputLockedUntil || 0) - Date.now()) + 20;
+    battleUnlockRenderTimer = setTimeout(() => {
+      battleUnlockRenderTimer = null;
+      syncState();
+      if (state?.currentEnemy) render();
+    }, delay);
   }
 
   function battlePotionGroups() {
@@ -753,35 +824,58 @@ export function createRenderRuntime(ctx) {
   function renderBattlePotionButtons() {
     const potions = battlePotionGroups();
     if (!potions.length) return `<p class="battle-empty-supplies">暂无药剂</p>`;
+    const turn = currentBattleTurnState();
+    const locked = turn.locked;
     return potions
       .slice(0, 4)
       .map((entry) => {
         const isHp = entry.effect === "hp";
         const cap = isHp ? effectiveMaxHp() : effectiveMaxMp();
         const current = isHp ? state.hp : state.mp;
-        const disabled = current >= cap ? "disabled" : "";
+        const disabled = locked || current >= cap ? "disabled" : "";
         const effectText = `${isHp ? "HP" : "MP"} +${entry.amount}`;
-        const note = disabled ? "已满" : "立即恢复";
-        return `<button class="battle-consumable" type="button" ${disabled} onclick="useBattlePotion('${entry.id}')"><span class="battle-card-head"><b>${entry.name}</b><i>x${entry.count}</i></span><span class="battle-effect-text">${effectText}</span><small>${note}</small></button>`;
+        const note = locked ? turn.actionLabel : disabled ? "已满" : "立即恢复";
+        return `<button class="battle-consumable" type="button" ${disabled} ${locked ? `title="${turn.disabledTitle}"` : ""} onclick="useBattlePotion('${entry.id}')"><span class="battle-card-head"><b>${entry.name}</b><i>x${entry.count}</i></span><span class="battle-effect-text">${effectText}</span><small>${note}</small></button>`;
       })
       .join("");
   }
 
   // 根据当前模式生成技能按钮，战斗模式会展示更完整的资源信息。
   function renderSkillActionButtons(mode = "compact") {
+    const turn = currentBattleTurnState();
+    const locked = turn.locked;
     return CLASSES[state.classId].skills
       .map((skill) => {
         const upgraded = upgradedSkill(skill);
         const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
         const hasMp = state.mp >= upgraded.mp;
-        const disabled = hasMp ? "" : "disabled";
+        const cooldown = Math.max(0, Number(state.skillCooldowns?.[skill.id] || 0));
+        const ready = cooldown <= 0;
+        const disabled = locked || !hasMp || !ready ? "disabled" : "";
+        const title = locked
+          ? `title="${turn.disabledTitle}"`
+          : !ready
+            ? `title="冷却中，还需 ${cooldown} 回合"`
+            : !hasMp
+              ? `title="法力不足"`
+              : "";
         if (mode === "battle") {
-          const mpText = hasMp ? `${upgraded.mp} MP` : `${upgraded.mp} MP · MP不足`;
+          const cooldownText = !ready ? ` · 冷却 ${cooldown}` : "";
+          const mpText = locked
+            ? `${upgraded.mp} MP${cooldownText}`
+            : hasMp
+              ? `${upgraded.mp} MP${cooldownText}`
+              : `${upgraded.mp} MP · MP不足${cooldownText}`;
           const elementText = elementName(upgraded.element);
           const branchText = upgraded.branch ? `${upgraded.branch.name} · ` : "";
-          return `<button class="battle-skill-card" type="button" ${disabled} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}</small></button>`;
+          const note = locked
+            ? turn.shortHint
+            : !ready
+              ? `冷却中，还需 ${cooldown} 回合`
+              : `${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}`;
+          return `<button class="battle-skill-card" type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${note}</small></button>`;
         }
-        return `<button type="button" ${disabled} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP</button>`;
+        return `<button type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP${!ready ? ` · 冷却 ${cooldown}` : ""}</button>`;
       })
       .join("");
   }
@@ -968,13 +1062,16 @@ export function createRenderRuntime(ctx) {
     const enemy = state.currentEnemy;
     if (enemy) {
       const risk = battleRisk(enemy);
+      const turn = currentBattleTurnState();
+      const locked = turn.locked;
+      const disabled = locked ? `disabled title="${turn.disabledTitle}"` : "";
       $("contextTitle").textContent =
         `${enemy.name} ${Math.max(0, Math.round(enemy.hp))}/${enemy.maxHp}`;
       $("contextBody").innerHTML = `
-      <div class="item-row"><div>一键战斗评估<small>${risk.label}，胜率估算 ${Math.round(risk.score * 100)}%</small></div><button type="button" onclick="autoBattle()">一键战斗</button></div>
-      <button type="button" onclick="attackEnemy('attack')">普通攻击</button>
+      <div class="item-row"><div>一键战斗评估<small>${locked ? turn.title : `${risk.label}，胜率估算 ${Math.round(risk.score * 100)}%`}</small></div><button type="button" ${disabled} onclick="autoBattle()">一键战斗</button></div>
+      <button type="button" ${disabled} onclick="attackEnemy('attack')">普通攻击</button>
       ${renderSkillActionButtons()}
-      <button type="button" onclick="attackEnemy('defend')">防御</button>
+      <button type="button" ${disabled} onclick="attackEnemy('defend')">防御</button>
     `;
       return;
     }
@@ -1270,10 +1367,14 @@ export function createRenderRuntime(ctx) {
   }
 
   function materialRows() {
-    const materials = Object.entries(state.materials || {}).filter(([, count]) => count > 0);
+    const materials = (Object.entries(state.materials || {}) as Array<[string, number]>).filter(
+      ([, count]) => count > 0
+    );
     if ((state.keys || 0) > 0) materials.unshift(["符文钥匙", state.keys]);
     if ((state.universalKeys || 0) > 0) materials.unshift(["万能钥匙", state.universalKeys]);
-    for (const [keyId, count] of Object.entries(state.doorKeys || {})) {
+    for (const [keyId, count] of Object.entries(state.doorKeys || {}) as Array<
+      [string, number]
+    >) {
       if (count > 0) materials.unshift([state.doorKeyNames?.[keyId] || "房门钥匙", count]);
     }
     return materials.length
@@ -1287,7 +1388,7 @@ export function createRenderRuntime(ctx) {
   }
 
   function runeRows() {
-    const runes = Object.entries(state.runes || {}).filter(([, count]) => count > 0);
+    const runes = runeEntries().filter(([, count]) => count > 0);
     return runes.length
       ? runes
           .map(
@@ -1312,7 +1413,7 @@ export function createRenderRuntime(ctx) {
 
   // 渲染材料、符文库存和符文合成控制。
   function renderCraft() {
-    const runes = Object.entries(state.runes).filter(([, count]) => count > 0);
+    const runes = runeEntries().filter(([, count]) => count > 0);
     $("tabBody").innerHTML = `
     <div class="item-row"><div>材料<small>强化石 ${state.materials["强化石"] || 0}，魔尘 ${state.materials["魔尘"] || 0}</small></div></div>
     ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("") : "<p>暂无符文。</p>"}
@@ -1329,7 +1430,7 @@ export function createRenderRuntime(ctx) {
         const upgraded = upgradedSkill(skill);
         const cost = skillUpgradeCost(skill.id);
         const disabled = canUpgradeSkill(skill.id) ? "" : "disabled";
-        return `<div class="item-row skill-row inventory-card"><div class="item-main"><span class="item-kicker">职业技能${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name} Lv.${upgraded.level}</b><small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>升级 ${cost.points} 点 / ${cost.dust} 尘</i></span></div><div class="item-actions"><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div></div>`;
+        return `<div class="item-row skill-row inventory-card"><div class="item-main"><span class="item-kicker">职业技能${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name} Lv.${upgraded.level}</b><small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i><i>升级 ${cost.points} 点 / ${cost.dust} 尘</i></span></div><div class="item-actions"><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div></div>`;
       })
       .join("")}
   `;
@@ -1337,7 +1438,7 @@ export function createRenderRuntime(ctx) {
 
   // 格式化装备属性摘要。
   function statsText(eq) {
-    const stats = Object.entries(eq.stats)
+    const stats = (Object.entries(eq.stats || {}) as Array<[StatKey, number]>)
       .map(([key, value]) => {
         const enhance = eq.level ? `(+${eq.level})` : "";
         return `${STAT_NAMES[key] || key}+${value}${enhance}`;
@@ -1351,6 +1452,10 @@ export function createRenderRuntime(ctx) {
     ]
       .filter(Boolean)
       .join(" ");
+  }
+
+  function runeEntries() {
+    return Object.entries(state.runes || {}) as Array<[string, number]>;
   }
 
   // 生成装备列表中复用的评分、部位、品质和属性摘要。
@@ -1422,11 +1527,6 @@ export function createRenderRuntime(ctx) {
   `;
   }
 
-  function effectiveItemStat(item, key) {
-    if (!item) return 0;
-    return (item.stats?.[key] || 0) + (item.stats?.[key] ? item.level || 0 : 0);
-  }
-
   function enhanceText(eq) {
     return Object.keys(eq.stats)
       .map((key) => `${STAT_NAMES[key] || key}+${eq.level}`)
@@ -1451,25 +1551,6 @@ export function createRenderRuntime(ctx) {
   `;
   }
 
-  // 根据属性权重、品质、符文槽和强化等级估算物品评分。
-  function itemScore(item) {
-    if (!item) return 0;
-    if (item.kind === "potion") return item.amount || 0;
-    if (item.kind === "teleport") return 35;
-    if (item.kind !== "equip") return 0;
-    const weights = { atk: 11, mag: 11, def: 9, res: 8, spd: 8, luk: 7, hp: 1.2, mp: 1.1 };
-    const statScore = Object.entries(item.stats).reduce((sum, [key, value]) => {
-      return sum + (weights[key] || 5) * (value + item.level);
-    }, 0);
-    const qualityScore = { 普通: 0, 优秀: 8, 稀有: 18, 史诗: 32, 传说: 50 }[item.quality] || 0;
-    const slotScore =
-      (item.runeSlots || 0) * 6 +
-      (item.runes?.length || 0) * 4 +
-      (item.element ? 10 : 0) +
-      (item.elementResistances?.length || 0) * 8;
-    return Math.round(statScore + qualityScore + slotScore);
-  }
-
   function isBetterThanEquipped(item) {
     if (item.kind !== "equip") return false;
     if (!isWeaponUsableByClass(item, state.classId)) return false;
@@ -1478,7 +1559,7 @@ export function createRenderRuntime(ctx) {
 
   // 渲染最新的冒险日志。
   function renderLog() {
-    $("log").innerHTML = state.log.map((entry) => `<div>${entry}</div>`).join("");
+    $("log").innerHTML = state.log.map((entry) => `<div>${escapeHtml(entry)}</div>`).join("");
   }
 
   // 追加一条冒险日志，并限制日志长度。

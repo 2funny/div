@@ -1,7 +1,6 @@
-// @ts-nocheck
 import { RUNES, VISION_RADIUS } from "../constants";
 import { cellsWithin, distance } from "../floor/mapGeometry";
-import { choice, rand } from "../random";
+import { choice, rand, random } from "../random";
 import { clearBattleFx } from "../combat/combatFx";
 import { discoverLorePage } from "../quest/lore";
 
@@ -14,9 +13,9 @@ export function createInteractionRuntime(ctx) {
     return state;
   };
 
-  const battleRisk = (...args) => api.battleRisk(...args);
   const closeModal = (...args) => api.closeModal(...args);
   const currentStairsDown = (...args) => api.currentStairsDown(...args);
+  const enemyTurn = (...args) => api.enemyTurn(...args);
   const getAudioEnabled = (...args) => api.getAudioEnabled(...args);
   const initAudio = (...args) => api.initAudio(...args);
   const isBlockingInteraction = (...args) => api.isBlockingInteraction(...args);
@@ -34,6 +33,7 @@ export function createInteractionRuntime(ctx) {
   const showEvent = (...args) => api.showEvent(...args);
   const showModal = (...args) => api.showModal(...args);
   const syncMusicToGame = (...args) => api.syncMusicToGame(...args);
+  const totals = (...args) => api.totals(...args);
   const useAltar = (...args) => api.useAltar(...args);
 
   // 以玩家为中心刷新可见格，同时把见过的格子永久标记为已探索。
@@ -98,7 +98,7 @@ export function createInteractionRuntime(ctx) {
         cell.object = null;
         return;
       }
-      handleEnemyEncounter(obj);
+      handleEnemyEncounter(obj, cell);
       return;
     }
     if (obj.type === "chest") {
@@ -129,25 +129,22 @@ export function createInteractionRuntime(ctx) {
   }
 
   // 处理踩到敌人后的进入战斗或危险确认流程。
-  function handleEnemyEncounter(enemy) {
+  function handleEnemyEncounter(enemy, sourceCell = null) {
     if (isDefeatedEnemy(enemy)) return;
     log(`遭遇${enemy.name}。`);
     if (!isDangerousEnemy(enemy)) {
-      enterBattle(enemy);
+      enterBattle(enemy, sourceCell);
       return;
     }
-    promptDangerousEnemy(enemy);
+    promptDangerousEnemy(enemy, null, sourceCell);
   }
 
-  // 根据敌人类型和战力评估判断是否需要先弹出危险确认。
+  // 只有首领、钥匙守卫、房间首领这类特殊敌人才需要确认，普通怪和普通精英直接开战。
   function isDangerousEnemy(obj) {
     if (!obj) return false;
     if (isDefeatedEnemy(obj)) return false;
     if (obj.type === "boss") return true;
-    if (obj.roomBoss || obj.dropsKey) return true;
-    if (obj.type !== "elite") return false;
-    const risk = state?.hp && state?.stats ? battleRisk(obj) : null;
-    return risk ? risk.score < 0.42 : false;
+    return !!(obj.roomBoss || obj.dropsKey || obj.rare);
   }
 
   function isDefeatedEnemy(obj) {
@@ -155,7 +152,7 @@ export function createInteractionRuntime(ctx) {
   }
 
   // 对危险敌人展示确认弹窗，避免玩家误触进入高风险战斗。
-  function promptDangerousEnemy(enemy, destination = null) {
+  function promptDangerousEnemy(enemy, destination = null, sourceCell = null) {
     const title = enemy.type === "boss" ? "危险首领" : "危险精英";
     showModal(
       title,
@@ -170,7 +167,7 @@ export function createInteractionRuntime(ctx) {
               state.player = destination;
               updateVisibility();
             }
-            enterBattle(enemy);
+            enterBattle(enemy, sourceCell);
           }
         }
       ]
@@ -178,21 +175,45 @@ export function createInteractionRuntime(ctx) {
   }
 
   // 将敌人设置为当前战斗目标，并切换到战斗视图。
-  function enterBattle(enemy) {
+  function enterBattle(enemy, sourceCell = null) {
     if (isDefeatedEnemy(enemy)) {
       state.currentEnemy = null;
+      delete state._battleCell;
+      setBattlePhase("idle");
       render();
       return;
     }
     state.currentEnemy = enemy;
+    if (sourceCell?.x != null && sourceCell?.y != null) {
+      state._battleCell = { x: sourceCell.x, y: sourceCell.y };
+    } else {
+      delete state._battleCell;
+    }
     syncMusicToGame();
     clearBattleFx();
     state._guard = 0;
     state._evade = false;
+    state.skillCooldowns = {};
     battle.inputLockedUntil = Date.now() + 350;
-    document.activeElement?.blur?.();
+    const playerSpeed = totals().spd || 0;
+    const enemySpeed = Number(enemy.spd || 0);
+    if (enemySpeed > playerSpeed) {
+      setBattlePhase("enemy-turn", `${enemy.name}抢先行动`, "enemy");
+      enemyTurn(enemy);
+      if (state.currentEnemy && state.hp > 0) setBattlePhase("player-turn", "你的回合", "hero");
+    } else {
+      setBattlePhase("player-turn", "你的回合", "hero");
+    }
+    const activeElement = document.activeElement as (Element & { blur?: () => void }) | null;
+    activeElement?.blur?.();
     playSound("encounter");
     render();
+  }
+
+  function setBattlePhase(phase, message = "", actor = "") {
+    battle.phase = phase;
+    battle.message = message;
+    battle.actor = actor;
   }
 
   // 触发陷阱伤害，并可能惊动附近守卫进入战斗。
@@ -203,7 +224,7 @@ export function createInteractionRuntime(ctx) {
     state.hp = Math.max(1, state.hp - damage);
     cell.object = null;
     const guard = alerted ? nearestGuardForTrap(state.map.cells, cell.x, cell.y) : null;
-    if (guard) enterBattle(guard.object);
+    if (guard) enterBattle(guard.object, guard);
     log(`触发隐藏机关，受到 ${damage} 点伤害${alerted ? "，并惊动了守卫" : ""}。`);
     showEvent(
       "触发机关",
@@ -224,7 +245,7 @@ export function createInteractionRuntime(ctx) {
   // 结算普通宝箱奖励：装备、符文或材料金币。
   function openChest(cell) {
     playSound("chest");
-    const roll = Math.random();
+    const roll = random();
     let message = "";
     const reward = floorEffectReward();
     if (roll < 0.42) {
@@ -244,11 +265,11 @@ export function createInteractionRuntime(ctx) {
       log("打开宝箱，获得金币和强化石。");
       message = `获得金币 +${gold} 和强化石`;
     }
-    if (reward > 1 && Math.random() < 0.18) {
+    if (reward > 1 && random() < 0.18) {
       state.materials["强化石"] = (state.materials["强化石"] || 0) + 1;
       message += "<br>特殊楼层奖励：强化石 +1";
     }
-    if (Math.random() < universalKeyChance()) {
+    if (random() < universalKeyChance()) {
       state.universalKeys = (state.universalKeys || 0) + 1;
       message += "<br>额外发现：万能钥匙 +1";
       log("宝箱夹层里藏着一把万能钥匙。");
@@ -331,8 +352,7 @@ export function createInteractionRuntime(ctx) {
   }
 
   function universalKeyChance() {
-    const luck = state.stats?.luk || 0;
-    return Math.min(0.18, 0.08 + state.floor * 0.004 + luck * 0.006);
+    return Math.min(0.18, 0.08 + state.floor * 0.004);
   }
 
   // 使用符文钥匙打开围住宝箱的门栅。

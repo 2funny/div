@@ -1,4 +1,4 @@
-// @ts-nocheck
+import { escapeHtml } from "./html";
 export function createModalRuntime({ $, initAudio, resetStatDraft }) {
   function showModal(title, body, actions) {
     $("modalTitle").textContent = title;
@@ -6,7 +6,7 @@ export function createModalRuntime({ $, initAudio, resetStatDraft }) {
     $("modalActions").innerHTML = actions
       .map(
         (action, index) =>
-          `<button type="button" onclick="modalAction(${index})">${action.text}</button>`
+          `<button type="button" onclick="modalAction(${index})">${escapeHtml(action.text)}</button>`
       )
       .join("");
     window._modalActions = actions;
@@ -19,7 +19,7 @@ export function createModalRuntime({ $, initAudio, resetStatDraft }) {
 
   function showToast(message, duration = 2600) {
     const toast = $("toast");
-    toast.innerHTML = message;
+    toast.textContent = message;
     toast.classList.add("show");
     clearTimeout(window._toastTimer);
     window._toastTimer = setTimeout(() => {

@@ -3,7 +3,7 @@ export * from "./combat";
 export * from "./constants";
 export * from "./events";
 export * from "./floor";
-export * from "./equipment/inventory";
+export * from "./inventory";
 export * from "./player";
 export * from "./quest/quests";
 export * from "./random";

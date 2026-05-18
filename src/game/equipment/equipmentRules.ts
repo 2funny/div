@@ -1,4 +1,5 @@
 import type { Item, StatKey } from "../types";
+import { random } from "../random";
 
 export const WEAPON_TYPES = {
   sword: { name: "剑", stat: "atk", classes: ["warrior"] },
@@ -43,9 +44,9 @@ export function equipmentRestrictionText(item?: Item | null, classId?: string | 
   return `职业不可用：${weaponTypeName(item?.weaponType)}系武器`;
 }
 
-export function randomWeaponTypeForClass(classId: string, roll = Math.random()) {
+export function randomWeaponTypeForClass(classId: string, roll = random()) {
   const preferred = CLASS_WEAPON_TYPES[classId] || CLASS_WEAPON_TYPES.warrior;
   const all = Object.keys(WEAPON_TYPES) as WeaponType[];
   const pool = roll < 0.65 ? preferred : all;
-  return pool[Math.floor(Math.random() * pool.length)] || preferred[0];
+  return pool[Math.floor(random() * pool.length)] || preferred[0];
 }

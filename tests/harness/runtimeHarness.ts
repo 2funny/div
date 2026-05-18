@@ -1,10 +1,11 @@
 import * as data from "../../src/game/constants";
 import * as runtime from "../../src/game/runtime";
+import { rand, resetRandomSource, setRandomSeed } from "../../src/game/random";
 import { saveSlotKey } from "../../src/game/save/save";
 
 const target = globalThis as typeof globalThis & Record<string, unknown>;
 
-Object.assign(target, data, runtime, { saveSlotKey });
+Object.assign(target, data, runtime, { rand, resetRandomSource, saveSlotKey, setRandomSeed });
 
 function normalizeState(nextState: unknown) {
   if (!nextState || typeof nextState !== "object") return nextState;
@@ -35,6 +36,7 @@ function normalizeState(nextState: unknown) {
   state.floorStates ??= {};
   state.skillLevels ??= {};
   state.skillBranches ??= {};
+  state.skillCooldowns ??= {};
   state.statPoints ??= 0;
   state.skillPoints ??= 0;
   state.skillDust ??= 0;

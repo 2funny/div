@@ -6,7 +6,9 @@ const { createTestContext } = require("./helpers/test-context");
 const context = createTestContext(assert);
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context, {
+  filename: "tests/.generated/runtime-harness.js"
+});
 vm.runInContext(
   `
   function reachableFloorCount(map, start) {
@@ -76,6 +78,8 @@ vm.runInContext(
   assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
   assert(state.map.rooms.length >= 4, "generated floor should label multiple meaningful rooms");
   assert(state.map.rooms.length <= 10, "generated floor should avoid excessive labelled filler rooms");
+  const roomNumbers = state.map.rooms.map((room) => Number(room.name.match(/\\d+/)?.[0]));
+  assert.deepStrictEqual(roomNumbers, state.map.rooms.map((_, index) => index + 1), "room names should stay bounded to the generated room count");
   assert(generatedCells.some((cell) => cell.object?.type === "rescueNpc"), "generated floor should include a rescue target NPC");
   const rescueGiver = generatedCells.find((cell) => cell.object?.questId === "rescueRoom" && cell.object?.type === "questNpc");
   assert(rescueGiver?.object.roomName, "rescue quest giver should name the target room");

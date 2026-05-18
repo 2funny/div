@@ -7,11 +7,13 @@ const storage = {};
 const context = createTestContext(assert, storage);
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context);
+vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context, {
+  filename: "tests/.generated/runtime-harness.js"
+});
 vm.runInContext(
   `
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
-  assert.strictEqual(saveSlots().length, 4, "start screen should expose multiple save slots");
+  assert.strictEqual(saveSlots().length, 8, "start screen should expose multiple save slots");
   assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
   assert(CLASSES.warrior.hp < 60 && CLASSES.mage.hp < 40, "classes should start from a low-value baseline");
   assert(CLASSES.warrior.role && CLASSES.mage.primary && CLASSES.ranger.growth?.primary, "classes should expose clear role, primary stat, and growth identity");
@@ -33,6 +35,17 @@ vm.runInContext(
   saveGame(false);
   assert(localStorage.getItem(saveSlotKey("slot-2")), "saving should write the active slot instead of only a single global save");
   assert(saveSlots().find((slot) => slot.id === "slot-2").meta, "saving should update the slot list metadata");
+  state.floor = 10;
+  state.floorStates = Object.fromEntries(
+    Array.from({ length: 20 }, (_, index) => [
+      String(index + 1),
+      { map: { size: 3, cells: [] }, player: { x: 1, y: 1 }, facing: "down" }
+    ])
+  );
+  saveGame(false);
+  const compactedSave = JSON.parse(localStorage.getItem(saveSlotKey("slot-2")));
+  assert(Object.keys(state.floorStates).length <= 12, "runtime floor cache should be compacted before saving");
+  assert(Object.keys(compactedSave.floorStates).length <= 12, "saved floor cache should stay within the configured cap");
   const savedState = state;
   state = null;
   assert.strictEqual(loadGame("slot-2"), true, "loading a selected slot should restore that save");
@@ -43,6 +56,26 @@ vm.runInContext(
   continueSavedGame("slot-2");
   assert.strictEqual(state.classId, savedState.classId, "continue should restore the selected slot in one click");
   assert(getElement("map").innerHTML.length > 0, "continue should render the game view immediately after loading");
+  state = null;
+  renderStartScreen();
+  startNewGame();
+  assert(getElement("classSelect").innerHTML.includes(">开始</button>"), "new game class cards should start directly without save-slot wording");
+  assert(!getElement("classSelect").innerHTML.includes("写入"), "new game flow should not expose write-to-save-slot copy");
+  assert.strictEqual(currentSaveSlot, "slot-2", "choosing a new game class should not switch saves before the class is selected");
+  loadGame("slot-2");
+  currentSaveSlot = "slot-3";
+  saveGame(false);
+  state = null;
+  renderContinueSlots();
+  assert.strictEqual(getElement("homeBtn").disabled, false, "save list should keep the top-level return-home button available");
+  confirmDeleteSaveSlot("slot-3");
+  modalState().actions.find((action) => action.text.includes("删除")).action();
+  assert.strictEqual(localStorage.getItem(saveSlotKey("slot-3")), null, "deleting a save slot should remove its storage entry");
+  assert(getElement("classSelect").innerHTML.includes("save-slot-grid"), "deleting from the save list should keep the player on the save list");
+  assert(!getElement("classSelect").innerHTML.includes("start-actions"), "deleting from the save list should not jump back to the start screen");
+  returnHome(false);
+  assert(getElement("classSelect").innerHTML.includes("start-actions"), "return home should work from the save list");
+  loadGame("slot-2");
 
   const upgrade = { id: "new", kind: "equip", name: "New Sword", slot: "weapon", quality: "优秀", stats: { atk: 8 }, runeSlots: 0, runes: [], level: 0 };
   const compare = equipmentCompareText(upgrade);

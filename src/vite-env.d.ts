@@ -6,6 +6,7 @@ declare global {
   interface Window {
     __runeDungeon?: {
       getState: () => GameState | null;
+      setState?: (state: GameState | null) => void;
     };
     _modalActions?: ModalAction[];
     _teleportTargets?: unknown[];

@@ -1,7 +1,7 @@
 import { SAVE_KEY } from "../constants";
 
 export const SAVE_INDEX_KEY = `${SAVE_KEY}-index-v2`;
-export const SAVE_SLOT_LIMIT = 4;
+export const SAVE_SLOT_LIMIT = 8;
 
 export function saveSlotKey(slotId: string): string {
   return `${SAVE_KEY}-${slotId}`;

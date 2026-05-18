@@ -1,20 +1,30 @@
-// @ts-nocheck
 import { CLASSES, MAX_FLOOR, RUNES, SLOTS } from "../constants";
 import {
   PLAYER_ELEMENT_RESIST,
   elementMatchLabel,
   elementMultiplier,
   elementName
-} from "../elements";
+} from "./elements";
 import { QUEST_DEFS } from "../quest/quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
 import { discoverLorePage } from "../quest/lore";
-import { choice, rand } from "../random";
+import { choice, rand, random } from "../random";
+
+const BASE_DODGE = 0.03;
+const SPEED_DODGE_SCALE = 0.005;
+const EVADE_SKILL_DODGE_BONUS = 0.35;
+const RANGER_COMBO_BASE = 0.08;
+const RANGER_COMBO_SPEED_SCALE = 0.006;
+const RANGER_COMBO_MAX = 0.55;
+const RANGER_SKILL_FOLLOWUP_BASE = 0.06;
+const RANGER_SKILL_FOLLOWUP_SPEED_SCALE = 0.004;
+const RANGER_SKILL_FOLLOWUP_MAX = 0.4;
 
 // 战斗运行时聚合回合制战斗、技能升级、胜负结算和自动战斗策略。
 export function createCombatRuntime(ctx) {
   const { api, battle } = ctx;
   let state = ctx.getState();
+  let enemyTurnTimer = null;
   const syncState = () => {
     state = ctx.getState();
     return state;
@@ -44,8 +54,9 @@ export function createCombatRuntime(ctx) {
   const totals = (...args) => api.totals(...args);
   const useItem = (...args) => api.useItem(...args);
   // 执行玩家回合：普通攻击、技能或防御都会在这里统一进入敌方回合。
-  function attackEnemy(mode, skill = null) {
+  function attackEnemy(mode, skill = null, immediateEnemyTurn = false) {
     if (Date.now() < battle.inputLockedUntil) return;
+    if (enemyTurnTimer) return;
     const enemy = state.currentEnemy;
     if (!enemy || Number(enemy.hp) <= 0) {
       state.currentEnemy = null;
@@ -65,14 +76,18 @@ export function createCombatRuntime(ctx) {
     let result = "";
     resetBattleFx(mode);
     if (mode === "attack") {
-      result = dealDamage(
-        enemy,
-        Math.max(2, t.atk * 0.92 + t.spd * 0.12 - enemy.def * 0.45),
-        "普通攻击",
-        currentWeaponElement()
-      );
+      result = basicAttack(enemy, t, "普通攻击");
+      if (enemy.hp > 0 && shouldTriggerRangerCombo(t)) {
+        result += ` ${basicAttack(enemy, t, "连击")}`;
+      }
     } else if (mode === "skill") {
       skill = upgradedSkill(skill);
+      const cooldown = skillCooldownRemaining(skill.id);
+      if (cooldown > 0) {
+        log(`技能冷却中，还需 ${cooldown} 回合。`);
+        render();
+        return;
+      }
       if (state.mp < skill.mp) {
         log("法力不足。");
         render();
@@ -80,6 +95,7 @@ export function createCombatRuntime(ctx) {
       }
       state.mp -= skill.mp;
       result = castSkill(enemy, skill, t);
+      setSkillCooldown(skill);
     } else if (mode === "defend") {
       const block = 3 + t.def;
       state._guard = block;
@@ -91,13 +107,58 @@ export function createCombatRuntime(ctx) {
     if (enemy.hp <= 0) {
       winBattle(enemy);
     } else {
-      enemyTurn(enemy);
+      finishPlayerAction(enemy, immediateEnemyTurn);
+      return;
     }
     render();
   }
 
+  function finishPlayerAction(enemy, immediateEnemyTurn = false) {
+    setBattlePhase("enemy-turn", `${enemy.name}准备反击`, "enemy");
+    if (immediateEnemyTurn) {
+      enemyTurn(enemy);
+      if (state.currentEnemy && state.hp > 0) {
+        tickSkillCooldowns();
+        setBattlePhase("player-turn", "你的回合", "hero");
+      }
+      render();
+      return;
+    }
+    scheduleEnemyTurn(enemy);
+    render();
+  }
+
+  function scheduleEnemyTurn(enemy) {
+    if (enemyTurnTimer) clearTimeout(enemyTurnTimer);
+    const delay = 520;
+    battle.inputLockedUntil = Date.now() + delay + 180;
+    enemyTurnTimer = setTimeout(() => {
+      enemyTurnTimer = null;
+      syncState();
+      if (!state.currentEnemy || state.currentEnemy !== enemy || Number(enemy.hp) <= 0 || state.hp <= 0) {
+        render();
+        return;
+      }
+      resetBattleFx("enemy-turn");
+      setBattlePhase("enemy-turn", `${enemy.name}正在行动`, "enemy");
+      enemyTurn(enemy);
+      if (state.currentEnemy && state.hp > 0) {
+        tickSkillCooldowns();
+        setBattlePhase("player-turn", "你的回合", "hero");
+      }
+      battle.inputLockedUntil = Date.now() + 220;
+      render();
+    }, delay);
+  }
+
+  function setBattlePhase(phase, message = "", actor = "") {
+    battle.phase = phase;
+    battle.message = message;
+    battle.actor = actor;
+  }
+
   // 战斗中使用药水，喝药后敌人会立刻行动。
-  function useBattlePotion(id) {
+  function useBattlePotion(id, immediateEnemyTurn = false) {
     const enemy = state.currentEnemy;
     if (!enemy) {
       useItem(id);
@@ -123,13 +184,14 @@ export function createCombatRuntime(ctx) {
     log(
       `战斗中使用${entry.name}，恢复 ${Math.max(0, Math.round(after - before))} 点${isHp ? "生命" : "法力"}。`
     );
-    enemyTurn(enemy);
-    render();
+    finishPlayerAction(enemy, immediateEnemyTurn);
   }
 
   // 计算暴击并扣除敌人生命，同时返回战斗日志文本。
-  function dealDamage(enemy, amount, label, element = null, options = {}) {
-    if (enemy.affix?.id === "swift" && Math.random() < 0.12) {
+  function dealDamage(enemy, amount, label, element = null, options: any = {}) {
+    const bonus = consumeNextDamageBonus(0);
+    if (bonus > 0) amount *= 1 + bonus;
+    if (enemy.affix?.id === "swift" && random() < 0.12) {
       setBattleFx("enemy", { type: "evade", text: "闪避", label });
       return `${enemy.name}借迅捷身法避开了${label}。`;
     }
@@ -139,9 +201,10 @@ export function createCombatRuntime(ctx) {
       enemy._guard = 0;
     }
     const multiplier = elementMultiplier(element, enemy, state.classId, options);
-    const crit = Math.random() < 0.06 + totals().luk * 0.008;
+    const crit = random() < 0.06 + totals().luk * 0.008;
     const damage = Math.max(1, Math.round(amount * multiplier * (crit ? 1.7 : 1)));
     enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
+    if (typeof options.onHit === "function") options.onHit({ damage, multiplier, crit });
     const match = elementMatchLabel(multiplier);
     const elementText = elementName(element);
     const fxLabel = [label, elementText, match].filter(Boolean).join("·");
@@ -154,58 +217,106 @@ export function createCombatRuntime(ctx) {
     return `${label}${elementText ? `（${elementText}）` : ""}${crit ? "暴击" : ""}，造成 ${damage} 点伤害${match ? `（${match}）` : ""}。`;
   }
 
+  function basicAttack(enemy, t, label = "普通攻击") {
+    return dealDamage(enemy, basicAttackDamage(t, enemy), label, currentWeaponElement());
+  }
+
+  function basicAttackDamage(t, enemy) {
+    return Math.max(2, t.atk * 1 - (enemy.def || 0) * 0.45);
+  }
+
+  function shouldTriggerRangerCombo(t) {
+    return state.classId === "ranger" && random() < rangerComboChance(t);
+  }
+
+  function rangerComboChance(t) {
+    if (state.classId !== "ranger") return 0;
+    return Math.min(RANGER_COMBO_MAX, RANGER_COMBO_BASE + t.spd * RANGER_COMBO_SPEED_SCALE);
+  }
+
+  function shouldTriggerRangerSkillFollowUp(t) {
+    return state.classId === "ranger" && random() < rangerSkillFollowUpChance(t);
+  }
+
+  function rangerSkillFollowUpChance(t) {
+    if (state.classId !== "ranger") return 0;
+    return Math.min(
+      RANGER_SKILL_FOLLOWUP_MAX,
+      RANGER_SKILL_FOLLOWUP_BASE + t.spd * RANGER_SKILL_FOLLOWUP_SPEED_SCALE
+    );
+  }
+
+  function skillDamageAmount(skill, t, enemy) {
+    const base = skill.scale === "mag" ? t.mag : t.atk;
+    const mitigation = skill.scale === "mag" ? (enemy.def || 0) * 0.18 : (enemy.def || 0) * 0.3;
+    return Math.max(2, base * skill.power + state.floor - mitigation);
+  }
+
   // 执行职业技能效果，例如护盾、中毒、灼烧或连射。
   function castSkill(enemy, skill, t) {
     if (skill.type === "guard") {
       state._guard = 6 + t.def;
-      const damage = Math.round(t.atk * skill.power);
-      enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
       setBattleFx("hero", { type: "guard", text: `-${state._guard}`, label: "格挡" });
-      setBattleFx("enemy", { type: "hit", text: `-${damage}`, label: skill.name });
-      return `格挡反击，造成 ${damage} 点伤害。`;
+      return dealDamage(enemy, skillDamageAmount(skill, t, enemy), "格挡反击", currentWeaponElement());
     }
     if (skill.type === "shield") {
-      state._guard = 8 + t.mag;
+      state._guard = Math.max(1, Math.round(8 + t.mag * skill.power));
       setBattleFx("hero", { type: "shield", text: `+${state._guard}`, label: skill.name });
       setBattleFx("center", { type: "shield", text: "护盾展开" });
       return `奥术护盾展开，抵挡 ${state._guard} 点伤害。`;
     }
     if (skill.type === "evade") {
       state._evade = true;
+      if (skill.power > 1) state._nextDamageBonus = Math.max(state._nextDamageBonus || 0, skill.power - 1);
       setBattleFx("hero", { type: "evade", text: "闪避", label: skill.name });
       setBattleFx("center", { type: "evade", text: "拉开距离" });
       return "你拉开距离，下回合更容易闪避。";
     }
     if (skill.type === "double") {
       const element = currentWeaponElement();
-      const d1 = dealDamage(enemy, t.atk * skill.power, "第一箭", element);
-      const d2 = dealDamage(enemy, t.atk * skill.power, "第二箭", element);
-      return `${d1} ${d2}`;
+      let text = dealDamage(enemy, skillDamageAmount(skill, t, enemy), skill.name, element);
+      if (enemy.hp > 0 && shouldTriggerRangerSkillFollowUp(t)) {
+        text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * 0.65, "追击", element)}`;
+      }
+      return text;
     }
-    const base = skill.scale === "mag" ? t.mag : t.atk;
     const element = skill.element || currentWeaponElement();
-    const text = dealDamage(enemy, base * skill.power + state.floor, skill.name, element, {
-      pierceResist: skill.pierceResist
+    let text = dealDamage(enemy, skillDamageAmount(skill, t, enemy), skill.name, element, {
+      pierceResist: skill.pierceResist,
+      onHit: () => {
+        if (["burn", "poison"].includes(skill.type)) {
+          const extra = 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
+          enemy.hp = Math.max(0, Math.round(enemy.hp - extra));
+          setBattleFx("enemy", {
+            type: skill.type,
+            element: skill.element,
+            text: `-${extra}`,
+            label: skill.name
+          });
+        }
+        if (skill.type === "weaken") enemy.atk = Math.max(1, enemy.atk - 3);
+        if (skill.type === "slow") enemy.atk = Math.max(1, enemy.atk - 2);
+      }
     });
-    if (["burn", "poison"].includes(skill.type)) {
-      const extra = 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
-      enemy.hp = Math.max(0, Math.round(enemy.hp - extra));
-      setBattleFx("enemy", {
-        type: skill.type,
-        element: skill.element,
-        text: `-${extra}`,
-        label: skill.name
-      });
+    if (enemy.hp > 0 && shouldTriggerRangerSkillFollowUp(t)) {
+      text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * 0.65, "追击", element)}`;
     }
-    if (skill.type === "weaken") enemy.atk = Math.max(1, enemy.atk - 3);
-    if (skill.type === "slow") enemy.atk = Math.max(1, enemy.atk - 2);
     return text;
+  }
+
+  function consumeNextDamageBonus(amount = 1) {
+    const bonus = state._nextDamageBonus || 0;
+    if (bonus > 0) state._nextDamageBonus = 0;
+    if (amount === 0) return bonus;
+    return amount * (1 + bonus);
   }
 
   // 结算敌人攻击回合，包含闪避、防御减伤和死亡检测。
   function enemyTurn(enemy) {
     const t = totals();
-    const dodge = Math.random() < t.spd * 0.006 + (state._evade ? 0.35 : 0);
+    const dodge =
+      random() <
+      BASE_DODGE + t.spd * SPEED_DODGE_SCALE + (state._evade ? EVADE_SKILL_DODGE_BONUS : 0);
     state._evade = false;
     if (dodge) {
       setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
@@ -249,12 +360,16 @@ export function createCombatRuntime(ctx) {
     const hpRatio = enemy.maxHp ? enemy.hp / enemy.maxHp : 1;
     const baseChance =
       enemy.type === "boss" ? 0.54 : enemy.type === "elite" || enemy.roomBoss ? 0.42 : 0.24;
-    const candidates = enemy.skills.filter((skill) => {
+    const filteredSkills = enemy.skills.filter((skill) => {
       if (skill.type === "heal" && hpRatio > 0.55) return false;
       if (skill.type === "guard" && enemy._guard) return false;
-      return Math.random() < (skill.chance || baseChance);
+      return true;
     });
-    if (!candidates.length && Math.random() < baseChance * 0.35) return choice(enemy.skills);
+    const candidates = filteredSkills.filter((skill) => {
+      return random() < (skill.chance || baseChance);
+    });
+    if (!candidates.length && filteredSkills.length && random() < baseChance * 0.35)
+      return choice(filteredSkills);
     return candidates.length ? choice(candidates) : null;
   }
 
@@ -311,7 +426,7 @@ export function createCombatRuntime(ctx) {
   function incomingElementMultiplier(element) {
     if (!element) return 1;
     const resistances = new Set();
-    for (const eq of Object.values(state.equipment || {})) {
+    for (const eq of Object.values(state.equipment || {}) as any[]) {
       for (const entry of eq?.elementResistances || []) resistances.add(entry);
     }
     return resistances.has(element) ? PLAYER_ELEMENT_RESIST : 1;
@@ -334,6 +449,7 @@ export function createCombatRuntime(ctx) {
       level,
       branch,
       mp: Math.max(1, skill.mp + Math.floor(level / 3) + (branch?.mpDelta || 0)),
+      cooldown: Math.max(0, (skill.cooldown ?? 1) + (branch?.cooldownDelta || 0)),
       power: Number((skill.power * (1 + level * 0.1) + (branch?.powerBonus || 0)).toFixed(2)),
       element: branch?.element || skill.element,
       statusBonus: branch?.statusBonus || 0,
@@ -341,21 +457,40 @@ export function createCombatRuntime(ctx) {
     };
   }
 
+  function skillCooldownRemaining(skillId) {
+    return Math.max(0, Number(state.skillCooldowns?.[skillId] || 0));
+  }
+
+  function setSkillCooldown(skill) {
+    if (!skill.cooldown) return;
+    state.skillCooldowns = state.skillCooldowns || {};
+    state.skillCooldowns[skill.id] = skill.cooldown;
+  }
+
+  function tickSkillCooldowns() {
+    if (!state.skillCooldowns) return;
+    for (const [skillId, turns] of Object.entries(state.skillCooldowns)) {
+      const next = Math.max(0, Number(turns) - 1);
+      if (next > 0) state.skillCooldowns[skillId] = next;
+      else delete state.skillCooldowns[skillId];
+    }
+  }
+
   function skillPreviewText(skill) {
     const t = totals();
     const floor = state?.floor || 1;
-    const base = skill.scale === "mag" ? t.mag : t.atk;
+    const enemy = state.currentEnemy || { def: 0 };
     if (skill.type === "guard") {
-      const damage = Math.max(1, Math.round(t.atk * skill.power));
+      const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
       return `伤害 ${damage} · 格挡 ${6 + t.def}`;
     }
-    if (skill.type === "shield") return `护盾 ${8 + t.mag}`;
+    if (skill.type === "shield") return `护盾 ${Math.max(1, Math.round(8 + t.mag * skill.power))}`;
     if (skill.type === "evade") return "下回合闪避 +35%";
     if (skill.type === "double") {
-      const damage = Math.max(1, Math.round(t.atk * skill.power));
-      return `两段伤害 ${damage} + ${damage}`;
+      const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
+      return `伤害 ${damage} · 追击 ${Math.round(rangerSkillFollowUpChance(t) * 100)}%`;
     }
-    const damage = Math.max(1, Math.round(base * skill.power + floor));
+    const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
     const elementText = elementName(skill.element);
     const prefix = elementText ? `${elementText} · ` : "";
     if (skill.type === "burn")
@@ -383,9 +518,13 @@ export function createCombatRuntime(ctx) {
     state.gold += enemy.gold;
     state.xp += enemy.xp;
     log(`击败${enemy.name}，获得 ${enemy.xp} 经验和 ${enemy.gold} 金币。`);
-    const cell = state.map.cells[state.player.y][state.player.x];
-    cell.object = null;
+    const cell = currentBattleCell(enemy);
+    if (cell?.object === enemy) cell.object = null;
+    else if (cell?.object && Number(cell.object.hp) <= 0) cell.object = null;
+    delete state._battleCell;
     state.currentEnemy = null;
+    state.skillCooldowns = {};
+    setBattlePhase("idle");
     syncMusicToGame();
     const rewards = [`经验 +${enemy.xp}`, `金币 +${enemy.gold}`];
     recordQuestKill(enemy, rewards);
@@ -393,22 +532,34 @@ export function createCombatRuntime(ctx) {
     rewards.push(...maybeDrop(enemy));
     const lore = discoverBattleLore(enemy);
     if (lore) rewards.push(`残页：${lore.title}`);
+    state._nextDamageBonus = 0;
     const levelBefore = state.level;
     while (state.xp >= state.xpNext) levelUp();
     if (state.level > levelBefore) rewards.push(`等级提升到 Lv.${state.level}`);
     if (enemy.type === "boss") {
       showModal(
         "通关",
-        `<p>第 ${MAX_FLOOR} 层的符文守王倒下了，地牢深处的王座重新安静下来。</p>${battleResultList(rewards)}`,
+        `<p>第 ${MAX_FLOOR} 层的符文守王倒下了，地牢深处的王座重新安静下来。</p>${battleResultList(rewards, "最终战利品")}`,
         [{ text: "继续整理装备", action: closeModal }]
       );
     } else {
       showModal(
         `击败 ${enemy.name}`,
-        `<p>战斗结束，你清点了这次收获。</p>${battleResultList(rewards)}`,
+        battleResultList(rewards, "战斗收获"),
         [{ text: "收下", action: closeModal }]
       );
     }
+  }
+
+  function currentBattleCell(enemy) {
+    const tracked = state._battleCell;
+    if (tracked) {
+      const cell = state.map?.cells?.[tracked.y]?.[tracked.x];
+      if (cell) return cell;
+    }
+    const playerCell = state.map?.cells?.[state.player?.y]?.[state.player?.x];
+    if (playerCell?.object === enemy) return playerCell;
+    return state.map?.cells?.flat?.().find((cell) => cell.object === enemy) || playerCell || null;
   }
 
   // 击败封印守卫后解除当前楼层下行楼梯封印。
@@ -466,7 +617,7 @@ export function createCombatRuntime(ctx) {
     }
   }
 
-  // 抽取战斗后的钥匙、材料、技能尘、装备和符文掉落。
+  // 抽取战斗后的钥匙、材料、技能尘、装备、符文和额外金币。
   function maybeDrop(enemy) {
     const drops = [];
     const reward = floorEffectReward();
@@ -479,39 +630,83 @@ export function createCombatRuntime(ctx) {
       state.materials["首领印记"] = (state.materials["首领印记"] || 0) + 1;
       drops.push("首领印记 +1");
     }
-    const specialBonus = reward > 1 ? 0.08 : 0;
-    const dustChance =
-      enemy.type === "boss"
-        ? 1
-        : enemy.type === "elite"
-          ? Math.min(0.95, 0.85 + specialBonus)
-          : Math.min(0.42, 0.32 + specialBonus);
-    if (Math.random() < dustChance) {
-      const dust = Math.max(
-        1,
-        Math.round(
-          (enemy.type === "boss" ? 5 : enemy.type === "elite" ? 2 : 1) * (reward > 1 ? 1.12 : 1)
-        )
-      );
-      state.skillDust = (state.skillDust || 0) + dust;
-      log(`获得 ${dust} 点技能尘。`);
-      drops.push(`技能尘 +${dust}`);
-    }
-    const equipmentChance = Math.min(0.8, 0.34 + state.floor * 0.035 + specialBonus);
-    if (Math.random() < equipmentChance || enemy.type !== "monster") {
-      const loot = randomEquipment();
-      state.inventory.push(loot);
-      log(`${enemy.name}掉落了${loot.name}。`);
-      drops.push(`装备：${loot.name}`);
-    }
-    if (Math.random() < Math.min(0.7, 0.28 + state.floor * 0.025 + specialBonus)) {
-      const rune = choice(RUNES) + "1";
-      state.runes[rune] = (state.runes[rune] || 0) + 1;
-      log(`获得${rune}符文。`);
-      drops.push(`符文：${rune}`);
-    }
+    if (enemy.type === "boss") dropEquipment(enemy, drops);
+    const rolls = lootRollCount(enemy, reward);
+    for (let i = 0; i < rolls; i++) rollLootDrop(enemy, drops, reward);
     if (!drops.length) drops.push("未发现额外掉落");
     return drops;
+  }
+
+  function lootRollCount(enemy, reward = 1) {
+    const base = enemy.type === "boss" ? 3 : enemy.type === "elite" || enemy.roomBoss ? 2 : 1;
+    const extraChance =
+      enemy.type === "boss"
+        ? 0.75
+        : enemy.type === "elite" || enemy.roomBoss
+          ? 0.42
+          : Math.min(0.38, 0.16 + state.floor * 0.008);
+    return base + (random() < extraChance + (reward > 1 ? 0.1 : 0) ? 1 : 0);
+  }
+
+  function rollLootDrop(enemy, drops, reward = 1) {
+    const noneChance = enemy.type === "monster" ? 0.2 : enemy.type === "elite" ? 0.06 : 0;
+    if (random() < noneChance) return false;
+    const roll = random();
+    const equipmentWeight =
+      enemy.type === "boss" ? 0.42 : enemy.type === "elite" || enemy.roomBoss ? 0.34 : 0.2;
+    const runeWeight = equipmentWeight + (enemy.type === "boss" ? 0.2 : 0.22);
+    const dustWeight = runeWeight + (enemy.type === "boss" ? 0.18 : 0.2);
+    const materialWeight = dustWeight + 0.14;
+    if (roll < equipmentWeight) return dropEquipment(enemy, drops);
+    if (roll < runeWeight) return dropRune(drops);
+    if (roll < dustWeight) return dropSkillDust(enemy, drops, reward);
+    if (roll < materialWeight) return dropMaterial(drops, reward);
+    return dropBonusGold(enemy, drops, reward);
+  }
+
+  function dropEquipment(enemy, drops) {
+    const loot = randomEquipment();
+    state.inventory.push(loot);
+    log(`${enemy.name}掉落了${loot.name}。`);
+    drops.push(`装备：${loot.name}`);
+    return true;
+  }
+
+  function dropRune(drops) {
+    const rune = choice(RUNES) + "1";
+    state.runes[rune] = (state.runes[rune] || 0) + 1;
+    log(`获得${rune}符文。`);
+    drops.push(`符文：${rune}`);
+    return true;
+  }
+
+  function dropSkillDust(enemy, drops, reward = 1) {
+    const dust = Math.max(
+      1,
+      Math.round(
+        (enemy.type === "boss" ? rand(4, 6) : enemy.type === "elite" ? rand(1, 3) : 1) *
+          (reward > 1 ? 1.12 : 1)
+      )
+    );
+    state.skillDust = (state.skillDust || 0) + dust;
+    log(`获得 ${dust} 点技能尘。`);
+    drops.push(`技能尘 +${dust}`);
+    return true;
+  }
+
+  function dropMaterial(drops, reward = 1) {
+    const amount = reward > 1 && random() < 0.35 ? 2 : 1;
+    state.materials["强化石"] = (state.materials["强化石"] || 0) + amount;
+    drops.push(`材料：强化石 +${amount}`);
+    return true;
+  }
+
+  function dropBonusGold(enemy, drops, reward = 1) {
+    const gold = Math.max(1, Math.round(rand(4, 12 + state.floor) * reward));
+    state.gold += gold;
+    log(`${enemy.name}身上还找到 ${gold} 枚金币。`);
+    drops.push(`额外金币 +${gold}`);
+    return true;
   }
 
   function discoverBattleLore(enemy) {
@@ -527,8 +722,41 @@ export function createCombatRuntime(ctx) {
     return state?.map?.effect?.reward || 1;
   }
 
-  function battleResultList(rewards) {
-    return `<ul class="reward-list">${rewards.map((reward) => `<li>${reward}</li>`).join("")}</ul>`;
+  function battleResultList(rewards, title = "战斗收获") {
+    const listClass = rewards.length > 4 ? "reward-list dense" : "reward-list";
+    return `
+      <div class="battle-result">
+        <div class="battle-result-head">
+          <span>收获 ${rewards.length} 项</span>
+          <b>${title}</b>
+        </div>
+        <div class="${listClass}">
+          ${rewards.map((reward) => rewardItemMarkup(reward)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function rewardItemMarkup(reward) {
+    const meta = rewardMeta(reward);
+    return `<div class="reward-item ${meta.className}"><i>${meta.icon}</i><span>${reward}</span></div>`;
+  }
+
+  function rewardMeta(reward) {
+    if (reward.startsWith("经验")) return { className: "reward-xp", icon: "XP" };
+    if (reward.startsWith("金币")) return { className: "reward-gold", icon: "金" };
+    if (reward.startsWith("额外金币")) return { className: "reward-gold", icon: "金" };
+    if (reward.startsWith("装备")) return { className: "reward-equipment", icon: "装" };
+    if (reward.startsWith("符文")) return { className: "reward-rune", icon: "符" };
+    if (reward.startsWith("技能尘")) return { className: "reward-dust", icon: "尘" };
+    if (reward.startsWith("材料")) return { className: "reward-material", icon: "材" };
+    if (reward.startsWith("残页")) return { className: "reward-lore", icon: "书" };
+    if (reward.includes("等级提升")) return { className: "reward-level", icon: "Lv" };
+    if (reward.includes("钥匙") || reward.includes("封印")) return { className: "reward-key", icon: "钥" };
+    if (reward.includes("任务") || reward.includes("清理") || reward.includes("去找") || reward.includes("领取")) {
+      return { className: "reward-quest", icon: "任" };
+    }
+    return { className: "reward-common", icon: "·" };
   }
 
   // 提升等级，发放属性点和技能点，并刷新生命法力。
@@ -545,7 +773,7 @@ export function createCombatRuntime(ctx) {
   }
 
   function applyClassLevelGrowth() {
-    const growth = CLASSES[state.classId]?.growth || { hp: 3, mp: 2 };
+    const growth: any = CLASSES[state.classId]?.growth || { hp: 3, mp: 2 };
     state.maxHp += growth.hp || 0;
     state.maxMp += growth.mp || 0;
     if (growth.primary && state.level % (growth.primaryEvery || 2) === 0) {
@@ -561,7 +789,11 @@ export function createCombatRuntime(ctx) {
     state.hp = Math.ceil(effectiveMaxHp() * 0.55);
     state.mp = Math.ceil(effectiveMaxMp() * 0.45);
     state.gold = Math.max(0, state.gold - Math.ceil(state.gold * 0.15));
+    state._nextDamageBonus = 0;
     state.currentEnemy = null;
+    state.skillCooldowns = {};
+    delete state._battleCell;
+    setBattlePhase("idle");
     syncMusicToGame();
     generateFloor();
     log("你被击倒，被传送回本层入口，损失了少量金币。");
@@ -604,9 +836,12 @@ export function createCombatRuntime(ctx) {
       autoBattlePolicy(state.currentEnemy).allowed
     ) {
       const bestSkill = CLASSES[state.classId].skills.find(
-        (skill) => state.mp >= upgradedSkill(skill).mp && skill.type !== "evade"
+        (skill) =>
+          state.mp >= upgradedSkill(skill).mp &&
+          skill.type !== "evade" &&
+          skillCooldownRemaining(skill.id) <= 0
       );
-      attackEnemy(bestSkill ? "skill" : "attack", bestSkill || null);
+      attackEnemy(bestSkill ? "skill" : "attack", bestSkill || null, true);
       rounds++;
     }
   }

@@ -1,7 +1,14 @@
-// @ts-nocheck
-import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "./constants";
-import { equipmentRestrictionText, isWeaponUsableByClass } from "./equipment/equipmentRules";
-import { cardinalNeighbors, cellsWithin, distance } from "./floor/mapGeometry";
+import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "../constants";
+import { equipmentRestrictionText, isWeaponUsableByClass } from "../equipment/equipmentRules";
+import { itemScore } from "../equipment/equipmentScoring";
+import { cardinalNeighbors, cellsWithin, distance } from "../floor/mapGeometry";
+import { random } from "../random";
+import type { GameMap, GameState, StatKey } from "../types";
+
+type StatDraft = {
+  points: number;
+  stats: Record<StatKey, number>;
+};
 
 // 背包运行时负责装备穿脱、消耗品、属性点、强化、商店和传送道具。
 export function createInventoryRuntime(ctx) {
@@ -19,7 +26,6 @@ export function createInventoryRuntime(ctx) {
   const equipmentCompareText = (...args) => api.equipmentCompareText(...args);
   const equipmentDetailMarkup = (...args) => api.equipmentDetailMarkup(...args);
   const equipmentSummary = (...args) => api.equipmentSummary(...args);
-  const itemScore = (...args) => api.itemScore(...args);
   const log = (...args) => api.log(...args);
   const cloneFloorMap = (...args) => api.cloneFloorMap(...args);
   const openQuestFromGiver = (...args) => api.openQuestFromGiver(...args);
@@ -72,31 +78,35 @@ export function createInventoryRuntime(ctx) {
   }
 
   function adjustStatDraft(key, delta, redraw = true) {
-    if (!draft.value) return;
-    const next = (draft.value.stats[key] || 0) + delta;
+    const current = draft.value as StatDraft | null;
+    if (!current) return;
+    const statKey = key as StatKey;
+    const next = (current.stats[statKey] || 0) + delta;
     if (next < 0) return;
-    const used = Object.values(draft.value.stats).reduce((sum, value) => sum + value, 0);
-    if (delta > 0 && used >= draft.value.points) return;
-    draft.value.stats[key] = next;
+    const used = Object.values(current.stats).reduce((sum, value) => sum + value, 0);
+    if (delta > 0 && used >= current.points) return;
+    current.stats[statKey] = next;
     if (redraw) renderStatAllocator();
   }
 
   function renderStatAllocator() {
-    const used = Object.values(draft.value.stats).reduce((sum, value) => sum + value, 0);
-    const left = draft.value.points - used;
+    const current = draft.value as StatDraft;
+    const used = Object.values(current.stats).reduce((sum, value) => sum + value, 0);
+    const left = current.points - used;
     showModal(
       "分配属性点",
       `
     <div class="stat-allocator">
-      <div class="allocator-summary">剩余 <b>${left}</b> / ${draft.value.points}</div>
+      <div class="allocator-summary">剩余 <b>${left}</b> / ${current.points}</div>
       ${Object.entries(STAT_NAMES)
         .map(([key, name]) => {
           const extra = key === "def" ? "生命上限 +4" : key === "res" ? "法力上限 +3" : "";
+          const statKey = key as StatKey;
           return `<div class="allocator-row">
-          <div><b>${name}</b><small>当前 ${state.stats[key] || 0}${extra ? ` · ${extra}` : ""}</small></div>
+          <div><b>${name}</b><small>当前 ${state.stats[statKey] || 0}${extra ? ` · ${extra}` : ""}</small></div>
           <div class="stepper">
             <button type="button" onclick="adjustStatDraft('${key}', -1)">-</button>
-            <span>${draft.value.stats[key] || 0}</span>
+            <span>${current.stats[statKey] || 0}</span>
             <button type="button" ${left <= 0 ? "disabled" : ""} onclick="adjustStatDraft('${key}', 1)">+</button>
           </div>
         </div>`;
@@ -112,10 +122,11 @@ export function createInventoryRuntime(ctx) {
   }
 
   function applyStatDraft() {
-    if (!draft.value) return;
+    const current = draft.value as StatDraft | null;
+    if (!current) return;
     const beforeHpMax = effectiveMaxHp();
     const beforeMpMax = effectiveMaxMp();
-    for (const [key, value] of Object.entries(draft.value.stats)) {
+    for (const [key, value] of Object.entries(current.stats) as Array<[StatKey, number]>) {
       if (!value) continue;
       state.stats[key] = (state.stats[key] || 0) + value;
       if (key === "def") state.maxHp += value * 2;
@@ -383,8 +394,10 @@ export function createInventoryRuntime(ctx) {
       }
     };
     addFromMap(state.floor, state.map);
-    for (const [floor, saved] of Object.entries(state.floorStates || {}))
-      addFromMap(floor, saved.map);
+    for (const [floor, saved] of Object.entries(state.floorStates || {}) as Array<
+      [string, Partial<GameState>]
+    >)
+      addFromMap(floor, saved.map as GameMap);
     return targets.sort(
       (a, b) => Math.abs(a.floor - state.floor) - Math.abs(b.floor - state.floor)
     );
@@ -703,9 +716,8 @@ export function createInventoryRuntime(ctx) {
   function merchantSellsUniversalKey(merchant = currentMerchant()) {
     if (!merchant) return false;
     if (merchant.sellsUniversalKey === undefined) {
-      const luck = state.stats?.luk || 0;
       merchant.sellsUniversalKey =
-        Math.random() < Math.min(0.48, 0.2 + state.floor * 0.018 + luck * 0.01);
+        random() < Math.min(0.48, 0.2 + state.floor * 0.018);
     }
     return !!merchant.sellsUniversalKey;
   }
@@ -731,7 +743,7 @@ export function createInventoryRuntime(ctx) {
   }
 
   function merchantStockCount() {
-    return 1 + (Math.random() < 0.7 ? 1 : 0) + (state.floor >= 5 && Math.random() < 0.35 ? 1 : 0);
+    return 1 + (random() < 0.7 ? 1 : 0) + (state.floor >= 5 && random() < 0.35 ? 1 : 0);
   }
 
   function merchantEquipmentPrice(entry) {
