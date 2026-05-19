@@ -22,3 +22,9 @@ export interface LoreState {
   chapters: string[];
   pages: string[];
 }
+
+export interface NarrativeState {
+  relations: Record<string, number>;
+  flags: Record<string, boolean>;
+  eventChoices: Record<string, string>;
+}

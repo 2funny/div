@@ -164,6 +164,10 @@ export function createCombatRuntime(ctx) {
     battle.actor = actor;
   }
 
+  function setBattleFeed(kind, title, detail = "", meta = "") {
+    battle.actionFeed = { kind, title, detail, meta };
+  }
+
   // 战斗中使用药水，喝药后敌人会立刻行动。
   function useBattlePotion(id, immediateEnemyTurn = false) {
     const enemy = state.currentEnemy;
@@ -410,6 +414,7 @@ export function createCombatRuntime(ctx) {
     state._evade = false;
     if (dodge) {
       setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
+      setBattleFeed("evade", `${enemy.name}攻击落空`, "你闪避了这次攻击。", "闪避");
       log(`${enemy.name}的攻击落空。`);
       return;
     }
@@ -420,6 +425,7 @@ export function createCombatRuntime(ctx) {
       return;
     }
     let damage = Math.max(1, Math.round(enemy.atk * 1.08 - t.def * 0.36 - t.res * 0.08));
+    const guarded = !!state._guard;
     if (state._guard) {
       const guard = enemy.affix?.id === "shatter" ? Math.ceil(state._guard * 0.45) : state._guard;
       damage = Math.max(0, damage - guard);
@@ -437,6 +443,7 @@ export function createCombatRuntime(ctx) {
       label: enemy.name
     });
     playSound("hurt");
+    setBattleFeed("hit", `${enemy.name}反击`, `造成 ${damage} 点伤害。`, guarded ? "格挡后" : "普通攻击");
     log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
     if (state.hp <= 0) death();
   }
@@ -468,6 +475,7 @@ export function createCombatRuntime(ctx) {
       const guard = Math.max(3, Math.round(3 + enemy.def + state.floor * 0.45));
       enemy._guard = guard;
       setBattleFx("enemy", { type: "shield", text: `+${guard}`, label: skill.name });
+      setBattleFeed("shield", `${enemy.name}使用${skill.name}`, `下一次受到的伤害降低 ${guard} 点。`, "护盾");
       log(`${enemy.name}使用${skill.name}，下一次受到的伤害降低 ${guard} 点。`);
       return;
     }
@@ -476,6 +484,7 @@ export function createCombatRuntime(ctx) {
       const heal = Math.max(2, Math.min(missing, Math.round(enemy.maxHp * (skill.power || 0.14))));
       enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
       setBattleFx("enemy", { type: "shield", text: `+${heal}`, label: skill.name });
+      setBattleFeed("heal", `${enemy.name}使用${skill.name}`, `恢复 ${heal} 点生命。`, "治疗");
       log(`${enemy.name}使用${skill.name}，恢复 ${heal} 点生命。`);
       return;
     }
@@ -508,6 +517,12 @@ export function createCombatRuntime(ctx) {
       label: [skill.name, elementText].filter(Boolean).join("·")
     });
     playSound("hurt");
+    setBattleFeed(
+      "skill",
+      `${enemy.name}使用${skill.name}${elementText ? `（${elementText}）` : ""}`,
+      `造成 ${damage} 点伤害${skill.type === "weaken" ? "，打断你的防御。" : ""}`,
+      resistMultiplier < 1 ? "装备抗性减免" : skill.type === "drain" ? "汲取" : "敌方技能"
+    );
     log(
       `${enemy.name}使用${skill.name}${elementText ? `（${elementText}）` : ""}，造成 ${damage} 点伤害${resistMultiplier < 1 ? "（装备抗性）" : ""}。`
     );

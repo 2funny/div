@@ -7,7 +7,7 @@ import {
   saveSlotLabel,
   writeSaveIndex
 } from "./save";
-import { ensureLoreState, unlockLoreChaptersForFloor } from "../quest/lore";
+import { ensureLoreState, ensureNarrativeState, unlockLoreChaptersForFloor } from "../quest";
 import { escapeHtml } from "../render/html";
 import { createTutorialState } from "../tutorial/tutorial";
 import type { GameState } from "../types";
@@ -225,9 +225,13 @@ export function createSaveRuntime(ctx) {
     state.quest = state.quest || null;
     state.quests = Array.isArray(state.quests) ? state.quests : [];
     ensureLoreState(state);
+    ensureNarrativeState(state);
     unlockLoreChaptersForFloor(state);
     state.tutorial = state.tutorial || createTutorialState();
     state.floorStates = state.floorStates || {};
+    for (const savedFloor of Object.values(state.floorStates || {}) as Partial<GameState>[]) {
+      if (savedFloor) ensureNarrativeState(savedFloor as GameState);
+    }
     state.skillLevels = state.skillLevels || {};
     state.skillBranches = state.skillBranches || {};
     state.skillCooldowns = state.skillCooldowns || {};

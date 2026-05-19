@@ -4,6 +4,7 @@ import { choice, rand, random } from "../random";
 import { clearBattleFx } from "../combat/combatFx";
 import { roomEventById, roomEventMetaText } from "../events/roomEvents";
 import { discoverLorePage } from "../quest/lore";
+import { adjustRelation, markNarrativeFlag, recordEventChoice, relationLabel } from "../quest/narrative";
 import { advanceTutorial } from "../tutorial/tutorial";
 
 // 交互运行时负责玩家移动、视野刷新和地图物件触发，不直接生成 UI 标记。
@@ -389,15 +390,25 @@ export function createInteractionRuntime(ctx) {
         text: entry.text,
         action: () => {
           const result = entry.apply(context);
+          const consequence = applyRoomEventConsequence(event.id, entry);
           cell.object = null;
-          log(result.log);
+          log(`${result.log}${consequence ? ` ${consequence}` : ""}`);
           playSound("quest");
           render();
-          showEvent(event.title, result.body, "继续探索");
+          showEvent(event.title, `${result.body}${consequence ? `<p>${consequence}</p>` : ""}`, "继续探索");
         }
       })),
       { text: "暂不处理", action: closeModal }
     ]);
+  }
+
+  function applyRoomEventConsequence(eventId, choice) {
+    recordEventChoice(state, eventId, choice.id);
+    if (choice.flag) markNarrativeFlag(state, choice.flag);
+    if (!choice.relation) return "";
+    const score = adjustRelation(state, choice.relation.id, choice.relation.delta);
+    const sign = choice.relation.delta > 0 ? "+" : "";
+    return `${relationLabel(state, choice.relation.id)}（${sign}${choice.relation.delta}，当前 ${score}）。`;
   }
 
   // 使用符文钥匙打开围住宝箱的门栅。

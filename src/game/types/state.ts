@@ -2,7 +2,7 @@ import type { Player, SlotKey, Stats } from "./core";
 import type { Enemy } from "./combat";
 import type { Item } from "./item";
 import type { GameMap } from "./map";
-import type { LoreState, QuestState } from "./quest";
+import type { LoreState, NarrativeState, QuestState } from "./quest";
 
 export interface GameState {
   floor: number;
@@ -38,6 +38,7 @@ export interface GameState {
   quest?: QuestState;
   quests?: QuestState[];
   lore?: LoreState;
+  narrative?: NarrativeState;
   log: string[];
   [key: string]: unknown;
 }

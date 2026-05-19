@@ -498,15 +498,16 @@ h2 {
   position: absolute;
   z-index: 3;
   display: grid;
-  place-items: center;
+  justify-items: center;
   align-content: center;
-  width: 66px;
-  min-height: 42px;
-  padding: 5px;
+  width: 86px;
+  min-height: 52px;
+  padding: 5px 6px;
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(20, 26, 35, 0.78);
   font-size: 12px;
   line-height: 1.15;
+  text-align: center;
 }
 
 .gear-slot small {
@@ -520,11 +521,32 @@ h2 {
 .gear-slot span {
   position: relative;
   z-index: 1;
+  color: #8bb7ff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.gear-slot b {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #dfe8f6;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gear-slot.equipped {
   border-color: rgba(240, 195, 91, 0.42);
   background: rgba(55, 43, 22, 0.78);
+  color: #ffe6a8;
+}
+
+.gear-slot.equipped b {
   color: #ffe6a8;
 }
 
@@ -1446,6 +1468,104 @@ h2 {
   background: linear-gradient(90deg, rgba(125, 216, 255, 0.6), rgba(240, 195, 91, 0.64));
 }
 
+.battle-action-feed {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(10, 14, 20, 0.58);
+}
+
+.battle-action-feed i {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dfe8f6;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.battle-action-feed div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.battle-action-feed b,
+.battle-action-feed span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.battle-action-feed b {
+  color: #e7f1ff;
+  font-size: 13px;
+}
+
+.battle-action-feed span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.battle-action-feed em {
+  padding: 3px 7px;
+  border: 1px solid rgba(240, 195, 91, 0.28);
+  border-radius: 999px;
+  color: #ffe6a8;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.battle-action-feed.skill,
+.battle-action-feed.hit {
+  border-color: rgba(255, 126, 91, 0.24);
+  background: rgba(43, 18, 15, 0.42);
+}
+
+.battle-action-feed.skill i,
+.battle-action-feed.hit i {
+  border-color: rgba(255, 126, 91, 0.34);
+  background: rgba(255, 126, 91, 0.13);
+  color: #ffd2c4;
+}
+
+.battle-action-feed.shield,
+.battle-action-feed.heal {
+  border-color: rgba(125, 212, 190, 0.24);
+  background: rgba(18, 42, 39, 0.38);
+}
+
+.battle-action-feed.shield i,
+.battle-action-feed.heal i {
+  border-color: rgba(125, 212, 190, 0.34);
+  background: rgba(125, 212, 190, 0.12);
+  color: #c8fff2;
+}
+
+.battle-action-feed.evade {
+  border-color: rgba(125, 216, 255, 0.24);
+  background: rgba(15, 31, 43, 0.42);
+}
+
+.battle-action-feed.evade i {
+  border-color: rgba(125, 216, 255, 0.34);
+  background: rgba(125, 216, 255, 0.12);
+  color: #dff6ff;
+}
+
 @keyframes turnPulse {
   0%,
   100% {
@@ -1901,25 +2021,12 @@ h2 {
 }
 
 .mini-room-entrance {
-  height: 44%;
-  align-self: flex-end;
-  margin-bottom: 14%;
+  background:
+    repeating-linear-gradient(90deg, #4a3323 0 3px, #2a1d16 3px 6px),
+    #302018;
   box-shadow:
-    inset 0 -1px 0 currentColor,
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
-}
-
-.mini-room-entrance::before {
-  content: "";
-  position: absolute;
-  left: 18%;
-  right: 18%;
-  top: 38%;
-  height: 1px;
-  background: currentColor;
-  box-shadow:
-    -5px 0 0 currentColor,
-    5px 0 0 currentColor;
+    inset 0 0 0 1px rgba(20, 14, 11, 0.92),
+    inset 0 -4px 0 rgba(0, 0, 0, 0.26);
 }
 
 .mini-locked-door::before {
@@ -2670,79 +2777,24 @@ h2 {
     inset 0 0 0 1px rgba(0, 0, 0, 0.38);
 }
 
-.sprite.room-entrance {
-  width: 78%;
-  height: 54%;
-  align-self: end;
-  margin-bottom: 9%;
-  border: 1px solid rgba(222, 190, 125, 0.42);
-  border-radius: 4px 4px 2px 2px;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 15%, #d2ad72 15% 25%, transparent 25% 41%),
-    linear-gradient(
-      180deg,
-      transparent 24%,
-      #927247 24% 38%,
-      transparent 38% 60%,
-      #927247 60% 74%,
-      transparent 74%
-    ) !important;
-  box-shadow:
-    0 2px 7px rgba(0, 0, 0, 0.34),
-    0 0 8px rgba(168, 210, 132, 0.18),
-    inset 0 0 0 1px rgba(0, 0, 0, 0.34);
-}
-
-.sprite.room-entrance::before {
-  left: 10%;
-  right: 10%;
-  bottom: -12%;
-  height: 18%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(151, 122, 74, 0), rgba(222, 190, 125, 0.72), rgba(151, 122, 74, 0));
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.34);
-}
-
-.sprite.room-entrance::after {
-  left: 43%;
-  top: -7%;
-  width: 14%;
-  height: 114%;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #ead39d, #9b7446);
-  box-shadow:
-    -20px 8px 0 -2px #b78e57,
-    20px 8px 0 -2px #b78e57,
-    0 0 5px rgba(240, 195, 91, 0.3);
-}
-
+.sprite.room-entrance,
 .sprite.locked-door {
-  color: #ffe19b;
-  border-color: rgba(240, 195, 91, 0.5);
-  background: rgba(22, 18, 12, 0.76) !important;
+  width: 108%;
+  height: 108%;
+  align-self: end;
+  margin-bottom: -4%;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none;
 }
 
-.sprite.locked-door::before {
-  left: 24%;
-  right: 24%;
-  top: 42%;
-  bottom: 18%;
-  border-radius: 3px;
-  background: linear-gradient(180deg, #f0c35b, #9b6d24);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-    0 3px 8px rgba(0, 0, 0, 0.42);
-}
-
-.sprite.locked-door::after {
-  left: 31%;
-  top: 19%;
-  width: 38%;
-  height: 32%;
-  border: 3px solid currentColor;
-  border-bottom: 0;
-  border-radius: 10px 10px 0 0;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+.sprite.room-entrance img,
+.sprite.locked-door img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: none;
 }
 
 .sprite.altar img {

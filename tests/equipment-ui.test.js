@@ -129,6 +129,10 @@ vm.runInContext(
   assert(!inventory.includes("攻击差 +3"), "full stat deltas should stay out of compact inventory rows");
   assert(inventory.includes("inventory-filter"), "equipment inventory should include a type filter");
   assert(inventory.includes('<option value="weapon"'), "equipment filter should include weapon slot");
+  renderPaperdoll();
+  const paperdollMarkup = getElement("paperdoll").innerHTML;
+  assert(paperdollMarkup.includes("Old Sword"), "paperdoll equipment slots should show equipped item names directly");
+  assert(paperdollMarkup.includes("未装备"), "paperdoll empty slots should show an unequipped placeholder");
   activeEquipmentFilter = "armor";
   assert(!inventoryGroupMarkup().includes("New Sword"), "equipment filter should hide other slots");
   activeEquipmentFilter = "all";
@@ -227,7 +231,7 @@ vm.runInContext(
   const miniMarkup = getElement("minimap").innerHTML;
   assert(miniMarkup.includes("mini-room-label"), "minimap should stamp explored rooms with compact room numbers");
   assert(miniMarkup.includes("mini-door"), "minimap should mark normal room doors");
-  assert(miniMarkup.includes("mini-room-entrance"), "minimap should mark unlocked room entrances");
+  assert(!miniMarkup.includes('title="1号房：未上锁入口，可直接通过"'), "passive unlocked doors should not show a hover prompt");
   assert(miniMarkup.includes("mini-locked-door"), "minimap should mark locked room doors");
 
   state.classId = "warrior";
@@ -276,8 +280,10 @@ vm.runInContext(
   assert(ASSETS.questNpc && ASSETS.questNpc !== ASSETS.shop, "quest NPC should not reuse the merchant icon");
   assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");
   assert(ASSETS.floor && ASSETS.wall, "floor and wall should have dedicated dungeon texture assets");
+  assert(ASSETS.door && ASSETS.lockedDoor, "room doors should use dedicated dungeon image assets");
   assert.strictEqual(objectSprite({ type: "questNpc" }).includes(ASSETS.questNpc), true, "quest NPC sprite should render its own asset");
-  assert(objectSprite({ type: "roomEntrance" }).includes("room-entrance"), "unlocked room entrances should render as a distinct threshold sprite");
+  assert(objectSprite({ type: "roomEntrance" }).includes(ASSETS.door), "unlocked room entrances should render with the normal door image");
+  assert(objectSprite({ type: "lockedDoor" }).includes(ASSETS.lockedDoor), "locked room doors should render with the locked door image");
   assert(!objectSprite({ type: "roomEvent" }).includes(ASSETS.altar), "room events should use a distinct CSS sprite instead of reusing the altar image");
   const downgrade = { id: "bad", kind: "equip", name: "Bad Sword", slot: "weapon", quality: "普通", stats: { atk: 1 }, runeSlots: 0, runes: [], level: 0 };
   const worseCompare = equipmentCompareText(downgrade, "inline-equipment-compare");

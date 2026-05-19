@@ -13,6 +13,8 @@ export const ASSETS = {
   forge: "assets/dawngeon/forge-dark.svg",
   shop: "assets/dawngeon/merchant-dark.svg",
   questNpc: "assets/dawngeon/quest-npc-dark.svg",
+  door: "assets/dawngeon/door-dark.png",
+  lockedDoor: "assets/dawngeon/door-locked-dark.png",
   fenceGate: "assets/dawngeon/fence-gate-dark.svg",
   trap: "assets/dawngeon/trap-spikes-dark.svg",
   portal: "assets/dawngeon/portal-dark.svg",

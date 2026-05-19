@@ -127,11 +127,13 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       resolveOutdoorFeatureCrowding(map);
       normalizeRoomDoors(map);
       expandOpenSpace(map, 0.275);
+      smoothOutdoorWallNoise(map);
       rooms = assignRoomLabels(map);
       if (rooms.length < 5) {
         carveFallbackStructuredRooms(map, 5 - rooms.length);
         normalizeRoomDoors(map);
         expandOpenSpace(map, 0.275);
+        smoothOutdoorWallNoise(map);
         rooms = assignRoomLabels(map);
       }
       if (rooms.length < 5) {
@@ -532,19 +534,37 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     let attempts = 0;
     while (floorCount < target && attempts < 240) {
       attempts++;
-      const candidates = interiorCells(map)
-        .filter((cell) => cell.terrain === "wall" && !cell.roomId && !cell.object)
-        .filter((cell) =>
-          cardinalNeighbors(map, cell.x, cell.y).some(
-            (nearby) => nearby.terrain === "floor" && !nearby.roomId
-          )
-        )
-        .filter((cell) => !cardinalNeighbors(map, cell.x, cell.y).some((nearby) => nearby.roomId));
-      if (!candidates.length) break;
-      const cell = choice(candidates);
+      const candidates = outdoorExpansionCandidates(map, true);
+      const fallback = candidates.length ? candidates : outdoorExpansionCandidates(map, false);
+      if (!fallback.length) break;
+      const cell = choice(fallback);
       cell.terrain = "floor";
       floorCount++;
     }
+  }
+
+  function outdoorExpansionCandidates(map, requireSmoothEdge = true) {
+    return interiorCells(map)
+        .filter((cell) => cell.terrain === "wall" && !cell.roomId && !cell.object)
+        .filter((cell) => !cardinalNeighbors(map, cell.x, cell.y).some((nearby) => nearby.roomId))
+        .filter((cell) => outdoorFloorNeighborCount(map, cell) >= (requireSmoothEdge ? 2 : 1));
+  }
+
+  function smoothOutdoorWallNoise(map) {
+    for (let pass = 0; pass < 2; pass++) {
+      const toOpen = interiorCells(map)
+        .filter((cell) => cell.terrain === "wall" && !cell.roomId && !cell.object)
+        .filter((cell) => !cardinalNeighbors(map, cell.x, cell.y).some((nearby) => nearby.roomId))
+        .filter((cell) => outdoorFloorNeighborCount(map, cell) >= 3);
+      if (!toOpen.length) break;
+      for (const cell of toOpen) cell.terrain = "floor";
+    }
+  }
+
+  function outdoorFloorNeighborCount(map, cell) {
+    return cardinalNeighbors(map, cell.x, cell.y).filter(
+      (nearby) => nearby.terrain === "floor" && !nearby.roomId
+    ).length;
   }
 
   // 为所有房间统计可通行格子数量，并生成展示用房间名。

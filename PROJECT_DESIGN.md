@@ -394,7 +394,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 | 首局 10 分钟分步目标链：移动、开箱、战斗、装备、接任务 | 已调整 | `src/game/tutorial/tutorial.ts` 定义目标链；`runtime.ts` 初始化；移动、宝箱、战斗胜利、装备和接任务节点会推进教程；`renderRuntime.ts` 在上下文区渲染教程卡片；旧存档加载时补齐教程状态。 |
 | 任务与房间事件模板扩展，增加 6 到 10 个分支事件 | 已调整 | `src/game/events/roomEvents.ts` 定义 6 个房间事件；`floorRuntime.ts` 投放事件；`interactionRuntime.ts` 弹出事件选择并结算奖励/风险；测试覆盖事件池数量与结算。 |
 | 66 层纵深需要更多主题敌人与局部机制 | 已调整 | `floorRuntime.ts` 已按主题提供多段敌人池、主题元素弱点和敌人技能；中后期敌人原型随楼层主题变化。后续仍可继续补小首领和专属房间机制。 |
-| 叙事需要持续关系与分支后果 | 部分调整 | 已有章节、残页、救援和多任务状态；尚未形成常驻 NPC 关系线或选择影响后续奖励/剧情的长期系统。 |
+| 叙事需要持续关系与分支后果 | 已调整 | 新增 `state.narrative` 记录关系、旗标和事件选择；房间事件选项会改变巡夜人、商队、被困者和符文回声关系；任务弹窗展示关系状态，任务奖励会受相关关系影响并继续推进关系。 |
 | 强化战斗反馈：命中冲击、敌我状态、Buff/Debuff 时间线、关键音效层次 | 已调整 | `combatRuntime.ts` 写入 battle FX 与敌方锁定阶段；`renderRuntime.ts` 展示战斗回合横幅、状态标签和飘字；`styles.css` 提供命中震动、元素 FX 和回合状态样式。 |
 | `render()` 直接保存改为脏标记 + 1 到 2 秒防抖保存 | 已调整 | `runtime.ts` 提供 `markAutosaveDirty()`，`renderRuntime.ts` 在完整渲染后标脏并防抖调用 `saveGame(false)`；楼层缓存保存前压缩到 12 层。 |
 | 跨局元进度、图鉴、永久 relic、职业挑战和主题 modifier | 未调整 | 当前仍以单局成长和多存档为主，尚未加入跨局永久进度。 |

@@ -1,8 +1,11 @@
 import type { GameState, Item } from "../types";
 
 export type RoomEventChoice = {
+  id: string;
   text: string;
   desc: string;
+  relation?: { id: "wardens" | "merchants" | "survivors" | "runebound"; delta: number };
+  flag?: string;
   canChoose?: (ctx: RoomEventContext) => boolean;
   apply: (ctx: RoomEventContext) => RoomEventResult;
 };
@@ -57,8 +60,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 2,
     choices: [
       {
+        id: "blood_for_rune",
         text: "献出生命",
         desc: "损失少量生命，换取一枚随机符文。",
+        relation: { id: "runebound", delta: 2 },
+        flag: "altar_blood_pact",
         canChoose: ({ state }) => (state.hp || 0) > Math.ceil((state.maxHp || 1) * 0.18),
         apply: ({ state, randomRune }) => {
           const cost = Math.max(3, Math.ceil((state.maxHp || 1) * 0.15));
@@ -73,8 +79,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "salvage_altar_dust",
         text: "刮取粉尘",
         desc: "不冒险，只收集少量魔尘和金币。",
+        relation: { id: "wardens", delta: 1 },
+        flag: "altar_salvaged",
         apply: ({ state, scaledReward }) => {
           const gold = scaledReward(8 + (state.floor || 1) * 2);
           state.materials = state.materials || {};
@@ -97,8 +106,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 3,
     choices: [
       {
+        id: "spend_key_for_cache",
         text: "用钥匙开启",
         desc: "消耗一把符文钥匙，获得一件装备。",
+        relation: { id: "merchants", delta: 2 },
+        flag: "cache_opened_cleanly",
         canChoose: ({ state }) => (state.keys || 0) > 0,
         apply: ({ state, randomEquipment }) => {
           const loot = randomEquipment();
@@ -112,8 +124,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "force_cache",
         text: "强行撬开",
         desc: "受到机关伤害，但能拿到金币和材料。",
+        relation: { id: "merchants", delta: -1 },
+        flag: "cache_forced",
         apply: ({ state, scaledReward }) => {
           const damage = 6 + Math.ceil((state.floor || 1) * 0.8);
           const gold = scaledReward(12 + (state.floor || 1) * 3);
@@ -138,8 +153,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 4,
     choices: [
       {
+        id: "sort_lost_pack",
         text: "整理补给",
         desc: "获得金币，并恢复少量生命和法力。",
+        relation: { id: "survivors", delta: 1 },
+        flag: "lost_pack_sorted",
         apply: ({ state, scaledReward }) => {
           const gold = scaledReward(10 + (state.floor || 1) * 2);
           const hp = 8 + Math.ceil((state.floor || 1) * 1.2);
@@ -154,8 +172,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "strip_lost_pack",
         text: "拆下扣环",
         desc: "获得魔尘和强化石。",
+        relation: { id: "survivors", delta: -1 },
+        flag: "lost_pack_stripped",
         apply: ({ state }) => {
           state.materials = state.materials || {};
           state.materials["魔尘"] = (state.materials["魔尘"] || 0) + 1;
@@ -177,8 +198,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 5,
     choices: [
       {
+        id: "stabilize_rune",
         text: "用魔尘稳定",
         desc: "消耗魔尘，获得技能尘和随机符文。",
+        relation: { id: "runebound", delta: 2 },
+        flag: "rune_stabilized",
         canChoose: ({ state }) => (state.materials?.["魔尘"] || 0) > 0,
         apply: ({ state, randomRune }) => {
           const rune = randomRune();
@@ -194,8 +218,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "grab_rune",
         text: "强行抓取",
         desc: "受到法力灼伤，获得技能尘。",
+        relation: { id: "runebound", delta: -1 },
+        flag: "rune_forced",
         apply: ({ state }) => {
           const damage = 5 + Math.ceil((state.floor || 1) * 0.7);
           state.hp = Math.max(1, (state.hp || 1) - damage);
@@ -217,8 +244,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 6,
     choices: [
       {
+        id: "forge_universal_key",
         text: "补上强化石",
         desc: "消耗强化石和金币，铸成一把万能钥匙。",
+        relation: { id: "wardens", delta: 1 },
+        flag: "key_mold_forged",
         canChoose: ({ state }) => (state.materials?.["强化石"] || 0) > 0 && (state.gold || 0) >= 18,
         apply: ({ state }) => {
           state.materials = state.materials || {};
@@ -232,8 +262,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "melt_key_mold",
         text: "熔掉残料",
         desc: "放弃钥匙，换取金币和魔尘。",
+        relation: { id: "merchants", delta: 1 },
+        flag: "key_mold_melted",
         apply: ({ state, scaledReward }) => {
           const gold = scaledReward(16 + (state.floor || 1) * 2);
           state.gold = (state.gold || 0) + gold;
@@ -256,8 +289,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
     minFloor: 8,
     choices: [
       {
+        id: "listen_echo",
         text: "聆听回声",
         desc: "恢复法力并获得技能尘。",
+        relation: { id: "runebound", delta: 1 },
+        flag: "echo_listened",
         apply: ({ state }) => {
           const mp = 8 + Math.ceil((state.floor || 1) * 0.9);
           state.mp = Math.min(state.maxMp || state.mp || 0, (state.mp || 0) + mp);
@@ -269,8 +305,11 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         }
       },
       {
+        id: "break_echo_shrine",
         text: "打碎神龛",
         desc: "承受反噬，获得装备。",
+        relation: { id: "runebound", delta: -2 },
+        flag: "echo_shrine_broken",
         apply: ({ state, randomEquipment }) => {
           const damage = 8 + Math.ceil((state.floor || 1) * 0.9);
           const loot = randomEquipment();

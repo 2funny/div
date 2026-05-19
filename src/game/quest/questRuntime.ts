@@ -1,4 +1,5 @@
 import { advanceTutorial } from "../tutorial/tutorial";
+import { adjustRelation, relationLabel, relationRewardBonus } from "./narrative";
 import { QUEST_DEFS } from "./quests";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
@@ -95,7 +96,14 @@ export function createQuestRuntime(ctx) {
   function questRewardGold(def, floor = state.floor) {
     const base = typeof def.rewardGold === "function" ? def.rewardGold(floor) : def.rewardGold || 0;
     const multiplier = floor === state.floor ? floorEffectReward() : 1;
-    return Math.max(0, Math.round(base * multiplier));
+    const relationMultiplier = 1 + relationRewardBonus(state, relationForQuest(def));
+    return Math.max(0, Math.round(base * multiplier * relationMultiplier));
+  }
+
+  function relationForQuest(def) {
+    if (def.id === "merchantRoute" || def.giver === "shop") return "merchants";
+    if (def.id === "rescueRoom") return "survivors";
+    return "wardens";
   }
 
   function floorEffectReward() {
@@ -167,6 +175,7 @@ export function createQuestRuntime(ctx) {
     const remaining = Math.max(0, def.target - progress.kills);
     const location = questLocationText(progress);
     const rewardGold = questRewardGold(def, progress.floor);
+    const relationText = relationLabel(state, relationForQuest(def));
     const rewardParts = [
       def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
       def.rewardDoorKey ? `${def.doorKeyName || progress.doorKeyName || "房门钥匙"} +1` : "",
@@ -179,6 +188,7 @@ export function createQuestRuntime(ctx) {
     <div class="quest-panel">
       <b>${def.giverName}</b>
       <p>${def.desc}</p>
+      <div class="event-tags"><span>${relationText}</span></div>
       <small>目标：${location} · 进度：${progress.kills}/${def.target}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
       <div class="quest-reward">${rewardParts}</div>
     </div>
@@ -234,6 +244,8 @@ export function createQuestRuntime(ctx) {
     if (!def || !quest || !quest.completed || quest.claimed) return;
     const rewardGold = questRewardGold(def, quest.floor);
     quest.claimed = true;
+    const relationId = relationForQuest(def);
+    adjustRelation(state, relationId, def.id === "rescueRoom" ? 2 : 1);
     state.keys = (state.keys || 0) + (def.rewardKeys || 0);
     if (def.rewardDoorKey && quest.doorKeyId) {
       state.doorKeys = state.doorKeys || {};
@@ -258,7 +270,7 @@ export function createQuestRuntime(ctx) {
         def.rewardPotion ? "小型生命药水 +1" : ""
       ]
         .filter(Boolean)
-        .join("<br>")}</p>`,
+        .join("<br>")}</p><p>${relationLabel(state, relationId)}。</p>`,
       "收下"
     );
     playSound("quest");
@@ -287,6 +299,7 @@ export function createQuestRuntime(ctx) {
     }
     quest.rescued = true;
     quest.completed = true;
+    adjustRelation(state, "survivors", 2);
     log(`${name}已经安全，回到${quest.giverName || "救援斥候卡尔"}处领取报酬。`);
     playSound("quest");
     showEvent("救援完成", `<p>${name}已经安全。回到救援斥候卡尔处领取报酬。</p>`, "继续");

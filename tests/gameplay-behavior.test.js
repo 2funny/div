@@ -454,8 +454,8 @@ vm.runInContext(
 
   state.map.rooms = [{ id: "room-8-1", name: "12号房" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12", "room doors should expose only the compact room number");
-  assert.strictEqual(roomDoorLabel({ terrain: "floor", roomId: "room-8-1" }), "", "open room entrances should not render as doors");
-  assert(tileLabel({ seen: true, terrain: "floor", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "12号房" } }).includes("未上锁入口"), "unlocked room entrance labels should explain that the tile is passable");
+  assert.strictEqual(roomDoorLabel({ terrain: "floor", roomId: "room-8-1" }), "", "unlocked room doors should not add a compact room-number badge");
+  assert(tileLabel({ seen: true, terrain: "floor", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "12号房" } }).includes("未上锁入口"), "unlocked room door labels should remain available for accessibility");
   state.map.rooms = [{ id: "room-8-2", name: "13号房", threat: "danger" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-2" }), "13", "room doors should not show suffixes or threat markers beside the room number");
 
@@ -842,7 +842,34 @@ vm.runInContext(
   modalState().actions.find((action) => action.text.includes("刮取")).action();
   assert.strictEqual(roomEventCell.object, null, "resolved room events should be consumed");
   assert.strictEqual(state.materials["魔尘"], 1, "room event rewards should apply through the event definition");
+  assert.strictEqual(state.narrative.relations.wardens, 1, "room event choices should leave persistent relationship changes");
+  assert.strictEqual(state.narrative.flags.altar_salvaged, true, "room event choices should set persistent narrative flags");
+  assert.strictEqual(state.narrative.eventChoices.cracked_altar, "salvage_altar_dust", "room event choices should be recorded for later consequences");
   assert(roomEventsForFloor(8).length >= 6, "room event pools should have enough varied mid-run events");
+
+  state = {
+    floor: 4,
+    gold: 0,
+    keys: 0,
+    inventory: [],
+    quests: [{
+      id: "wardenErrand",
+      giver: "questNpc",
+      floor: 4,
+      targetFloor: 4,
+      kills: 2,
+      target: 2,
+      accepted: true,
+      completed: true,
+      claimed: false
+    }],
+    narrative: { relations: { wardens: 6 }, flags: {}, eventChoices: {} },
+    log: []
+  };
+  claimQuestReward("wardenErrand");
+  assert.strictEqual(state.gold, 31, "trusted quest givers should pay a relationship bonus");
+  assert.strictEqual(state.narrative.relations.wardens, 7, "claiming a quest should strengthen the related long-term relationship");
+  assert(modalState().body.includes("巡夜人信赖"), "quest reward modal should surface relationship consequences");
 
   state = {
     floor: 1,
@@ -867,6 +894,27 @@ vm.runInContext(
   assert(waitingAfterPlayerAction.includes("battle-turn-banner windup enemy"), "battle command panel should switch to the enemy windup after player damage");
   assert(waitingAfterPlayerAction.includes("敌方锁定"), "battle command panel should show a useful enemy intent state");
   assert(waitingAfterPlayerAction.includes("disabled title="), "battle actions should be disabled right after the player action ends");
+
+  state = {
+    floor: 1,
+    classId: "warrior",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 1, mag: 0, def: 0, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    currentEnemy: { type: "monster", name: "Skill Dummy", hp: 40, maxHp: 40, atk: 12, def: 0, skills: [{ id: "slam", name: "重击", type: "damage", power: 1, chance: 1 }] },
+    log: []
+  };
+  Math.random = () => 0.99;
+  enemyTurn(state.currentEnemy);
+  Math.random = randomBeforeCombatRules;
+  const enemyActionFeed = renderBattleCommandPanel();
+  assert(enemyActionFeed.includes("battle-action-feed skill"), "battle command panel should include a recent enemy action feed");
+  assert(enemyActionFeed.includes("Skill Dummy使用重击"), "enemy action feed should show the skill the enemy used");
+  assert(enemyActionFeed.includes("造成"), "enemy action feed should show the result of the enemy action");
 
   const tutorialMap = Array.from({ length: 5 }, (_, y) => Array.from({ length: 5 }, (_, x) => ({
     x,

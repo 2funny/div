@@ -36,7 +36,7 @@ import {
   writeSaveIndex
 } from "./save/save";
 import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combat/combatFx";
-import { discoverLorePage, ensureLoreState, unlockLoreChaptersForFloor } from "./quest/lore";
+import { discoverLorePage, ensureLoreState, ensureNarrativeState, unlockLoreChaptersForFloor } from "./quest";
 import {
   emptyEquipment,
   item,
@@ -93,7 +93,8 @@ const battleState = {
   },
   phase: "idle",
   message: "",
-  actor: ""
+  actor: "",
+  actionFeed: null
 };
 
 const uiState = {
@@ -192,6 +193,7 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     quest: null,
     quests: [],
     lore: { chapters: [], pages: [] },
+    narrative: { relations: {}, flags: {}, eventChoices: {} },
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     skillBranches: {},
     skillCooldowns: {},
@@ -1232,6 +1234,7 @@ const runtimeApi = {
   canUnequipSlot,
   cellsWithin,
   clickTile,
+  claimQuestReward,
   closeModal,
   completeStairSeal,
   confirmAddStat,
@@ -1258,6 +1261,7 @@ const runtimeApi = {
   emptyEquipment,
   enhance,
   ensureLoreState,
+  ensureNarrativeState,
   enterBattle,
   enterFloor,
   enemyAffixText,
@@ -1401,6 +1405,7 @@ export {
   canUnequipSlot,
   cellsWithin,
   clickTile,
+  claimQuestReward,
   closeModal,
   completeStairSeal,
   confirmAddStat,
@@ -1427,6 +1432,7 @@ export {
   emptyEquipment,
   enhance,
   ensureLoreState,
+  ensureNarrativeState,
   enterBattle,
   enterFloor,
   enemyAffixText,

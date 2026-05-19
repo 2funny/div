@@ -351,6 +351,7 @@ export function createRenderRuntime(ctx) {
         const eq = state.equipment[slot];
         return `<button class="gear-slot gear-${cls} ${eq ? "equipped" : ""}" type="button" onclick="showEquipmentSlot('${slot}')" title="${eq ? eq.name : SLOT_NAMES[slot]}">
         <span>${SLOT_NAMES[slot]}</span>
+        <b>${eq ? escapeHtml(eq.name) : "未装备"}</b>
         <small>${eq ? `+${eq.level}` : "空"}</small>
       </button>`;
       })
@@ -421,11 +422,12 @@ export function createRenderRuntime(ctx) {
         const roomLabel = roomDoorLabel(cell);
         const roomBadge = roomLabel ? `<span class="room-label">${roomLabel}</span>` : "";
         const label = tileLabel(cell, isPlayer);
+        const isPassiveRoomEntrance = cell.object?.type === "roomEntrance";
         const showHint =
           isPlayer ||
-          showObject ||
+          (showObject && !isPassiveRoomEntrance) ||
           ["wall", "door", "fence", "lava"].includes(cell.terrain) ||
-          roomLabel;
+          (roomLabel && !isPassiveRoomEntrance);
         const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
         const title = "";
         const flags = [
@@ -512,8 +514,9 @@ export function createRenderRuntime(ctx) {
           inView ? "in-view" : "",
           isPlayer ? "mini-player" : ""
         ].join(" ");
+        const title = cell.object?.type === "roomEntrance" ? "" : ` title="${tileLabel(cell, isPlayer)}"`;
         cells.push(
-          `<button class="${classes}" type="button" title="${tileLabel(cell, isPlayer)}" onclick="selectMinimapTile(${cell.x},${cell.y})">${marker}</button>`
+          `<button class="${classes}" type="button"${title} onclick="selectMinimapTile(${cell.x},${cell.y})">${marker}</button>`
         );
       }
     }
@@ -595,8 +598,8 @@ export function createRenderRuntime(ctx) {
       shop: { cls: "merchant", src: ASSETS.shop, alt: "商人" },
       questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
       rescueNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "被困者" },
-      lockedDoor: { cls: "locked-door", src: null, alt: "上锁房门" },
-      roomEntrance: { cls: "room-entrance", src: null, alt: "房间入口" },
+      lockedDoor: { cls: "locked-door", src: ASSETS.lockedDoor, alt: "上锁房门" },
+      roomEntrance: { cls: "door", src: ASSETS.door, alt: "房门" },
       fenceGate: { cls: "fence-gate", src: ASSETS.fenceGate, alt: "门栅" },
       trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
       portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
@@ -715,6 +718,7 @@ export function createRenderRuntime(ctx) {
           <i class="enemy-step">敌</i>
         </div>
       </div>
+      ${battleActionFeedMarkup()}
       <div class="battle-command-layout">
         <div class="battle-basic-actions battle-command-section">
           <div class="battle-panel-title">
@@ -832,6 +836,37 @@ export function createRenderRuntime(ctx) {
       disabledTitle: "",
       shortHint: ""
     };
+  }
+
+  function battleActionFeedMarkup() {
+    const feed = battle.actionFeed;
+    if (!feed) {
+      return `
+      <div class="battle-action-feed idle">
+        <i>战</i>
+        <div><b>等待交锋</b><span>敌人的关键行动会显示在这里。</span></div>
+      </div>
+    `;
+    }
+    const meta = feed.meta ? `<em>${escapeHtml(feed.meta)}</em>` : "";
+    return `
+      <div class="battle-action-feed ${escapeHtml(feed.kind || "info")}">
+        <i>${battleFeedIcon(feed.kind)}</i>
+        <div><b>${escapeHtml(feed.title || "战斗播报")}</b><span>${escapeHtml(feed.detail || "")}</span></div>
+        ${meta}
+      </div>
+    `;
+  }
+
+  function battleFeedIcon(kind) {
+    const icons = {
+      hit: "伤",
+      skill: "技",
+      shield: "盾",
+      heal: "愈",
+      evade: "闪"
+    };
+    return icons[kind] || "战";
   }
 
   function scheduleBattleUnlockRender() {
@@ -963,8 +998,8 @@ export function createRenderRuntime(ctx) {
       roomEvent: ["room-event", null, "探索事件"],
       questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
       rescueNpc: ["quest-npc", ASSETS.questNpc, "被困者"],
-      lockedDoor: ["locked-door", null, "上锁房门"],
-      roomEntrance: ["room-entrance", null, "房间入口"],
+      lockedDoor: ["locked-door", ASSETS.lockedDoor, "上锁房门"],
+      roomEntrance: ["room-entrance", ASSETS.door, "房门"],
       fenceGate: ["fence-gate", ASSETS.fenceGate, "门栅"],
       trap: ["trap", ASSETS.trap, "陷阱"],
       portal: ["portal", ASSETS.portal, "传送门"],
@@ -1004,7 +1039,6 @@ export function createRenderRuntime(ctx) {
       questNpc: "托",
       rescueNpc: "救",
       lockedDoor: "锁",
-      roomEntrance: "入",
       fenceGate: "栅",
       trap: "陷",
       portal: "门",
