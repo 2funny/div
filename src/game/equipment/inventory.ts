@@ -43,7 +43,8 @@ export function starterEquipment(classId: string): EquipmentSet {
 }
 
 export function starterInventory(classId: string): Item[] {
-  return Object.values(starterEquipment(classId)).filter(Boolean) as Item[];
+  void classId;
+  return [potion("小型生命药水", "hp", 18), potion("小型法力药水", "mp", 12)];
 }
 
 export {

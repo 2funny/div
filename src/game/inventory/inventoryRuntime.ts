@@ -3,6 +3,7 @@ import { equipmentRestrictionText, isWeaponUsableByClass } from "../equipment/eq
 import { itemScore } from "../equipment/equipmentScoring";
 import { cardinalNeighbors, cellsWithin, distance } from "../floor/mapGeometry";
 import { random } from "../random";
+import { advanceTutorial } from "../tutorial/tutorial";
 import type { GameMap, GameState, StatKey } from "../types";
 
 type StatDraft = {
@@ -164,6 +165,7 @@ export function createInventoryRuntime(ctx) {
     state.inventory.splice(index, 1);
     if (old) state.inventory.push(old);
     adjustVitalsForMaxChange(beforeHpMax, beforeMpMax);
+    advanceTutorial(state, "equip");
     log(`装备了${entry.name}。`);
     render();
   }
@@ -615,6 +617,7 @@ export function createInventoryRuntime(ctx) {
 
   // 打开商人主弹窗，商人既能交易、收购装备，也可能提供任务。
   function openMerchant() {
+    const merchant = currentMerchant();
     const hasTask = questDefinitionsForGiver("shop").length > 0;
     const actions = [
       { text: "打开商店", action: openMerchantShop },
@@ -703,21 +706,24 @@ export function createInventoryRuntime(ctx) {
   }
 
   function currentMerchant() {
+    return currentMerchantCell()?.object || null;
+  }
+
+  function currentMerchantCell() {
     if (!state?.map?.cells || !state.player) return null;
     const here = state.map.cells[state.player.y]?.[state.player.x];
-    if (here?.object?.type === "shop") return here.object;
+    if (here?.object?.type === "shop") return here;
     return (
       cardinalNeighbors(state.map.cells, state.player.x, state.player.y).find(
         (cell) => cell.object?.type === "shop"
-      )?.object || null
+      ) || null
     );
   }
 
   function merchantSellsUniversalKey(merchant = currentMerchant()) {
     if (!merchant) return false;
     if (merchant.sellsUniversalKey === undefined) {
-      merchant.sellsUniversalKey =
-        random() < Math.min(0.48, 0.2 + state.floor * 0.018);
+      merchant.sellsUniversalKey = random() < Math.min(0.48, 0.2 + state.floor * 0.018);
     }
     return !!merchant.sellsUniversalKey;
   }

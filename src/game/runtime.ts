@@ -21,6 +21,7 @@ import {
   WEAPON_TYPES,
   randomWeaponTypeForClass,
   weaponPrimaryStat,
+  weaponPrimaryStats,
   weaponTypeName
 } from "./equipment/equipmentRules";
 import { equipmentName } from "./equipment/equipmentNames";
@@ -61,7 +62,9 @@ import { createInventoryRuntime } from "./inventory/inventoryRuntime";
 import { createSaveRuntime } from "./save/saveRuntime";
 import { createQuestRuntime } from "./quest/questRuntime";
 import { createInteractionRuntime } from "./interaction/interactionRuntime";
+import { createTutorialState } from "./tutorial/tutorial";
 import type { CellObject, GameState, Item, Stats } from "./types";
+export { roomEventsForFloor, roomEventMetaText } from "./events/roomEvents";
 
 let state: GameState | null = null;
 let activeTab = "inventory";
@@ -72,6 +75,8 @@ let statDraft = null;
 let battleInputLockedUntil = 0;
 let currentSaveSlot = localStorage.getItem(`${SAVE_KEY}-current`) || "slot-1";
 let pendingSaveSlot = currentSaveSlot;
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autosaveDirty = false;
 
 const $ = requiredById;
 const mutableElementIds = () => [...ELEMENT_IDS];
@@ -190,19 +195,16 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     skillBranches: {},
     skillCooldowns: {},
-    inventory: [
-      potion("小型生命药水", "hp", 18),
-      potion("小型法力药水", "mp", 12),
-      ...starterInventory(classId)
-    ],
+    inventory: starterInventory(classId),
     materials: { 强化石: 1, 魔尘: 0 },
     runes: { 火焰1: 1, 守护1: 1 },
-    equipment: emptyEquipment(),
+    equipment: starterEquipment(classId),
     floorStates: {},
     map: null,
     player: { x: 1, y: 1 },
     facing: "down",
     currentEnemy: null,
+    tutorial: createTutorialState(),
     log: []
   };
   state.hp = effectiveMaxHp();
@@ -282,19 +284,8 @@ function randomEquipment() {
   const slot = choice(SLOTS);
   const quality = qualityRoll();
   const weaponType = slot === "weapon" ? randomWeaponTypeForClass(state.classId || "warrior") : "";
-  const main =
-    slot === "weapon"
-      ? weaponPrimaryStat(weaponType)
-      : slot === "armor"
-        ? "def"
-        : slot === "boots"
-          ? "spd"
-          : slot === "ring"
-            ? "luk"
-            : "res";
   const bonus = qualityBonus(quality) + Math.floor(state.floor / 4);
-  const stats = { [main]: bonus };
-  if (slot === "armor") stats.hp = 4 + state.floor;
+  const stats = equipmentStatsForDrop(slot, bonus, weaponType);
   const equipment = item(
     equipmentName(slot, quality, weaponType),
     slot,
@@ -317,6 +308,30 @@ function randomEquipment() {
     equipment.name = `${elementName(resistance)}抗${equipment.name}`;
   }
   return equipment;
+}
+
+function equipmentStatsForDrop(slot, bonus, weaponType = "") {
+  if (slot === "weapon") {
+    const stats = {};
+    const primaryStats = weaponPrimaryStats(weaponType);
+    primaryStats.forEach((stat, index) => {
+      const value =
+        stat === "hp"
+          ? 4 + state.floor + bonus * 2
+          : stat === "mp"
+            ? 2 + Math.ceil(state.floor * 0.5) + bonus
+            : index === 0
+              ? bonus
+              : Math.max(1, Math.ceil(bonus * 0.65));
+      stats[stat] = (stats[stat] || 0) + value;
+    });
+    return stats;
+  }
+  const main =
+    slot === "armor" ? "def" : slot === "boots" ? "spd" : slot === "ring" ? "luk" : "res";
+  const stats = { [main]: bonus };
+  if (slot === "armor") stats.hp = 4 + state.floor;
+  return stats;
 }
 
 function weaponElementChance(quality) {
@@ -984,6 +999,19 @@ const {
   updateSaveSlotMeta
 } = saveRuntime;
 
+function markAutosaveDirty() {
+  if (!state) return;
+  autosaveDirty = true;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    if (!state || !autosaveDirty) return;
+    autosaveDirty = false;
+    saveGame(false);
+  }, 1200);
+  (autosaveTimer as { unref?: () => void } | null)?.unref?.();
+}
+
 Object.assign(renderApi, {
   addStat,
   autoBattle,
@@ -1010,6 +1038,7 @@ Object.assign(renderApi, {
   isDefeatedEnemy,
   knownTeleportTargets,
   loadGame,
+  markAutosaveDirty,
   move,
   questLocationText,
   questRewardGold,
@@ -1232,6 +1261,7 @@ const runtimeApi = {
   enterBattle,
   enterFloor,
   enemyAffixText,
+  enemyTurn,
   equipmentCompareText,
   equippedStateBadge,
   equipItem,
@@ -1272,6 +1302,7 @@ const runtimeApi = {
   openStatAllocator,
   placeTreasureEncounters,
   potion,
+  randomEquipment,
   recordQuestKill,
   render,
   renderBattleView,
@@ -1399,6 +1430,7 @@ export {
   enterBattle,
   enterFloor,
   enemyAffixText,
+  enemyTurn,
   equipmentCompareText,
   equippedStateBadge,
   equipItem,
@@ -1437,6 +1469,7 @@ export {
   openStatAllocator,
   placeTreasureEncounters,
   potion,
+  randomEquipment,
   recordQuestKill,
   render,
   renderBattleCommandPanel,
@@ -1493,6 +1526,7 @@ export {
   upgradeSkill,
   useBattlePotion,
   useItem,
+  weaponPrimaryStats,
   validRoomDoor
 };
 

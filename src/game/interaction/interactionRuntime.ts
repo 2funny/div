@@ -2,7 +2,9 @@ import { RUNES, VISION_RADIUS } from "../constants";
 import { cellsWithin, distance } from "../floor/mapGeometry";
 import { choice, rand, random } from "../random";
 import { clearBattleFx } from "../combat/combatFx";
+import { roomEventById, roomEventMetaText } from "../events/roomEvents";
 import { discoverLorePage } from "../quest/lore";
+import { advanceTutorial } from "../tutorial/tutorial";
 
 // 交互运行时负责玩家移动、视野刷新和地图物件触发，不直接生成 UI 标记。
 export function createInteractionRuntime(ctx) {
@@ -85,6 +87,7 @@ export function createInteractionRuntime(ctx) {
     playSound("step");
     ui.selectedTile = null;
     updateVisibility();
+    advanceTutorial(state, "move");
     resolveCell(cell);
     render();
   }
@@ -109,6 +112,8 @@ export function createInteractionRuntime(ctx) {
       triggerTrap(cell);
     } else if (obj.type === "altar") {
       useAltar(cell);
+    } else if (obj.type === "roomEvent") {
+      openRoomEvent(cell);
     } else if (obj.type === "shop") {
       openMerchant();
     } else if (obj.type === "forge") {
@@ -277,6 +282,7 @@ export function createInteractionRuntime(ctx) {
     const lore = discoverChestLore("chest");
     if (lore) message += `<br>发现残页：${lore.title}`;
     cell.object = null;
+    advanceTutorial(state, "loot");
     showEvent("打开宝箱", `<p>${message}</p>`, "收下");
   }
 
@@ -297,6 +303,7 @@ export function createInteractionRuntime(ctx) {
     state.gold += gold;
     const lore = discoverChestLore("lockedChest");
     cell.object = null;
+    advanceTutorial(state, "loot");
     log(`打开上锁宝箱，获得${loot.name}、${rune}符文和 ${gold} 金币。`);
     showEvent(
       "打开上锁宝箱",
@@ -353,6 +360,44 @@ export function createInteractionRuntime(ctx) {
 
   function universalKeyChance() {
     return Math.min(0.18, 0.08 + state.floor * 0.004);
+  }
+
+  function openRoomEvent(cell) {
+    const event = roomEventById(String(cell.object?.eventId || ""));
+    if (!event) {
+      cell.object = null;
+      render();
+      return;
+    }
+    const context = {
+      state,
+      randomEquipment,
+      randomRune: () => `${choice(RUNES)}1`,
+      scaledReward
+    };
+    const choices = event.choices.filter((entry) => !entry.canChoose || entry.canChoose(context));
+    const body = `
+      <div class="quest-panel">
+        <b>${event.title}</b>
+        <div class="event-tags"><span>${roomEventMetaText(event)}</span><span>最早 ${event.minFloor} 层</span></div>
+        <p>${event.summary}</p>
+        <small class="event-choice-summary">${choices.map((entry) => `${entry.text}：${entry.desc}`).join("<br>")}</small>
+      </div>
+    `;
+    showModal(event.title, body, [
+      ...choices.map((entry) => ({
+        text: entry.text,
+        action: () => {
+          const result = entry.apply(context);
+          cell.object = null;
+          log(result.log);
+          playSound("quest");
+          render();
+          showEvent(event.title, result.body, "继续探索");
+        }
+      })),
+      { text: "暂不处理", action: closeModal }
+    ]);
   }
 
   // 使用符文钥匙打开围住宝箱的门栅。

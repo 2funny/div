@@ -1,3 +1,4 @@
+import { advanceTutorial } from "../tutorial/tutorial";
 import { QUEST_DEFS } from "./quests";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
@@ -148,6 +149,7 @@ export function createQuestRuntime(ctx) {
     }
     quest.accepted = true;
     if (id === "wardenErrand") state.quest = quest;
+    advanceTutorial(state, "quest");
     log(`接受任务：${def.title}。`);
     render();
     return quest;

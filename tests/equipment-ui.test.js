@@ -17,6 +17,13 @@ vm.runInContext(
   assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
   assert(CLASSES.warrior.hp < 60 && CLASSES.mage.hp < 40, "classes should start from a low-value baseline");
   assert(CLASSES.warrior.role && CLASSES.mage.primary && CLASSES.ranger.growth?.primary, "classes should expose clear role, primary stat, and growth identity");
+  assert(CLASSES.ranger.passives.some((passive) => passive.id === "ranger_combo"), "ranger combo should be declared as a data-driven passive");
+  renderClassSelect("slot-1");
+  assert(getElement("classSelect").innerHTML.includes("游击连击"), "class selection should show passive names");
+  assert(getElement("classSelect").innerHTML.includes("连击/速度"), "class selection should show passive tags");
+  assert.deepStrictEqual(weaponPrimaryStats("dagger"), ["atk", "spd"], "ranger daggers should drop attack plus speed");
+  assert.deepStrictEqual(weaponPrimaryStats("staff"), ["mag", "mp"], "mage staffs should drop magic plus mp");
+  assert.deepStrictEqual(weaponPrimaryStats("sword"), ["atk", "def"], "warrior swords should drop attack plus defense");
   state = {
     classId: "warrior",
     floor: 1,
@@ -76,6 +83,23 @@ vm.runInContext(
   returnHome(false);
   assert(getElement("classSelect").innerHTML.includes("start-actions"), "return home should work from the save list");
   loadGame("slot-2");
+
+  const randomBeforeEquipmentRules = Math.random;
+  try {
+    state.classId = "ranger";
+    state.floor = 1;
+    const matchedRolls = [0.1, 0.99, 0.5, 0.99, 0.99];
+    Math.random = () => matchedRolls.shift() ?? 0.99;
+    const matchedWeapon = randomEquipment();
+    assert.strictEqual(matchedWeapon.weaponType, "dagger", "70 percent equipment path should prefer class weapon pools");
+    assert(matchedWeapon.stats.atk > 0 && matchedWeapon.stats.spd > 0, "dagger drops should carry both atk and spd");
+    const offClassRolls = [0.8, 0.99, 0.05, 0.99, 0.99];
+    Math.random = () => offClassRolls.shift() ?? 0.99;
+    const offClassWeapon = randomEquipment();
+    assert(!["bow", "crossbow", "dagger"].includes(offClassWeapon.weaponType), "30 percent equipment path should allow non-matching weapons");
+  } finally {
+    Math.random = randomBeforeEquipmentRules;
+  }
 
   const upgrade = { id: "new", kind: "equip", name: "New Sword", slot: "weapon", quality: "优秀", stats: { atk: 8 }, runeSlots: 0, runes: [], level: 0 };
   const compare = equipmentCompareText(upgrade);
@@ -192,6 +216,8 @@ vm.runInContext(
   state.map.cells[2][1].terrain = "door";
   state.map.cells[2][1].roomId = "room-1-0";
   state.map.cells[2][2].roomId = "room-1-0";
+  state.map.cells[1][2].roomId = "room-1-0";
+  state.map.cells[1][2].object = { type: "roomEntrance", roomId: "room-1-0", roomName: "1号房" };
   state.map.cells[2][3].terrain = "door";
   state.map.cells[2][3].roomId = "room-1-0";
   state.map.cells[2][3].object = { type: "lockedDoor", keyId: "door-a", keyName: "1号房钥匙", roomName: "1号房" };
@@ -201,6 +227,7 @@ vm.runInContext(
   const miniMarkup = getElement("minimap").innerHTML;
   assert(miniMarkup.includes("mini-room-label"), "minimap should stamp explored rooms with compact room numbers");
   assert(miniMarkup.includes("mini-door"), "minimap should mark normal room doors");
+  assert(miniMarkup.includes("mini-room-entrance"), "minimap should mark unlocked room entrances");
   assert(miniMarkup.includes("mini-locked-door"), "minimap should mark locked room doors");
 
   state.classId = "warrior";
@@ -250,6 +277,8 @@ vm.runInContext(
   assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");
   assert(ASSETS.floor && ASSETS.wall, "floor and wall should have dedicated dungeon texture assets");
   assert.strictEqual(objectSprite({ type: "questNpc" }).includes(ASSETS.questNpc), true, "quest NPC sprite should render its own asset");
+  assert(objectSprite({ type: "roomEntrance" }).includes("room-entrance"), "unlocked room entrances should render as a distinct threshold sprite");
+  assert(!objectSprite({ type: "roomEvent" }).includes(ASSETS.altar), "room events should use a distinct CSS sprite instead of reusing the altar image");
   const downgrade = { id: "bad", kind: "equip", name: "Bad Sword", slot: "weapon", quality: "普通", stats: { atk: 1 }, runeSlots: 0, runes: [], level: 0 };
   const worseCompare = equipmentCompareText(downgrade, "inline-equipment-compare");
   assert(worseCompare.includes("compare-badge compare-badge-down"), "worse equipment should show a persistent red down badge");

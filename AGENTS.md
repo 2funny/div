@@ -41,6 +41,7 @@ Rune Dungeon is a Vite + TypeScript browser RPG. The game is mostly plain DOM, C
 - Escape save/user/state-controlled text with `escapeHtml()` from `src/game/render/html.ts` before placing it in `innerHTML`.
 - `floorStates` is a bounded floor cache, not permanent world history; keep save-size changes deliberate.
 - Save slots currently use `SAVE_SLOT_LIMIT = 8`.
+- New heroes should equip `starterEquipment(classId)` directly; `starterInventory(classId)` is for starting consumables.
 
 ## Combat Rules
 

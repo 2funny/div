@@ -1,16 +1,16 @@
-import type { Item, StatKey } from "../types";
+import type { Item, StatKey, Stats } from "../types";
 import { random } from "../random";
 
 export const WEAPON_TYPES = {
-  sword: { name: "剑", stat: "atk", classes: ["warrior"] },
-  axe: { name: "斧", stat: "atk", classes: ["warrior"] },
-  greatsword: { name: "重剑", stat: "atk", classes: ["warrior"] },
-  staff: { name: "法杖", stat: "mag", classes: ["mage"] },
-  tome: { name: "魔书", stat: "mag", classes: ["mage"] },
-  orb: { name: "法珠", stat: "mag", classes: ["mage"] },
-  bow: { name: "弓", stat: "atk", classes: ["ranger"] },
-  crossbow: { name: "弩", stat: "atk", classes: ["ranger"] },
-  dagger: { name: "短刃", stat: "spd", classes: ["ranger"] }
+  sword: { name: "剑", stat: "atk", stats: ["atk", "def"], classes: ["warrior"] },
+  axe: { name: "斧", stat: "atk", stats: ["atk", "hp"], classes: ["warrior"] },
+  greatsword: { name: "重剑", stat: "atk", stats: ["atk", "def"], classes: ["warrior"] },
+  staff: { name: "法杖", stat: "mag", stats: ["mag", "mp"], classes: ["mage"] },
+  tome: { name: "魔书", stat: "mag", stats: ["mag", "mp"], classes: ["mage"] },
+  orb: { name: "法珠", stat: "mag", stats: ["mag", "res"], classes: ["mage"] },
+  bow: { name: "弓", stat: "atk", stats: ["atk", "spd"], classes: ["ranger"] },
+  crossbow: { name: "弩", stat: "atk", stats: ["atk", "luk"], classes: ["ranger"] },
+  dagger: { name: "短刃", stat: "spd", stats: ["atk", "spd"], classes: ["ranger"] }
 } as const;
 
 export type WeaponType = keyof typeof WEAPON_TYPES;
@@ -33,6 +33,11 @@ export function weaponPrimaryStat(type?: string | null): StatKey {
   ) as StatKey;
 }
 
+export function weaponPrimaryStats(type?: string | null): Array<keyof Stats> {
+  const def = type ? WEAPON_TYPES[type as WeaponType] : null;
+  return ((def?.stats || [def?.stat || "atk"]) as ReadonlyArray<keyof Stats>).filter(Boolean);
+}
+
 export function isWeaponUsableByClass(item?: Item | null, classId?: string | null) {
   if (!item || item.kind !== "equip" || item.slot !== "weapon") return true;
   if (!item.weaponType) return true;
@@ -47,6 +52,7 @@ export function equipmentRestrictionText(item?: Item | null, classId?: string | 
 export function randomWeaponTypeForClass(classId: string, roll = random()) {
   const preferred = CLASS_WEAPON_TYPES[classId] || CLASS_WEAPON_TYPES.warrior;
   const all = Object.keys(WEAPON_TYPES) as WeaponType[];
-  const pool = roll < 0.65 ? preferred : all;
+  const offClass = all.filter((type) => !preferred.includes(type));
+  const pool = roll < 0.7 ? preferred : offClass.length ? offClass : all;
   return pool[Math.floor(random() * pool.length)] || preferred[0];
 }

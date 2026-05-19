@@ -168,7 +168,25 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 门栅：`openFenceGate()`。
 - 楼梯：`nextFloor()` 或 `previousFloor()`。
 
-## 7. 战斗系统
+## 7. 职业差异
+
+职业定义在 `src/game/constants/classes.ts`，职业差异主要来自初始属性、成长曲线、技能组、资源消耗和战斗节奏。职业类只提供配置，不直接计算普通攻击伤害；普通攻击、暴击、防御减伤、元素结算和技能冷却由战斗模块统一处理。
+
+| 职业 | 定位 | 主属性倾向 | 战斗特点 | 策略重点 |
+| --- | --- | --- | --- | --- |
+| 剑士 | 前排压制 | 攻击、防御、生命 | 普通攻击稳定，技能偏高额物理伤害、格挡反击和削弱敌人 | 依靠高生命和防御承压，适合稳扎稳打；技能冷却期仍能靠基础攻击维持输出 |
+| 法师 | 元素爆发 | 魔法、抗性、法力 | 技能倍率高，依赖火焰、冰霜、护盾等效果处理战斗 | 管理 MP 和技能冷却，利用元素克制打爆发；生存依赖护盾、抗性和战斗节奏 |
+| 游侠 | 高速游击 | 速度、幸运、攻击 | 普通攻击可按速度触发额外普通攻击，技能可触发追击或状态强化 | 依靠先手、闪避、连击和暴击获得主动权；速度提高机会而不是直接提高普通攻击伤害 |
+
+职业设计边界：
+
+- 剑士的优势是容错、承伤和稳定物理输出，不应通过过高爆发覆盖法师定位。
+- 法师的优势是元素技能和爆发窗口，需要明显依赖 MP 与冷却管理。
+- 游侠的优势是行动顺序、闪避、普通攻击连击和技能附加效果，不通过 `spd` 直接增加普通攻击伤害。
+- 幸运只影响暴击率，因此游侠的幸运成长体现为更高暴击机会，而不是额外掉落或装备品质收益。
+- 新增职业时，应同时检查 `CLASSES`、初始装备、职业资产、技能 UI、战斗测试和设计文档。
+
+## 8. 战斗系统
 
 战斗逻辑在 `src/game/combat/combatRuntime.ts`，敌人和词缀在 `src/game/combat/enemies.ts`，元素克制在 `src/game/combat/elements.ts`。
 
@@ -182,6 +200,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 暴击与幸运：
 
 - 暴击率：`critRate = 0.06 + luk * 0.008`。
+- 暴击率上限为 `95%`，避免高幸运后变成必定暴击。
 - 暴击倍率：`1.7`。
 - 幸运只影响暴击率，不再影响掉落、商店、装备品质或其他非暴击收益。
 
@@ -190,6 +209,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 决定战斗先手。
 - 提高普通攻击连击概率。
 - 提高闪避概率：`dodge = baseDodge + spd * 0.005`。
+- 闪避率上限为 `95%`，避免高速度后变成必定闪避。
 - 高速度可以提高技能附加效果或追击概率，但不增加普通攻击伤害。
 
 技能机制：
@@ -199,6 +219,15 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 冷却在回合推进中递减，UI 会展示冷却状态并禁用不可用技能。
 - 技能触发连击时只产生额外效果，例如额外普通攻击、元素伤害加成、状态效果强化；不重复施放同一个技能。
 - 自动战斗会避开 MP 不足或冷却中的技能。
+
+持续状态：
+
+- 灼烧和中毒不是一次性伤害，而是直接伤害后附加持续状态。
+- 命中时先结算技能本体伤害，再给敌人写入 `statuses.burn` 或 `statuses.poison`。
+- 持续状态默认结算 `3` 次，当前常量为 `DAMAGE_STATUS_TURNS = 3`。
+- 玩家行动结束时会立刻结算一次敌方持续状态伤害，因此刚施加后剩余回合会从 `3` 变为 `2`。
+- 后续每次玩家行动结束继续结算，直到回合归零或敌人死亡。
+- 再次施加同类状态会刷新该状态的伤害和剩余结算次数。
 
 游侠机制：
 
@@ -214,7 +243,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - `maybeApplyEnemyAffix()` 添加词缀。
 - 敌人拥有速度属性，用于先手和闪避相关计算。
 
-## 8. 装备、背包与成长
+## 9. 装备、背包与成长
 
 背包和成长逻辑在 `src/game/inventory/inventoryRuntime.ts`，基础物品工厂在 `src/game/equipment/inventory.ts`。
 
@@ -230,7 +259,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 装备相关入口：
 
 - 装备工厂：`item()`、`potion()`、`teleportBeacon()`。
-- 初始装备：`starterEquipment()`、`starterInventory()`。
+- 初始装备：`starterEquipment()` 直接安装到角色装备栏，`starterInventory()` 只提供初始消耗品。
 - 装备评分：`itemScore()`、`equipmentCompareText()`。
 - 武器规则：`src/game/equipment/equipmentRules.ts`。
 - 名称字典：`src/game/equipment/equipmentNames.ts`。
@@ -241,7 +270,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 幸运不参与装备品质、商店或掉落概率，除非后续设计明确改回。
 - 新增属性时同步检查 `totals()`、装备评分、UI 文案、存档兼容和测试。
 
-## 9. 任务与传送
+## 10. 任务与传送
 
 任务定义在 `src/game/quest/quests.ts`，运行时逻辑在 `src/game/quest/questRuntime.ts`，剧情文本在 `src/game/quest/lore.ts`。
 
@@ -258,7 +287,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 目标类型包括商人、委托人、被困者和合成台。
 - `knownTeleportTargets()` 收集目标，`landingNear()` 寻找落点，`teleportToTarget()` 消耗信标并移动玩家。
 
-## 10. 渲染与 UI
+## 11. 渲染与 UI
 
 渲染逻辑集中在 `src/game/render/renderRuntime.ts`，入口 `render()` 根据状态显示开始页、地图视图或战斗视图，并在完整渲染后静默保存当前游戏。
 
@@ -285,7 +314,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - 渲染过程中动态创建的元素使用 `document.getElementById()` 或 `byId()`，缺失时由渲染函数创建。
 - 不要假设 render-only 节点已经存在。
 
-## 11. 音频系统
+## 12. 音频系统
 
 音频由 `src/game/audio/audioRuntime.ts`、`audioProfiles.ts` 和 `audioEngine.ts` 组成。
 
@@ -304,7 +333,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - `startDungeonMusic()`。
 - `startBattleMusic()`。
 
-## 12. 测试范围
+## 13. 测试范围
 
 测试入口：
 
@@ -320,7 +349,7 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 - CI 或覆盖率相关修改：`npm run test:coverage`。
 - 大范围跨模块修改：`npm run build`、`npm test`、`npm run test:coverage`。
 
-## 13. 常见修改索引
+## 14. 常见修改索引
 
 | 目标 | 优先查看 |
 | --- | --- |
@@ -349,9 +378,23 @@ CI 当前使用 Node 22，流程为 `npm ci`、`npm run build`、`npm test`、`n
 | 修改音频 | `src/game/audio/audioProfiles.ts`、`audioRuntime.ts`、`audioEngine.ts` |
 | 修改随机性 | `src/game/random.ts` 和对应领域测试 |
 
-## 14. 已知保留项
+## 15. 已知保留项
 
 - License 暂未处理。
 - `renderRuntime.ts` 仍承担较多 UI 拼装职责，后续可按地图、战斗、侧栏继续拆分。
 - 仍有部分 `innerHTML` 拼接，新增可变文本时必须先转义；后续可逐步改成更多 DOM API。
 - 项目已完成 `src/game` 类型化清理，但可以继续收紧外部测试 harness 和浏览器全局 API 类型。
+
+## 16. 参考报告调整对照
+
+基于 `deep-research-report (1).md` 的优先改进表，当前代码侧对照如下：
+
+| 调整项 | 是否调整 | 当前落点 |
+| --- | --- | --- |
+| 首局 10 分钟分步目标链：移动、开箱、战斗、装备、接任务 | 已调整 | `src/game/tutorial/tutorial.ts` 定义目标链；`runtime.ts` 初始化；移动、宝箱、战斗胜利、装备和接任务节点会推进教程；`renderRuntime.ts` 在上下文区渲染教程卡片；旧存档加载时补齐教程状态。 |
+| 任务与房间事件模板扩展，增加 6 到 10 个分支事件 | 已调整 | `src/game/events/roomEvents.ts` 定义 6 个房间事件；`floorRuntime.ts` 投放事件；`interactionRuntime.ts` 弹出事件选择并结算奖励/风险；测试覆盖事件池数量与结算。 |
+| 66 层纵深需要更多主题敌人与局部机制 | 已调整 | `floorRuntime.ts` 已按主题提供多段敌人池、主题元素弱点和敌人技能；中后期敌人原型随楼层主题变化。后续仍可继续补小首领和专属房间机制。 |
+| 叙事需要持续关系与分支后果 | 部分调整 | 已有章节、残页、救援和多任务状态；尚未形成常驻 NPC 关系线或选择影响后续奖励/剧情的长期系统。 |
+| 强化战斗反馈：命中冲击、敌我状态、Buff/Debuff 时间线、关键音效层次 | 已调整 | `combatRuntime.ts` 写入 battle FX 与敌方锁定阶段；`renderRuntime.ts` 展示战斗回合横幅、状态标签和飘字；`styles.css` 提供命中震动、元素 FX 和回合状态样式。 |
+| `render()` 直接保存改为脏标记 + 1 到 2 秒防抖保存 | 已调整 | `runtime.ts` 提供 `markAutosaveDirty()`，`renderRuntime.ts` 在完整渲染后标脏并防抖调用 `saveGame(false)`；楼层缓存保存前压缩到 12 层。 |
+| 跨局元进度、图鉴、永久 relic、职业挑战和主题 modifier | 未调整 | 当前仍以单局成长和多存档为主，尚未加入跨局永久进度。 |

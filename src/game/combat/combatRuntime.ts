@@ -8,17 +8,19 @@ import {
 import { QUEST_DEFS } from "../quest/quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
 import { discoverLorePage } from "../quest/lore";
+import { advanceTutorial } from "../tutorial/tutorial";
 import { choice, rand, random } from "../random";
+import type { DamageStatus } from "../types/combat";
 
 const BASE_DODGE = 0.03;
 const SPEED_DODGE_SCALE = 0.005;
 const EVADE_SKILL_DODGE_BONUS = 0.35;
-const RANGER_COMBO_BASE = 0.08;
-const RANGER_COMBO_SPEED_SCALE = 0.006;
-const RANGER_COMBO_MAX = 0.55;
-const RANGER_SKILL_FOLLOWUP_BASE = 0.06;
-const RANGER_SKILL_FOLLOWUP_SPEED_SCALE = 0.004;
-const RANGER_SKILL_FOLLOWUP_MAX = 0.4;
+const CHANCE_CAP = 0.95;
+const CRIT_BASE = 0.06;
+const CRIT_LUCK_SCALE = 0.008;
+const DAMAGE_STATUS_TURNS = 3;
+const PLAYER_TO_ENEMY_DELAY = 920;
+const ENEMY_TURN_RECOVERY_DELAY = 120;
 
 // 战斗运行时聚合回合制战斗、技能升级、胜负结算和自动战斗策略。
 export function createCombatRuntime(ctx) {
@@ -114,7 +116,12 @@ export function createCombatRuntime(ctx) {
   }
 
   function finishPlayerAction(enemy, immediateEnemyTurn = false) {
-    setBattlePhase("enemy-turn", `${enemy.name}准备反击`, "enemy");
+    if (!applyEnemyStatuses(enemy)) {
+      winBattle(enemy);
+      render();
+      return;
+    }
+    setBattlePhase("enemy-windup", `${enemy.name}锁定了你`, "enemy");
     if (immediateEnemyTurn) {
       enemyTurn(enemy);
       if (state.currentEnemy && state.hp > 0) {
@@ -130,8 +137,8 @@ export function createCombatRuntime(ctx) {
 
   function scheduleEnemyTurn(enemy) {
     if (enemyTurnTimer) clearTimeout(enemyTurnTimer);
-    const delay = 520;
-    battle.inputLockedUntil = Date.now() + delay + 180;
+    const delay = PLAYER_TO_ENEMY_DELAY;
+    battle.inputLockedUntil = Date.now() + delay + ENEMY_TURN_RECOVERY_DELAY;
     enemyTurnTimer = setTimeout(() => {
       enemyTurnTimer = null;
       syncState();
@@ -140,13 +147,13 @@ export function createCombatRuntime(ctx) {
         return;
       }
       resetBattleFx("enemy-turn");
-      setBattlePhase("enemy-turn", `${enemy.name}正在行动`, "enemy");
+      setBattlePhase("enemy-action", `${enemy.name}发动反击`, "enemy");
       enemyTurn(enemy);
       if (state.currentEnemy && state.hp > 0) {
         tickSkillCooldowns();
         setBattlePhase("player-turn", "你的回合", "hero");
       }
-      battle.inputLockedUntil = Date.now() + 220;
+      battle.inputLockedUntil = Date.now() + ENEMY_TURN_RECOVERY_DELAY;
       render();
     }, delay);
   }
@@ -201,7 +208,7 @@ export function createCombatRuntime(ctx) {
       enemy._guard = 0;
     }
     const multiplier = elementMultiplier(element, enemy, state.classId, options);
-    const crit = random() < 0.06 + totals().luk * 0.008;
+    const crit = random() < critChance(totals());
     const damage = Math.max(1, Math.round(amount * multiplier * (crit ? 1.7 : 1)));
     enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
     if (typeof options.onHit === "function") options.onHit({ damage, multiplier, crit });
@@ -226,30 +233,67 @@ export function createCombatRuntime(ctx) {
   }
 
   function shouldTriggerRangerCombo(t) {
-    return state.classId === "ranger" && random() < rangerComboChance(t);
+    return random() < passiveChance("ranger_combo", t);
   }
 
   function rangerComboChance(t) {
-    if (state.classId !== "ranger") return 0;
-    return Math.min(RANGER_COMBO_MAX, RANGER_COMBO_BASE + t.spd * RANGER_COMBO_SPEED_SCALE);
+    return passiveChance("ranger_combo", t);
   }
 
   function shouldTriggerRangerSkillFollowUp(t) {
-    return state.classId === "ranger" && random() < rangerSkillFollowUpChance(t);
+    return random() < passiveChance("ranger_followup", t);
   }
 
   function rangerSkillFollowUpChance(t) {
-    if (state.classId !== "ranger") return 0;
-    return Math.min(
-      RANGER_SKILL_FOLLOWUP_MAX,
-      RANGER_SKILL_FOLLOWUP_BASE + t.spd * RANGER_SKILL_FOLLOWUP_SPEED_SCALE
-    );
+    return passiveChance("ranger_followup", t);
+  }
+
+  function passiveById(id) {
+    return CLASSES[state.classId]?.passives?.find((passive) => passive.id === id) || null;
+  }
+
+  function passiveChance(id, t) {
+    const passive = passiveById(id);
+    if (!passive) return 0;
+    const max = Math.min(CHANCE_CAP, passive.chanceMax ?? CHANCE_CAP);
+    return clampChance((passive.chanceBase || 0) + (t.spd || 0) * (passive.chancePerSpeed || 0), max);
+  }
+
+  function passiveValue(id, fallback = 0) {
+    const passive = passiveById(id);
+    return Number(passive?.value ?? fallback);
+  }
+
+  function critChance(t) {
+    return clampChance(CRIT_BASE + (t.luk || 0) * CRIT_LUCK_SCALE);
+  }
+
+  function dodgeChance(t, bonus = 0) {
+    return clampChance(BASE_DODGE + (t.spd || 0) * SPEED_DODGE_SCALE + bonus);
+  }
+
+  function clampChance(value, max = CHANCE_CAP) {
+    return Math.max(0, Math.min(max, Number(value) || 0));
   }
 
   function skillDamageAmount(skill, t, enemy) {
-    const base = skill.scale === "mag" ? t.mag : t.atk;
-    const mitigation = skill.scale === "mag" ? (enemy.def || 0) * 0.18 : (enemy.def || 0) * 0.3;
-    return Math.max(2, base * skill.power + state.floor - mitigation);
+    const hasMultiScale =
+      skill.atkMultiplier != null ||
+      skill.magMultiplier != null ||
+      skill.hpMultiplier != null ||
+      skill.defMultiplier != null ||
+      skill.baseDamage != null;
+    const baseDamage = Number(skill.baseDamage || 0);
+    const raw = hasMultiScale
+      ? baseDamage +
+        (t.atk || 0) * Number(skill.atkMultiplier || 0) +
+        (t.mag || 0) * Number(skill.magMultiplier || 0) +
+        (state.maxHp || 0) * Number(skill.hpMultiplier || 0) +
+        (t.def || 0) * Number(skill.defMultiplier || 0)
+      : (skill.scale === "mag" ? t.mag : t.atk) * skill.power;
+    const physicalWeight = skill.magMultiplier && !skill.atkMultiplier ? 0.18 : 0.3;
+    const mitigation = (enemy.def || 0) * physicalWeight;
+    return Math.max(2, raw + state.floor - mitigation);
   }
 
   // 执行职业技能效果，例如护盾、中毒、灼烧或连射。
@@ -267,16 +311,17 @@ export function createCombatRuntime(ctx) {
     }
     if (skill.type === "evade") {
       state._evade = true;
-      if (skill.power > 1) state._nextDamageBonus = Math.max(state._nextDamageBonus || 0, skill.power - 1);
+      const damageBonus = evadeDamageBonus(skill);
+      if (damageBonus > 0) state._nextDamageBonus = Math.max(state._nextDamageBonus || 0, damageBonus);
       setBattleFx("hero", { type: "evade", text: "闪避", label: skill.name });
       setBattleFx("center", { type: "evade", text: "拉开距离" });
-      return "你拉开距离，下回合更容易闪避。";
+      return `你拉开距离，下回合更容易闪避${damageBonus > 0 ? `，下次伤害提高 ${Math.round(damageBonus * 100)}%` : ""}。`;
     }
     if (skill.type === "double") {
       const element = currentWeaponElement();
       let text = dealDamage(enemy, skillDamageAmount(skill, t, enemy), skill.name, element);
       if (enemy.hp > 0 && shouldTriggerRangerSkillFollowUp(t)) {
-        text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * 0.65, "追击", element)}`;
+        text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * passiveValue("ranger_followup", 0.65), "追击", element)}`;
       }
       return text;
     }
@@ -285,12 +330,12 @@ export function createCombatRuntime(ctx) {
       pierceResist: skill.pierceResist,
       onHit: () => {
         if (["burn", "poison"].includes(skill.type)) {
-          const extra = 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
-          enemy.hp = Math.max(0, Math.round(enemy.hp - extra));
+          const extra = statusDamageAmount(skill);
+          applyDamageStatus(enemy, skill, extra);
           setBattleFx("enemy", {
             type: skill.type,
             element: skill.element,
-            text: `-${extra}`,
+            text: `${extra}x${DAMAGE_STATUS_TURNS}`,
             label: skill.name
           });
         }
@@ -299,9 +344,56 @@ export function createCombatRuntime(ctx) {
       }
     });
     if (enemy.hp > 0 && shouldTriggerRangerSkillFollowUp(t)) {
-      text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * 0.65, "追击", element)}`;
+      text += ` ${dealDamage(enemy, basicAttackDamage(t, enemy) * passiveValue("ranger_followup", 0.65), "追击", element)}`;
     }
     return text;
+  }
+
+  function statusDamageAmount(skill) {
+    return 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
+  }
+
+  function applyDamageStatus(enemy, skill, damage) {
+    enemy.statuses = enemy.statuses || {};
+    enemy.statuses[skill.type] = {
+      type: skill.type,
+      name: skill.type === "burn" ? "灼烧" : "中毒",
+      damage,
+      turns: DAMAGE_STATUS_TURNS,
+      element: skill.element
+    };
+  }
+
+  function applyEnemyStatuses(enemy) {
+    const statuses = Object.values(enemy.statuses || {}).filter(
+      (status): status is DamageStatus => Boolean(status)
+    );
+    if (!statuses.length) return true;
+    const entries = [];
+    for (const status of statuses) {
+      const damage = Math.max(1, Math.round(status.damage || 0));
+      enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
+      status.turns = Math.max(0, Number(status.turns || 0) - 1);
+      entries.push(`${status.name}造成 ${damage} 点伤害`);
+      setBattleFx("enemy", {
+        type: status.type,
+        element: status.element,
+        text: `-${damage}`,
+        label: status.name
+      });
+    }
+    for (const [type, status] of Object.entries(enemy.statuses || {}) as [
+      string,
+      DamageStatus | undefined
+    ][]) {
+      if (!status || status.turns <= 0 || enemy.hp <= 0) delete enemy.statuses[type];
+    }
+    log(`${enemy.name}受到${entries.join("，")}。`);
+    return enemy.hp > 0;
+  }
+
+  function evadeDamageBonus(skill) {
+    return Math.max(0, (skill.power || 1) - 1);
   }
 
   function consumeNextDamageBonus(amount = 1) {
@@ -314,9 +406,7 @@ export function createCombatRuntime(ctx) {
   // 结算敌人攻击回合，包含闪避、防御减伤和死亡检测。
   function enemyTurn(enemy) {
     const t = totals();
-    const dodge =
-      random() <
-      BASE_DODGE + t.spd * SPEED_DODGE_SCALE + (state._evade ? EVADE_SKILL_DODGE_BONUS : 0);
+    const dodge = random() < dodgeChance(t, state._evade ? EVADE_SKILL_DODGE_BONUS : 0);
     state._evade = false;
     if (dodge) {
       setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
@@ -444,13 +534,32 @@ export function createCombatRuntime(ctx) {
     const level = skillLevel(skill.id);
     const branchId = state.skillBranches?.[skill.id];
     const branch = skill.branches?.find((entry) => entry.id === branchId) || null;
+    const scale = 1 + level * 0.1;
+    const power = Number((skill.power * scale + (branch?.powerBonus || 0)).toFixed(2));
+    const multiplierBonus = branch?.powerBonus || 0;
     return {
       ...skill,
       level,
       branch,
       mp: Math.max(1, skill.mp + Math.floor(level / 3) + (branch?.mpDelta || 0)),
       cooldown: Math.max(0, (skill.cooldown ?? 1) + (branch?.cooldownDelta || 0)),
-      power: Number((skill.power * (1 + level * 0.1) + (branch?.powerBonus || 0)).toFixed(2)),
+      power,
+      atkMultiplier:
+        skill.atkMultiplier == null
+          ? undefined
+          : Number((skill.atkMultiplier * scale + multiplierBonus).toFixed(2)),
+      magMultiplier:
+        skill.magMultiplier == null
+          ? undefined
+          : Number((skill.magMultiplier * scale + multiplierBonus).toFixed(2)),
+      hpMultiplier:
+        skill.hpMultiplier == null
+          ? undefined
+          : Number((skill.hpMultiplier * scale + multiplierBonus).toFixed(2)),
+      defMultiplier:
+        skill.defMultiplier == null
+          ? undefined
+          : Number((skill.defMultiplier * scale + multiplierBonus).toFixed(2)),
       element: branch?.element || skill.element,
       statusBonus: branch?.statusBonus || 0,
       pierceResist: !!branch?.pierceResist
@@ -485,7 +594,10 @@ export function createCombatRuntime(ctx) {
       return `伤害 ${damage} · 格挡 ${6 + t.def}`;
     }
     if (skill.type === "shield") return `护盾 ${Math.max(1, Math.round(8 + t.mag * skill.power))}`;
-    if (skill.type === "evade") return "下回合闪避 +35%";
+    if (skill.type === "evade") {
+      const bonus = evadeDamageBonus(skill);
+      return `下回合闪避 +35%${bonus > 0 ? ` · 下次伤害 +${Math.round(bonus * 100)}%` : ""}`;
+    }
     if (skill.type === "double") {
       const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
       return `伤害 ${damage} · 追击 ${Math.round(rangerSkillFollowUpChance(t) * 100)}%`;
@@ -494,9 +606,9 @@ export function createCombatRuntime(ctx) {
     const elementText = elementName(skill.element);
     const prefix = elementText ? `${elementText} · ` : "";
     if (skill.type === "burn")
-      return `${prefix}伤害 ${damage} · 灼烧 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+      return `${prefix}伤害 ${damage} · 灼烧 ${statusDamageAmount(skill)}x${DAMAGE_STATUS_TURNS}`;
     if (skill.type === "poison")
-      return `${prefix}伤害 ${damage} · 中毒 ${2 + Math.ceil(floor * 0.5) + (skill.statusBonus || 0)}`;
+      return `${prefix}伤害 ${damage} · 中毒 ${statusDamageAmount(skill)}x${DAMAGE_STATUS_TURNS}`;
     if (skill.type === "weaken") return `${prefix}伤害 ${damage} · 攻击 -3`;
     if (skill.type === "slow") return `${prefix}伤害 ${damage} · 攻击 -2`;
     return `${prefix}伤害 ${damage}`;
@@ -525,6 +637,7 @@ export function createCombatRuntime(ctx) {
     state.currentEnemy = null;
     state.skillCooldowns = {};
     setBattlePhase("idle");
+    advanceTutorial(state, "battle");
     syncMusicToGame();
     const rewards = [`经验 +${enemy.xp}`, `金币 +${enemy.gold}`];
     recordQuestKill(enemy, rewards);
@@ -710,6 +823,7 @@ export function createCombatRuntime(ctx) {
   }
 
   function discoverBattleLore(enemy) {
+    if (enemy?.loreSource) return discoverLorePage(state, enemy.loreSource);
     const source =
       enemy.type === "boss" ? "boss" : enemy.type === "elite" || enemy.roomBoss ? "elite" : "";
     if (!source) return null;

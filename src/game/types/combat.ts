@@ -14,10 +14,21 @@ export interface Enemy {
   resistances?: string[];
   skills?: EnemySkill[];
   _guard?: number;
+  statuses?: Partial<Record<DamageStatusType, DamageStatus>>;
   defeated?: boolean;
   roomId?: string;
   dropsKey?: boolean;
   roomBoss?: boolean;
+}
+
+export type DamageStatusType = "burn" | "poison";
+
+export interface DamageStatus {
+  type: DamageStatusType;
+  name: string;
+  damage: number;
+  turns: number;
+  element?: string;
 }
 
 export interface EnemySkill {

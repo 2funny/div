@@ -71,7 +71,7 @@ export const LORE_PAGES: LorePage[] = [
     minFloor: 1,
     sources: ["chest", "lockedChest"],
     title: "入口刻痕",
-    text: "石砖背面刻着一行小字：如果你看见这句话，别相信第一次见到你的商人。"
+    text: "石砖背面刻着一行小字：第一间房的灰尘总会比脚印更诚实，别急着相信地牢递给你的第一份答案。"
   },
   {
     id: "wet-ledger",

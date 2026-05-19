@@ -21,6 +21,11 @@ export interface Skill {
   type: string;
   scale?: StatKey;
   power: number;
+  baseDamage?: number;
+  atkMultiplier?: number;
+  magMultiplier?: number;
+  hpMultiplier?: number;
+  defMultiplier?: number;
   element?: string;
   branches?: SkillBranch[];
 }
@@ -35,6 +40,17 @@ export interface SkillBranch {
   statusBonus?: number;
   pierceResist?: boolean;
   cooldownDelta?: number;
+}
+
+export interface PassiveEffect {
+  id: string;
+  name: string;
+  desc: string;
+  tags?: string[];
+  chanceBase?: number;
+  chancePerSpeed?: number;
+  chanceMax?: number;
+  value?: number;
 }
 
 export interface PlayerClass {
@@ -54,6 +70,7 @@ export interface PlayerClass {
     secondary: StatKey;
     secondaryEvery: number;
   };
+  passives?: PassiveEffect[];
   skills: Skill[];
 }
 

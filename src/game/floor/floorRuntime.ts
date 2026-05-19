@@ -1,6 +1,7 @@
 import { FLOOR_EFFECTS, MAP_SIZE_MAX, MAP_SIZE_MIN, MAX_FLOOR, THEMES } from "../constants";
 import { ENEMY_AFFIXES } from "../combat/enemies";
 import { ELEMENTS } from "../combat/elements";
+import { roomEventsForFloor } from "../events/roomEvents";
 import { choice, rand, random } from "../random";
 import type { Cell } from "../types";
 import {
@@ -10,6 +11,22 @@ import {
   floorNeighborCount,
   validRoomDoor
 } from "./mapGeometry";
+
+const START_POSITION = { x: 1, y: 1 };
+const START_SAFE_RADIUS = 4;
+const THEME_ENEMY_POOLS = {
+  moss: ["史莱姆", "洞穴鼠", "骸骨兵"],
+  mine: ["矿洞蝙蝠", "诅咒矿工", "石像守卫"],
+  frost: ["冰霜狼", "寒冰法徒", "冰晶魔像"],
+  fungal: ["孢子行者", "菌毯潜伏者", "腐木守卫"],
+  cistern: ["沉钟水鬼", "锈鳞爬行者", "潮汐侍从"],
+  ember: ["余烬猎犬", "赤脉熔徒", "焦骨守卫"],
+  archive: ["失页书记", "墨尘幽影", "缄默书卫"],
+  astral: ["星砂祭司", "镜光游魂", "星盘守卫"],
+  shadow: ["影幕刺客", "黑旗骑士", "暮色咒徒"],
+  void: ["虚空回声", "无面巡礼者", "裂隙吞噬者"],
+  throne: ["王座近卫", "符文审判者", "记忆缝合体"]
+};
 
 type ScatterOptions = {
   rooms?: Array<{ id: string; threat?: string }>;
@@ -22,9 +39,14 @@ type QuestNpcSource = {
   questId: string;
   npcName: string;
   avoidRoomId?: string;
+  avoidRoomIds?: string[];
   roomName?: string;
   targetFloor?: number;
   targetRoomName?: string | null;
+};
+
+type GuardPlacementOptions = {
+  avoidStartSafeZone?: boolean;
 };
 
 // 楼层运行时负责地图拓扑、房间标签、怪物/宝藏/任务点投放和楼梯封印。
@@ -85,7 +107,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         explorationVersion: 2
       };
     } else {
-      const mainPath = carveMainRoute(map, 1, 1, size - 2, size - 2);
+      const mainPath = carveMainRoute(map, START_POSITION.x, START_POSITION.y, size - 2, size - 2);
       widenMainRoute(map, mainPath);
       carveSideRooms(map, mainPath, sideRoomCountForFloor());
       const structuredRooms = carveStructuredRooms(map, mainPath, 7);
@@ -125,6 +147,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       ensureQuestRoomEncounters(map, rooms);
       if (!rescueQuest) placeQuestNpc(map);
       placeLockedRoomDoors(map, rooms);
+      removeUnlockedRoomDoors(map);
+      placeRoomEvents(map, rooms);
       const stairs = placeFloorStairs(map, true);
       state.map = {
         size,
@@ -213,6 +237,11 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     return random() < Math.min(0.86, 0.74 + earlyFloorBonus + deepFloorBonus);
   }
 
+  function decorateMerchant(merchant) {
+    merchant.id = merchant.id || `merchant-${state.floor}-${rand(1000, 9999)}`;
+    return merchant;
+  }
+
   // 判断当前楼层是否为最终 Boss 层。
   function isFinalFloor(floor = state.floor) {
     return floor >= MAX_FLOOR;
@@ -220,10 +249,10 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
 
   // 在当前楼层放置上下楼梯，下楼梯优先选择远处房间或路线尽头。
   function placeFloorStairs(map, includeDownstairs = true) {
-    const upCell = state.floor > 1 ? chooseStairCell(map, "up", { x: 1, y: 1 }) : null;
+    const upCell = state.floor > 1 ? chooseStairCell(map, "up", START_POSITION) : null;
     if (upCell) upCell.object = { type: "stairsUp" };
     const downCell = includeDownstairs
-      ? chooseStairCell(map, "down", { x: 1, y: 1 }, upCell)
+      ? chooseStairCell(map, "down", START_POSITION, upCell)
       : null;
     if (downCell) {
       downCell.object = { type: "stairsDown" };
@@ -606,10 +635,11 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           )
       )
       .sort((a, b) => lockedRoomScore(b) - lockedRoomScore(a));
-    const target = Math.min(candidates.length, state.floor >= 8 && random() < 0.45 ? 2 : 1);
+    const target = Math.min(candidates.length, lockedRoomTargetCount());
+    const selected = candidates.slice(0, target);
+    const selectedRoomIds = selected.map((room) => room.id);
     let placed = 0;
-    for (const room of candidates) {
-      if (placed >= target) break;
+    for (const room of selected) {
       if (
         room.cells.some((cell) =>
           ["questNpc", "rescueNpc", "shop", "forge", "stairsDown", "stairsUp"].includes(
@@ -639,7 +669,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         target: Math.min(3, 1 + Math.ceil(state.floor / 5)),
         targetFloor: state.floor,
         targetRoomName: null,
-        avoidRoomId: room.id
+        avoidRoomId: room.id,
+        avoidRoomIds: selectedRoomIds
       };
       const giver = placeQuestNpc(map, source);
       if (!giver) {
@@ -660,11 +691,70 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function lockedRoomScore(room) {
     const priority = { sealed: 5, treasure: 4, danger: 3, quiet: 1 }[room.threat] || 1;
     const center = roomCenter(room.cells);
-    return priority * 16 + distance(center, { x: 1, y: 1 }) + random();
+    return priority * 16 + distance(center, START_POSITION) + random();
   }
 
   // 在空地面上散布怪物或地图物件，并按规则控制密度。
   // 在可通行格中散布对象，可按房间偏好、距离和拥挤度过滤候选点。
+  function lockedRoomTargetCount() {
+    const floorBudget = 1 + Math.floor(state.floor / 4);
+    const lateFloorBonus = state.floor >= 8 && random() < 0.45 ? 1 : 0;
+    return Math.min(4, floorBudget + lateFloorBonus);
+  }
+
+  function removeUnlockedRoomDoors(map) {
+    let opened = 0;
+    for (const cell of mapCells(map)) {
+      if (cell.terrain !== "door" || cell.object?.type === "lockedDoor") continue;
+      cell.terrain = "floor";
+      cell.object = {
+        type: "roomEntrance",
+        roomId: cell.roomId || "",
+        roomName: roomName(cell.roomId)
+      };
+      opened++;
+    }
+    return opened;
+  }
+
+  function placeRoomEvents(map, rooms = []) {
+    const events = roomEventsForFloor(state.floor);
+    if (!events.length) return 0;
+    const lockedRoomIds = new Set(rooms.filter((room) => room.locked).map((room) => room.id));
+    const count = Math.min(events.length, state.floor >= 8 ? 2 : 1);
+    const candidates = interiorCells(map)
+      .filter((cell) => cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell))
+      .filter((cell) => !cell.roomId || !lockedRoomIds.has(cell.roomId))
+      .filter((cell) => !isObjectCrowded(map, cell, { minObjectDistance: 4, preferRooms: true }))
+      .sort(() => random() - 0.5);
+    if (!candidates.length) {
+      const fallback = interiorCells(map)
+        .filter((cell) => cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell))
+        .filter((cell) => !cell.roomId || !lockedRoomIds.has(cell.roomId))
+        .sort((a, b) => distance(b, START_POSITION) - distance(a, START_POSITION))[0];
+      if (!fallback) return 0;
+      const event = choice(events);
+      fallback.object = { type: "roomEvent", eventId: event.id, name: event.title };
+      return 1;
+    }
+    let placed = 0;
+    const used = new Set();
+    for (const cell of candidates) {
+      if (placed >= count) break;
+      const pool = events.filter((event) => !used.has(event.id));
+      if (!pool.length) break;
+      const event = choice(pool);
+      used.add(event.id);
+      cell.object = {
+        type: "roomEvent",
+        eventId: event.id,
+        name: event.title
+      };
+      placed++;
+    }
+    return placed;
+  }
+
   function scatter(map, type, count, options: ScatterOptions = {}) {
     let placed = 0;
     let attempts = 0;
@@ -677,13 +767,14 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       if (
         cell.terrain === "floor" &&
         !cell.object &&
-        !(x === 1 && y === 1) &&
+        !isInStartSafeZone(cell) &&
         !isObjectCrowded(map, cell, options)
       ) {
         const threat = roomThreatFromRooms(options.rooms, cell.roomId);
         const eliteChance = eliteChanceForThreat(threat);
         const object =
           type === "monster" ? makeEnemyWithVariant(random() < eliteChance) : { type };
+        if (type === "shop") decorateMerchant(object);
         if (cell.roomId) object.roomId = cell.roomId;
         cell.object = object;
         placed++;
@@ -740,7 +831,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       .filter((cell) => cell.terrain === "floor" && !cell.object && !cell.roomId)
       .filter(
         (cell) =>
-          !(cell.x === 1 && cell.y === 1) &&
+          !isInStartSafeZone(cell) &&
           !(cell.x === map.length - 2 && cell.y === map.length - 2)
       )
       .filter((cell) => kept.every((other) => distance(cell, other) > 1))
@@ -788,7 +879,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       center.object = { type: "lockedChest" };
       placeFenceRing(map, center.x, center.y);
       placeKeyGuardianNear(map, center.x, center.y);
-      placeGuardNear(map, center.x, center.y, false);
+      placeGuardNear(map, center.x, center.y, false, { avoidStartSafeZone: true });
       return true;
     }
     return false;
@@ -817,8 +908,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     for (const center of candidates.slice(0, 32)) {
       if (!carveRoom(map, center.x, center.y, 2, encounterRoomId(center))) continue;
       center.object = { type: "chest" };
-      placeGuardNear(map, center.x, center.y, true);
-      placeGuardNear(map, center.x, center.y, false);
+      placeGuardNear(map, center.x, center.y, true, { avoidStartSafeZone: true });
+      placeGuardNear(map, center.x, center.y, false, { avoidStartSafeZone: true });
       return true;
     }
     return false;
@@ -836,7 +927,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (!cell) return false;
     markEncounterArea(map, cell.x, cell.y, 1);
     cell.object = { type: "chest" };
-    placeGuardNear(map, cell.x, cell.y, true);
+    placeGuardNear(map, cell.x, cell.y, true, { avoidStartSafeZone: true });
     return true;
   }
 
@@ -849,7 +940,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (!cell) return false;
     markEncounterArea(map, cell.x, cell.y, 1);
     cell.object = { type: "chest" };
-    placeGuardNear(map, cell.x, cell.y, true);
+    placeGuardNear(map, cell.x, cell.y, true, { avoidStartSafeZone: true });
     return true;
   }
 
@@ -864,6 +955,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       return false;
     for (let y = cy - radius; y <= cy + radius; y++) {
       for (let x = cx - radius; x <= cx + radius; x++) {
+        if (isInStartSafeZone(map[y][x])) return false;
         if (map[y][x].object || map[y][x].roomId) return false;
       }
     }
@@ -877,9 +969,15 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   // 在目标点附近生成守卫，精英概率由调用方控制。
-  function placeGuardNear(map, x, y, eliteChance = false) {
+  function placeGuardNear(map, x, y, eliteChance = false, options: GuardPlacementOptions = {}) {
     const candidates = cellsWithin(map, x, y, 2)
-      .filter((cell) => cell.terrain === "floor" && !cell.object && (cell.x !== x || cell.y !== y))
+      .filter(
+        (cell) =>
+          cell.terrain === "floor" &&
+          !cell.object &&
+          (!options.avoidStartSafeZone || !isInStartSafeZone(cell)) &&
+          (cell.x !== x || cell.y !== y)
+      )
       .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
     const guard = candidates[0];
     if (!guard) return false;
@@ -891,7 +989,13 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   // 在上锁宝箱附近生成必掉钥匙的精英守卫。
   function placeKeyGuardianNear(map, x, y) {
     const candidates = cellsWithin(map, x, y, 2)
-      .filter((cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x, y }) > 1)
+      .filter(
+        (cell) =>
+          cell.terrain === "floor" &&
+          !cell.object &&
+          !isInStartSafeZone(cell) &&
+          distance(cell, { x, y }) > 1
+      )
       .sort((a, b) => distance(a, { x, y }) - distance(b, { x, y }));
     const guard = candidates[0];
     if (!guard) return false;
@@ -912,8 +1016,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       .filter((entry) => entry.cells.length >= 5)
       .sort(
         (a, b) =>
-          distance(roomCenter(b.cells), { x: 1, y: 1 }) -
-          distance(roomCenter(a.cells), { x: 1, y: 1 })
+          distance(roomCenter(b.cells), START_POSITION) -
+          distance(roomCenter(a.cells), START_POSITION)
       )[0];
     if (!room) return null;
     const prisoner = choice(room.cells);
@@ -963,12 +1067,14 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     map: Cell[][],
     source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人" }
   ) {
-    const { avoidRoomId, ...objectSource } = source;
+    const { avoidRoomId, avoidRoomIds, ...objectSource } = source;
+    const blockedRoomIds = new Set([avoidRoomId, ...(avoidRoomIds || [])].filter(Boolean));
     const candidates = interiorCells(map)
       .filter(
-        (cell) => cell.terrain === "floor" && !cell.object && distance(cell, { x: 1, y: 1 }) > 4
+        (cell) =>
+          cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell, START_SAFE_RADIUS)
       )
-      .filter((cell) => !avoidRoomId || cell.roomId !== avoidRoomId)
+      .filter((cell) => !cell.roomId || !blockedRoomIds.has(cell.roomId))
       .sort((a, b) => npcScore(map, b) - npcScore(map, a));
     const cell =
       candidates.find((candidate) =>
@@ -1129,18 +1235,21 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function canUseTreasureCell(map, x, y) {
     const cell = map[y]?.[x];
     if (!cell || cell.terrain !== "floor" || cell.object) return false;
-    if ((x === 1 && y === 1) || (x === map.length - 2 && y === map.length - 2)) return false;
+    if (isInStartSafeZone(cell) || (x === map.length - 2 && y === map.length - 2)) return false;
     return true;
   }
 
   function treasureScore(map, cell) {
-    const start = { x: 1, y: 1 };
     const exit = { x: map.length - 2, y: map.length - 2 };
     return (
-      distance(cell, start) +
+      distance(cell, START_POSITION) +
       Math.min(8, distance(cell, exit)) -
       floorNeighborCount(map, cell.x, cell.y)
     );
+  }
+
+  function isInStartSafeZone(cell, radius = START_SAFE_RADIUS) {
+    return distance(cell, START_POSITION) <= radius;
   }
 
   function makeEnemyWithVariant(eliteOrBoss = false) {
@@ -1209,7 +1318,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     let placed = 0;
     const candidates = floorCells
       .filter((cell) => !cell.object && !cell.roomId && !cell.mainPath)
-      .filter((cell) => distance(cell, { x: 1, y: 1 }) > 5)
+      .filter((cell) => !isInStartSafeZone(cell, START_SAFE_RADIUS + 1))
       .sort(() => random() - 0.5);
     for (const cell of candidates) {
       if (placed >= target) break;
@@ -1265,10 +1374,23 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       xp: scaledReward(boss ? 160 + floor * 8 : 5 + floor * 2.2 + (elite ? 8 : 0)),
       gold: scaledReward(boss ? 220 + floor * 7 : rand(3, 6) + floor + (elite ? 5 : 0))
     };
+    applyThemeEnemyIdentity(enemy, floor);
     assignEnemyElement(enemy, names);
     assignEnemySkills(enemy);
     applyFloorEffectToEnemy(enemy);
     return maybeApplyEnemyAffix(enemy, eliteOrBoss);
+  }
+
+  function applyThemeEnemyIdentity(enemy, floor = state.floor) {
+    if (enemy.type === "boss") return enemy;
+    const names = enemyNamesForTheme(themeForFloor(floor)?.id);
+    const nextName = choice(names);
+    enemy.name = enemy.type === "elite" ? `精英${nextName}` : nextName;
+    return enemy;
+  }
+
+  function enemyNamesForTheme(themeId) {
+    return THEME_ENEMY_POOLS[themeId] || THEME_ENEMY_POOLS.moss;
   }
 
   function assignEnemyElement(enemy, names = []) {
@@ -1334,6 +1456,36 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       { match: "寒冰法徒", element: "ice", weaknesses: ["fire", "thunder"], resistances: ["ice"] },
       { match: "冰晶魔像", element: "ice", weaknesses: ["fire"], resistances: ["ice", "poison"] },
       { match: "符文守王", element: "dark", weaknesses: ["holy"], resistances: ["dark", "thunder"] }
+    ];
+    return themedMonsterProfileForName(name) || profiles.find((profile) => name.includes(profile.match));
+  }
+
+  function themedMonsterProfileForName(name = "") {
+    const profiles = [
+      { match: "孢子", element: "poison", weaknesses: ["fire"], resistances: ["poison"] },
+      { match: "菌毯", element: "poison", weaknesses: ["fire", "ice"], resistances: ["poison", "dark"] },
+      { match: "腐木", element: "poison", weaknesses: ["fire"], resistances: ["poison"] },
+      { match: "水鬼", element: "ice", weaknesses: ["thunder"], resistances: ["ice"] },
+      { match: "锈鳞", element: "thunder", weaknesses: ["ice"], resistances: ["thunder"] },
+      { match: "潮汐", element: "ice", weaknesses: ["thunder"], resistances: ["ice", "poison"] },
+      { match: "余烬", element: "fire", weaknesses: ["ice"], resistances: ["fire"] },
+      { match: "赤脉", element: "fire", weaknesses: ["ice", "thunder"], resistances: ["fire"] },
+      { match: "焦骨", element: "fire", weaknesses: ["ice"], resistances: ["fire", "dark"] },
+      { match: "失页", element: "dark", weaknesses: ["holy"], resistances: ["dark"] },
+      { match: "墨尘", element: "dark", weaknesses: ["holy", "fire"], resistances: ["dark"] },
+      { match: "书卫", element: "thunder", weaknesses: ["ice"], resistances: ["thunder", "dark"] },
+      { match: "星砂", element: "holy", weaknesses: ["dark"], resistances: ["holy"] },
+      { match: "镜光", element: "holy", weaknesses: ["dark", "thunder"], resistances: ["holy"] },
+      { match: "星盘", element: "thunder", weaknesses: ["dark"], resistances: ["thunder", "holy"] },
+      { match: "影幕", element: "dark", weaknesses: ["holy"], resistances: ["dark"] },
+      { match: "黑旗", element: "dark", weaknesses: ["holy", "fire"], resistances: ["dark"] },
+      { match: "暮色", element: "dark", weaknesses: ["holy"], resistances: ["dark", "poison"] },
+      { match: "虚空", element: "dark", weaknesses: ["holy"], resistances: ["dark", "thunder"] },
+      { match: "无面", element: "dark", weaknesses: ["holy", "fire"], resistances: ["dark"] },
+      { match: "裂隙", element: "dark", weaknesses: ["holy"], resistances: ["dark", "poison"] },
+      { match: "王座", element: "dark", weaknesses: ["holy"], resistances: ["dark"] },
+      { match: "审判", element: "holy", weaknesses: ["dark"], resistances: ["holy", "thunder"] },
+      { match: "缝合", element: "dark", weaknesses: ["holy", "fire"], resistances: ["dark"] }
     ];
     return profiles.find((profile) => name.includes(profile.match));
   }

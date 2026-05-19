@@ -13,7 +13,8 @@ vm.runInContext(
   `
   const empty = emptyEquipment();
   assert(SLOTS.every((slot) => empty[slot] === null), "new heroes should start with empty equipment slots");
-  assert.strictEqual(starterInventory("warrior").filter((entry) => entry.kind === "equip").length, Object.values(starterEquipment("warrior")).filter(Boolean).length, "starter gear should be placed in inventory");
+  assert.strictEqual(starterInventory("warrior").filter((entry) => entry.kind === "equip").length, 0, "starter gear should not be placed in inventory");
+  assert(Object.values(starterEquipment("warrior")).filter(Boolean).length > 0, "starter gear should be provided as equipped items");
   setRandomSeed("stable-seed");
   const seededRolls = [rand(1, 100), rand(1, 100), rand(1, 100)];
   setRandomSeed("stable-seed");
@@ -171,6 +172,7 @@ vm.runInContext(
   };
   playSound = () => {};
   render = () => {};
+  Math.random = () => 0.99;
   useBattlePotion(state.inventory[0].id, true);
   assert.strictEqual(state.inventory.length, 0, "battle potion use should consume the potion");
   assert(state.hp > 50, "battle potion should heal before the enemy response");
@@ -242,6 +244,51 @@ vm.runInContext(
     Math.random = randomBeforeCombatRules;
   }
 
+  const randomBeforeClampRules = Math.random;
+  const realDateNowForClampRules = Date.now;
+  try {
+    state = {
+      classId: "ranger",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 10, mag: 0, def: 0, res: 0, spd: 1000, luk: 200 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      currentEnemy: { type: "monster", name: "Cap Dummy", hp: 500, maxHp: 500, atk: 1, def: 0 },
+      log: []
+    };
+    Math.random = () => 0.96;
+    Date.now = () => realDateNowForClampRules() + 1000;
+    attackEnemy("attack", null, true);
+    Date.now = realDateNowForClampRules;
+    Math.random = randomBeforeClampRules;
+    assert.strictEqual(state.currentEnemy.hp, 490, "crit and combo chances should be capped below a guaranteed trigger");
+
+    state = {
+      classId: "ranger",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 1, mag: 0, def: 0, res: 0, spd: 1000, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      currentEnemy: { type: "monster", name: "Dodge Cap Dummy", hp: 20, maxHp: 20, atk: 10, def: 0 },
+      log: []
+    };
+    Math.random = () => 0.96;
+    enemyTurn(state.currentEnemy);
+    Math.random = randomBeforeClampRules;
+    assert(state.hp < 100, "extreme speed dodge chance should still cap below guaranteed evasion");
+  } finally {
+    Math.random = randomBeforeClampRules;
+    Date.now = realDateNowForClampRules;
+  }
+
   state = {
     classId: "warrior",
     floor: 2,
@@ -267,6 +314,84 @@ vm.runInContext(
   Date.now = realDateNowForCooldown;
   Math.random = randomBeforeCombatRules;
   assert.strictEqual(state.mp, mpAfterHeavy, "skills on cooldown should not spend mp again");
+
+  Math.random = () => 0.99;
+  state = {
+    classId: "mage",
+    floor: 2,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    stats: { atk: 0, mag: 10, def: 80, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    skillLevels: {},
+    skillBranches: {},
+    skillCooldowns: {},
+    currentEnemy: { type: "monster", name: "Burn Dummy", hp: 100, maxHp: 100, atk: 1, def: 0 },
+    log: []
+  };
+  Date.now = () => realDateNowForCooldown() + 1000;
+  attackEnemy("skill", "fireball", true);
+  const hpAfterBurnCast = state.currentEnemy.hp;
+  assert.strictEqual(state.currentEnemy.statuses?.burn?.turns, 2, "burn skills should leave a continuing status after the first tick");
+  attackEnemy("attack", null, true);
+  Date.now = realDateNowForCooldown;
+  assert(state.currentEnemy.hp < hpAfterBurnCast - 2, "burn should keep damaging the enemy on later turns");
+
+  state = {
+    classId: "ranger",
+    floor: 1,
+    hp: 100,
+    maxHp: 100,
+    mp: 50,
+    maxMp: 50,
+    stats: { atk: 10, mag: 0, def: 80, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    skillLevels: { step: 3 },
+    skillBranches: { step: "counter-step" },
+    skillCooldowns: {},
+    currentEnemy: { type: "monster", name: "Step Dummy", hp: 100, maxHp: 100, atk: 1, def: 0 },
+    log: []
+  };
+  Date.now = () => realDateNowForCooldown() + 1000;
+  attackEnemy("skill", "step", true);
+  assert(state._nextDamageBonus > 0, "upgraded evade should store its power as next-damage bonus");
+  attackEnemy("attack", null, true);
+  Date.now = realDateNowForCooldown;
+  Math.random = randomBeforeCombatRules;
+  assert.strictEqual(state.currentEnemy.hp, 86, "upgraded evade should make the next attack hit harder");
+
+  const randomBeforeRangerSkill = Math.random;
+  try {
+    const followupRolls = [0.99, 0.01, 0.99, 0.99];
+    Math.random = () => followupRolls.shift() ?? 0.99;
+    state = {
+      classId: "ranger",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 10, mag: 0, def: 80, res: 0, spd: 40, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      skillLevels: {},
+      skillBranches: {},
+      skillCooldowns: {},
+      currentEnemy: { type: "monster", name: "Followup Dummy", hp: 100, maxHp: 100, atk: 1, def: 0 },
+      log: []
+    };
+    Date.now = () => realDateNowForCooldown() + 1000;
+    attackEnemy("skill", "double", true);
+    Date.now = realDateNowForCooldown;
+    assert.strictEqual(state.currentEnemy.hp, 83, "ranger skill follow-up should add one normal attack, not recursively cast the skill");
+    assert(state.log.some((entry) => entry.includes("追击")), "ranger skill follow-up should be logged as a follow-up effect");
+  } finally {
+    Math.random = randomBeforeRangerSkill;
+  }
 
   state = {
     floor: 3,
@@ -329,6 +454,8 @@ vm.runInContext(
 
   state.map.rooms = [{ id: "room-8-1", name: "12号房" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12", "room doors should expose only the compact room number");
+  assert.strictEqual(roomDoorLabel({ terrain: "floor", roomId: "room-8-1" }), "", "open room entrances should not render as doors");
+  assert(tileLabel({ seen: true, terrain: "floor", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "12号房" } }).includes("未上锁入口"), "unlocked room entrance labels should explain that the tile is passable");
   state.map.rooms = [{ id: "room-8-2", name: "13号房", threat: "danger" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-2" }), "13", "room doors should not show suffixes or threat markers beside the room number");
 
@@ -367,6 +494,13 @@ vm.runInContext(
   assert(skilledEnemy.element, "generated enemies should carry an elemental identity");
   assert(Array.isArray(skilledEnemy.weaknesses) && skilledEnemy.weaknesses.length > 0, "enemy elements should expose weaknesses");
   assert(skilledEnemy.skills?.length > 0, "mid-floor elite enemies should have monster skills");
+  state = { floor: 20 };
+  const fungalEnemy = makeEnemy(false);
+  assert(
+    ["孢子行者", "菌毯潜伏者", "腐木守卫"].some((name) => fungalEnemy.name.includes(name)),
+    "mid-run floor themes should use their own enemy prototypes"
+  );
+  assert(fungalEnemy.weaknesses.includes("fire"), "fungal enemies should expose theme-specific elemental counters");
   Math.random = randomBeforeElementTest;
 
   state = {
@@ -687,6 +821,30 @@ vm.runInContext(
   assert(modalState().body.includes("confirmSellEquipment"), "merchant sell view should offer equipment selling");
 
   state = {
+    floor: 4,
+    hp: 60,
+    maxHp: 100,
+    mp: 10,
+    maxMp: 20,
+    gold: 0,
+    keys: 0,
+    inventory: [],
+    materials: {},
+    runes: {},
+    map: { cells: [[{ x: 0, y: 0, terrain: "floor", object: null, seen: true, visible: true }]] },
+    player: { x: 0, y: 0 },
+    log: []
+  };
+  const roomEventCell = { object: { type: "roomEvent", eventId: "cracked_altar", name: "裂纹祭坛" } };
+  resolveCell(roomEventCell);
+  assert(modalState().body.includes(roomEventMetaText(roomEventsForFloor(2)[0])), "room event modal should show event category and risk");
+  assert(modalState().actions.some((action) => action.text.includes("刮取")), "room events should expose event choices");
+  modalState().actions.find((action) => action.text.includes("刮取")).action();
+  assert.strictEqual(roomEventCell.object, null, "resolved room events should be consumed");
+  assert.strictEqual(state.materials["魔尘"], 1, "room event rewards should apply through the event definition");
+  assert(roomEventsForFloor(8).length >= 6, "room event pools should have enough varied mid-run events");
+
+  state = {
     floor: 1,
     classId: "warrior",
     hp: 100,
@@ -706,9 +864,64 @@ vm.runInContext(
   const waitingAfterPlayerAction = renderBattleCommandPanel();
   Date.now = realDateNowForTurnLock;
   state.currentEnemy = null;
-  assert(waitingAfterPlayerAction.includes("battle-turn-banner waiting enemy"), "battle command panel should switch to the enemy turn after player damage");
-  assert(waitingAfterPlayerAction.includes("准备反击"), "battle command panel should tell the player that the enemy is preparing to respond");
+  assert(waitingAfterPlayerAction.includes("battle-turn-banner windup enemy"), "battle command panel should switch to the enemy windup after player damage");
+  assert(waitingAfterPlayerAction.includes("敌方锁定"), "battle command panel should show a useful enemy intent state");
   assert(waitingAfterPlayerAction.includes("disabled title="), "battle actions should be disabled right after the player action ends");
+
+  const tutorialMap = Array.from({ length: 5 }, (_, y) => Array.from({ length: 5 }, (_, x) => ({
+    x,
+    y,
+    terrain: x === 0 || y === 0 || x === 4 || y === 4 ? "wall" : "floor",
+    object: null,
+    seen: true,
+    visible: true
+  })));
+  state = {
+    floor: 1,
+    classId: "warrior",
+    player: { x: 1, y: 1 },
+    facing: "down",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    gold: 0,
+    keys: 0,
+    universalKeys: 0,
+    stats: { atk: 60, mag: 0, def: 20, res: 10, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    materials: {},
+    runes: {},
+    quests: [],
+    lore: { chapters: [], pages: [] },
+    map: { size: 5, cells: tutorialMap },
+    currentEnemy: null,
+    tutorial: { step: "move", completed: [] },
+    log: []
+  };
+  showEvent = () => {};
+  showModal = () => {};
+  render = () => {};
+  playSound = () => {};
+  syncMusicToGame = () => {};
+  move(1, 0);
+  assert.strictEqual(state.tutorial.step, "loot", "tutorial should advance after the first successful move");
+  const realRandomForTutorial = Math.random;
+  try {
+    Math.random = () => 0.5;
+    resolveCell({ object: { type: "chest" } });
+  } finally {
+    Math.random = realRandomForTutorial;
+  }
+  assert.strictEqual(state.tutorial.step, "battle", "tutorial should advance after opening a chest");
+  state.tutorial.step = "equip";
+  state.tutorial.completed.push("battle");
+  state.inventory = [item("Tutorial Sword", "weapon", "普通", { atk: 1 })];
+  equipItem(state.inventory[0].id);
+  assert.strictEqual(state.tutorial.step, "quest", "tutorial should advance after equipping loot");
+  acceptQuest("wardenErrand", { type: "questNpc", questId: "wardenErrand", targetFloor: 1 });
+  assert.strictEqual(state.tutorial.step, "done", "tutorial should complete after accepting a quest");
 `,
   context
 );

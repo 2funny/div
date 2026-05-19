@@ -9,6 +9,7 @@ import {
 } from "./save";
 import { ensureLoreState, unlockLoreChaptersForFloor } from "../quest/lore";
 import { escapeHtml } from "../render/html";
+import { createTutorialState } from "../tutorial/tutorial";
 import type { GameState } from "../types";
 
 const MAX_SAVED_FLOOR_STATES = 12;
@@ -225,6 +226,7 @@ export function createSaveRuntime(ctx) {
     state.quests = Array.isArray(state.quests) ? state.quests : [];
     ensureLoreState(state);
     unlockLoreChaptersForFloor(state);
+    state.tutorial = state.tutorial || createTutorialState();
     state.floorStates = state.floorStates || {};
     state.skillLevels = state.skillLevels || {};
     state.skillBranches = state.skillBranches || {};

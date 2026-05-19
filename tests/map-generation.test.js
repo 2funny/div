@@ -65,15 +65,26 @@ vm.runInContext(
   assert.notDeepStrictEqual([stairsUp.x, stairsUp.y], [1, 1], "upstairs should not be fixed in the upper-left corner");
   assert(distance(stairsDown, { x: 1, y: 1 }) >= 10, "downstairs should not be discoverable immediately from the starting area");
   assert(stairsDown.roomId || floorNeighborCount(generated, stairsDown.x, stairsDown.y) <= 1, "downstairs should prefer a room or route endpoint");
-  assert(generatedCells.some((cell) => cell.terrain === "door"), "generated floor should include room doors");
   const lockedDoors = generatedCells.filter((cell) => cell.object?.type === "lockedDoor");
+  const roomEntrances = generatedCells.filter((cell) => cell.object?.type === "roomEntrance");
   assert(lockedDoors.length >= 1, "generated floors should include at least one quest-locked room door");
   assert(lockedDoors.every((cell) => cell.object.keyId && cell.object.keyName), "locked room doors should carry a specific key id and display name");
+  assert(roomEntrances.length >= 1, "generated floors should mark unlocked room entrances");
+  assert(roomEntrances.every((cell) => cell.terrain === "floor" && cell.object.roomId), "unlocked room entrances should stay passable and carry room metadata");
   assert(generatedCells.some((cell) => cell.object?.questId === "lockedRoomKey"), "locked room doors should have a matching key quest giver");
   for (const door of generatedCells.filter((cell) => cell.terrain === "door")) {
     assert(door.roomId, "room doors should belong to a labelled room");
+    assert.strictEqual(door.object?.type, "lockedDoor", "visible room doors should always be locked");
     assert(validRoomDoor(generated, door, door.roomId), "room doors should connect a room interior to an outside corridor through the wall");
   }
+  const lockedRoomIds = new Set(lockedDoors.map((cell) => cell.roomId));
+  assert.strictEqual(lockedRoomIds.size, lockedDoors.length, "each locked room should have one visible locked door");
+  assert(
+    generatedCells
+      .filter((cell) => cell.object?.type === "questNpc" && cell.object?.questId === "lockedRoomKey")
+      .every((cell) => !lockedRoomIds.has(cell.roomId)),
+    "room key quest givers should be reachable outside locked rooms"
+  );
   assert(generatedCells.some((cell) => cell.roomId && cell.terrain === "floor"), "generated floor should include enclosed room interiors");
   assert(generatedCells.some((cell) => cell.object?.type === "questNpc"), "generated floor should include a neutral quest NPC");
   assert(state.map.rooms.length >= 4, "generated floor should label multiple meaningful rooms");
@@ -87,6 +98,12 @@ vm.runInContext(
   assert(generatedCells.some((cell) => cell.object?.roomId === rescueRoomId && ["monster", "elite"].includes(cell.object.type)), "rescue room should start with monsters to clear");
   const outdoorFeatureTypes = new Set(["monster", "elite", "chest", "lockedChest", "altar"]);
   const outdoorFeatures = generatedCells.filter((cell) => !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));
+  const startSafeObjects = new Set(["monster", "elite", "boss", "trap", "chest", "lockedChest", "altar", "shop", "forge", "questNpc", "rescueNpc", "roomEvent"]);
+  assert(generatedCells.some((cell) => cell.object?.type === "roomEvent"), "generated floors should include at least one room event");
+  assert(
+    !generatedCells.some((cell) => startSafeObjects.has(cell.object?.type) && distance(cell, { x: 1, y: 1 }) <= 4),
+    "generated floors should keep the starting area clear of encounters and interactables"
+  );
   for (const feature of outdoorFeatures) {
     const crowdedNeighbor = cellsWithin(generated, feature.x, feature.y, 1)
       .some((cell) => cell !== feature && !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));

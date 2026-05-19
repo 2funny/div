@@ -11,6 +11,14 @@ export const CLASSES: Record<string, PlayerClass> = {
     hp: 46,
     mp: 12,
     growth: { hp: 4, mp: 1, primary: "atk", primaryEvery: 2, secondary: "def", secondaryEvery: 4 },
+    passives: [
+      {
+        id: "frontline",
+        name: "前线韧性",
+        desc: "高生命和防御成长，适合承受反击。",
+        tags: ["防御", "生命"]
+      }
+    ],
     skills: [
       {
         id: "heavy",
@@ -21,6 +29,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "damage",
         scale: "atk",
         power: 1.35,
+        baseDamage: 0,
+        atkMultiplier: 1.35,
         branches: [
           {
             id: "cleave",
@@ -60,6 +70,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "weaken",
         scale: "atk",
         power: 0.85,
+        baseDamage: 0,
+        atkMultiplier: 0.85,
         element: "dark",
         branches: [
           { id: "intimidate", name: "震慑", desc: "伤害略高。", powerBonus: 0.1 },
@@ -78,6 +90,14 @@ export const CLASSES: Record<string, PlayerClass> = {
     hp: 32,
     mp: 30,
     growth: { hp: 2, mp: 4, primary: "mag", primaryEvery: 2, secondary: "res", secondaryEvery: 4 },
+    passives: [
+      {
+        id: "elementalist",
+        name: "元素专注",
+        desc: "以法强和法力驱动高倍率元素技能。",
+        tags: ["元素", "法力"]
+      }
+    ],
     skills: [
       {
         id: "fireball",
@@ -88,6 +108,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "burn",
         scale: "mag",
         power: 1.45,
+        baseDamage: 0,
+        magMultiplier: 1.45,
         element: "fire",
         branches: [
           {
@@ -109,6 +131,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "slow",
         scale: "mag",
         power: 1.15,
+        baseDamage: 0,
+        magMultiplier: 1.15,
         element: "ice",
         branches: [
           { id: "deep-freeze", name: "深寒", desc: "伤害提高。", powerBonus: 0.12 },
@@ -145,6 +169,33 @@ export const CLASSES: Record<string, PlayerClass> = {
     hp: 38,
     mp: 18,
     growth: { hp: 3, mp: 2, primary: "spd", primaryEvery: 2, secondary: "luk", secondaryEvery: 4 },
+    passives: [
+      {
+        id: "ranger_combo",
+        name: "游击连击",
+        desc: "普通攻击有概率追加一次普通攻击，概率随速度提高。",
+        tags: ["连击", "速度"],
+        chanceBase: 0.08,
+        chancePerSpeed: 0.006,
+        chanceMax: 0.55
+      },
+      {
+        id: "ranger_followup",
+        name: "追击本能",
+        desc: "攻击型技能可触发一次普通追击，不会重复施放技能。",
+        tags: ["追击", "技能"],
+        chanceBase: 0.06,
+        chancePerSpeed: 0.004,
+        chanceMax: 0.4,
+        value: 0.65
+      },
+      {
+        id: "ranger_evasion",
+        name: "轻身闪避",
+        desc: "速度提高闪避概率，最终概率最多 95%。",
+        tags: ["闪避", "速度"]
+      }
+    ],
     skills: [
       {
         id: "double",
@@ -155,6 +206,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "double",
         scale: "atk",
         power: 0.86,
+        baseDamage: 0,
+        atkMultiplier: 0.86,
         branches: [
           { id: "rapid", name: "疾射", desc: "耗蓝 -1。", mpDelta: -1 },
           { id: "charged", name: "蓄势", desc: "每箭伤害提高。", powerBonus: 0.08, mpDelta: 1 }
@@ -182,6 +235,8 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "poison",
         scale: "atk",
         power: 1.05,
+        baseDamage: 0,
+        atkMultiplier: 1.05,
         element: "poison",
         branches: [
           { id: "corrode", name: "腐蚀", desc: "中毒伤害提高。", statusBonus: 3 },

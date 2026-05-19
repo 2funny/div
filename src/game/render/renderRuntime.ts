@@ -26,6 +26,7 @@ import {
 } from "../quest/lore";
 import { cellsWithin, distance } from "../floor/mapGeometry";
 import { QUEST_DEFS } from "../quest/quests";
+import { currentTutorialStep } from "../tutorial/tutorial";
 import { syncWeatherCanvas } from "./weatherCanvas";
 import { escapeHtml } from "./html";
 import type { StatKey } from "../types";
@@ -72,7 +73,7 @@ export function createRenderRuntime(ctx) {
   const roomName = (...args) => api.roomName(...args);
   const runeEffectText = (...args) => api.runeEffectText(...args);
   const saveSlotLabel = (...args) => api.saveSlotLabel(...args);
-  const saveGame = (...args) => api.saveGame(...args);
+  const markAutosaveDirty = (...args) => api.markAutosaveDirty(...args);
   const formatSaveTime = (...args) => api.formatSaveTime(...args);
   const saveSlots = (...args) => api.saveSlots(...args);
   const showConfirm = (...args) => api.showConfirm(...args);
@@ -238,6 +239,16 @@ export function createRenderRuntime(ctx) {
       <h2>${cls.name}</h2>
       <small>${cls.role || "职业"} · 主属性 ${cls.primary || "均衡"}</small>
       <p>${cls.desc}</p>
+      ${
+        cls.passives?.length
+          ? `<div class="class-passives">${cls.passives
+              .map(
+                (passive) =>
+                  `<span title="${passive.desc}">${passive.name}${passive.tags?.length ? ` · ${passive.tags.join("/")}` : ""}</span>`
+              )
+              .join("")}</div>`
+          : ""
+      }
       <ul>${cls.skills.map((skill) => `<li>${skill.name}：${skill.desc}</li>`).join("")}</ul>
       <button type="button" onclick="startGame('${id}', '${slotId}')">开始</button>
     </article>
@@ -280,7 +291,7 @@ export function createRenderRuntime(ctx) {
     renderContext();
     renderTab();
     renderLog();
-    saveGame(false);
+    markAutosaveDirty();
   }
 
   function confirmBuy(kind) {
@@ -585,6 +596,7 @@ export function createRenderRuntime(ctx) {
       questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
       rescueNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "被困者" },
       lockedDoor: { cls: "locked-door", src: null, alt: "上锁房门" },
+      roomEntrance: { cls: "room-entrance", src: null, alt: "房间入口" },
       fenceGate: { cls: "fence-gate", src: ASSETS.fenceGate, alt: "门栅" },
       trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
       portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
@@ -691,7 +703,12 @@ export function createRenderRuntime(ctx) {
     return `
     <div class="battle-command-panel">
       <div class="battle-turn-banner ${turn.className}">
-        <div class="battle-turn-copy"><b>${turn.title}</b><span>${turn.detail}</span></div>
+        <div class="battle-turn-pulse" aria-hidden="true"><span>${turn.icon}</span></div>
+        <div class="battle-turn-copy">
+          <small>${turn.kicker}</small>
+          <b>${turn.title}</b>
+          <span>${turn.detail}</span>
+        </div>
         <div class="battle-turn-track" aria-hidden="true">
           <i class="hero-step">你</i>
           <em></em>
@@ -769,32 +786,51 @@ export function createRenderRuntime(ctx) {
       return {
         locked,
         className: "ready",
-        title: "你的回合",
-        detail: "选择一次行动。",
-        actionLabel: "本回合",
+        icon: "令",
+        kicker: "行动权",
+        title: "轮到你行动",
+        detail: "选择攻击、技能或补给，下一次操作会推进回合。",
+        actionLabel: "可行动",
         disabledTitle: "",
         shortHint: ""
       };
     }
-    if (phase === "enemy-turn") {
+    if (phase === "enemy-windup") {
       return {
         locked,
-        className: "waiting enemy",
-        title: battle.message || "敌方行动中",
-        detail: "对方回合，等待敌人行动。",
-        actionLabel: "敌方回合",
-        disabledTitle: "敌方行动中",
-        shortHint: "敌方行动中，稍后再选择战术"
+        className: "windup enemy",
+        icon: "警",
+        kicker: "敌方锁定",
+        title: battle.message || "敌人正在逼近",
+        detail: "你的行动已生效，观察伤害与状态，准备承受反击。",
+        actionLabel: "反击将至",
+        disabledTitle: "敌人即将反击",
+        shortHint: "敌人即将反击"
+      };
+    }
+    if (phase === "enemy-action" || phase === "enemy-turn") {
+      return {
+        locked,
+        className: "impact enemy",
+        icon: "击",
+        kicker: "敌方行动",
+        title: battle.message || "敌人发动攻击",
+        detail: "敌人的伤害、闪避和护盾结算中，随后会回到你的回合。",
+        actionLabel: "结算中",
+        disabledTitle: "敌方行动结算中",
+        shortHint: "敌方行动结算中"
       };
     }
     return {
       locked,
-      className: "preparing",
-      title: "准备行动",
-      detail: "战斗刚开始，马上轮到你。",
-      actionLabel: "准备",
-      disabledTitle: "准备行动中",
-      shortHint: "准备行动中"
+      className: "ready",
+      icon: "令",
+      kicker: "行动权",
+      title: "轮到你行动",
+      detail: "选择攻击、技能或补给，下一次操作会推进回合。",
+      actionLabel: "可行动",
+      disabledTitle: "",
+      shortHint: ""
     };
   }
 
@@ -924,9 +960,11 @@ export function createRenderRuntime(ctx) {
       altar: ["altar", ASSETS.altar, "祭坛"],
       forge: ["forge", ASSETS.forge, "合成台"],
       shop: ["merchant", ASSETS.shop, "商人"],
+      roomEvent: ["room-event", null, "探索事件"],
       questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
       rescueNpc: ["quest-npc", ASSETS.questNpc, "被困者"],
       lockedDoor: ["locked-door", null, "上锁房门"],
+      roomEntrance: ["room-entrance", null, "房间入口"],
       fenceGate: ["fence-gate", ASSETS.fenceGate, "门栅"],
       trap: ["trap", ASSETS.trap, "陷阱"],
       portal: ["portal", ASSETS.portal, "传送门"],
@@ -962,9 +1000,11 @@ export function createRenderRuntime(ctx) {
       altar: "坛",
       forge: "锻",
       shop: "商",
+      roomEvent: "事",
       questNpc: "托",
       rescueNpc: "救",
       lockedDoor: "锁",
+      roomEntrance: "入",
       fenceGate: "栅",
       trap: "陷",
       portal: "门",
@@ -995,11 +1035,13 @@ export function createRenderRuntime(ctx) {
       altar: "符文祭坛：恢复生命和法力",
       forge: "合成台：强化装备或合成符文",
       shop: "商人：购买药水和补给",
+      roomEvent: cell.object.name ? `${cell.object.name}：可互动事件` : "可互动事件",
       questNpc: cell.object.npcName
         ? `${cell.object.npcName}：提供${cell.object.roomName || roomName(cell.object.roomId)}相关委托`
         : "中立委托人：完成任务获得钥匙和金币",
       rescueNpc: `${cell.object.npcName || "被困者"}：清理${roomName(cell.object.roomId)}后确认救援`,
       lockedDoor: `${cell.object.roomName || "上锁房门"}：需要${cell.object.keyName || "指定钥匙"}或万能钥匙`,
+      roomEntrance: `${cell.object.roomName || roomName(cell.object.roomId) || "房间"}：未上锁入口，可直接通过`,
       fenceGate: "符文门栅：有钥匙后可打开围栏入口",
       trap: "陷阱：触发后受到伤害",
       portal: "传送门：进入下一层",
@@ -1045,6 +1087,7 @@ export function createRenderRuntime(ctx) {
     if (type === "stairsDown") return "stairs-down";
     if (type === "stairsUp") return "stairs-up";
     if (type === "lockedDoor") return "locked-door";
+    if (type === "roomEntrance") return "room-entrance";
     return type;
   }
 
@@ -1058,6 +1101,25 @@ export function createRenderRuntime(ctx) {
   }
 
   // 渲染右侧上下文操作区：战斗、商店、合成台或移动提示。
+  function renderTutorialPrompt() {
+    const step = currentTutorialStep(state);
+    if (!step) return "";
+    const tutorial = state.tutorial as { completed?: string[] };
+    const completed = tutorial?.completed?.length || 0;
+    return `
+      <div class="tutorial-card">
+        <span>首局目标 ${completed + 1}/5</span>
+        <b>${escapeHtml(step.title)}</b>
+        <small>${escapeHtml(step.desc)}</small>
+      </div>
+    `;
+  }
+
+  function prependTutorialPrompt() {
+    const prompt = renderTutorialPrompt();
+    if (prompt) $("contextBody").innerHTML = prompt + $("contextBody").innerHTML;
+  }
+
   function renderContext() {
     const enemy = state.currentEnemy;
     if (enemy) {
@@ -1096,6 +1158,7 @@ export function createRenderRuntime(ctx) {
       <p>点击相邻格或使用方向键移动。探索宝箱、祭坛、商人和传送门。</p>
     `;
     }
+    prependTutorialPrompt();
   }
 
   // 渲染当前侧边栏标签页。
