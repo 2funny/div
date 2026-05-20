@@ -109,6 +109,13 @@ export const LORE_PAGES: LorePage[] = [
     text: "残页写道：每次使用符文，地牢都会留下一点你。起初只是招式，后来是声音，再后来是名字。"
   },
   {
+    id: "class-echoes",
+    minFloor: 28,
+    sources: ["elite", "lockedChest"],
+    title: "三份回声",
+    text: "同一段回声被抄成三份：剑士听见盾沿震动，法师听见火星倒流，游侠听见第二支箭已经离弦。地牢不是复制人，它在复制习惯。"
+  },
+  {
     id: "echo-duel",
     minFloor: 34,
     sources: ["elite", "boss"],
@@ -116,11 +123,25 @@ export const LORE_PAGES: LorePage[] = [
     text: "一名冒险者写下与自己影子的决斗过程。最后一行只有半句：它比我更熟悉我的下一步。"
   },
   {
+    id: "survivor-cairn",
+    minFloor: 38,
+    sources: ["chest", "lockedChest"],
+    title: "幸存者石堆",
+    text: "石堆下压着一片布条，上面没有求救，只写着路线：如果后来者还愿意救人，就把左边第三块石头翻过来。"
+  },
+  {
     id: "warden-confession",
     minFloor: 50,
     sources: ["elite", "boss", "lockedChest"],
     title: "守王忏悔",
     text: "我坐上王座不是为了统治地牢，而是为了让它先学会吞下我。这样它就会晚一点学会吞下世界。"
+  },
+  {
+    id: "merchant-last-price",
+    minFloor: 56,
+    sources: ["chest", "boss"],
+    title: "最后报价",
+    text: "商队账本的末页没有价格，只有一句：若门仍会移动，就把地图卖给还没失去名字的人。"
   },
   {
     id: "empty-rune",

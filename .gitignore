@@ -8,9 +8,5 @@ npm-debug.log*
 vite-smoke.err.log
 vite-smoke.out.log
 mobile-after-test.png
-tmp/imagegen/door-dark-fulltile.png
-tmp/imagegen/door-dark-passable-gap.png
-tmp/imagegen/door-dark.png
-tmp/imagegen/door-locked-dark-barred.png
-tmp/imagegen/door-locked-dark-fulltile.png
-tmp/imagegen/door-locked-dark.png
+tmp/
+coverage/

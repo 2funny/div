@@ -2,6 +2,7 @@ import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "../constants";
 import { equipmentRestrictionText, isWeaponUsableByClass } from "../equipment/equipmentRules";
 import { itemScore } from "../equipment/equipmentScoring";
 import { cardinalNeighbors, cellsWithin, distance } from "../floor/mapGeometry";
+import { merchantPriceFactor, merchantTrust, relationLabel } from "../quest/narrative";
 import { random } from "../random";
 import { advanceTutorial } from "../tutorial/tutorial";
 import type { GameMap, GameState, StatKey } from "../types";
@@ -44,6 +45,9 @@ export function createInventoryRuntime(ctx) {
   const showEvent = (...args) => api.showEvent(...args);
   const showModal = (...args) => api.showModal(...args);
   const showToast = (...args) => api.showToast(...args);
+  const learnSkill = (...args) => api.learnSkill(...args);
+  const skillRequirementText = (...args) => api.skillRequirementText(...args);
+  const skillScrollItem = (...args) => api.skillScrollItem?.(...args);
   const saveCurrentFloor = (...args) => api.saveCurrentFloor(...args);
   const skillById = (...args) => api.skillById(...args);
   const skillLevel = (...args) => api.skillLevel(...args);
@@ -322,6 +326,15 @@ export function createInventoryRuntime(ctx) {
       openTeleportBeacon(id);
       return;
     }
+    if (entry.kind === "skillScroll") {
+      if (entry.classId && entry.classId !== state.classId) {
+        showEvent("无法学习", `<p>${entry.name}不属于当前职业。</p>`, "知道了");
+        return;
+      }
+      const learned = learnSkill(entry.skillId, "研读卷轴");
+      if (learned) state.inventory.splice(index, 1);
+      return;
+    }
     if (entry.kind !== "potion") return;
     if (entry.effect === "hp") state.hp = Math.min(effectiveMaxHp(), state.hp + entry.amount);
     if (entry.effect === "mp") state.mp = Math.min(effectiveMaxMp(), state.mp + entry.amount);
@@ -335,6 +348,15 @@ export function createInventoryRuntime(ctx) {
     if (!entry) return;
     if (entry.kind === "teleport") {
       openTeleportBeacon(id);
+      return;
+    }
+    if (entry.kind === "skillScroll") {
+      showConfirm(
+        "研读卷轴",
+        `<p>要研读 ${entry.name} 吗？</p><p>${skillRequirementText(api.skillById(entry.skillId))}</p>`,
+        "学习",
+        () => useItem(id)
+      );
       return;
     }
     showConfirm(
@@ -484,8 +506,9 @@ export function createInventoryRuntime(ctx) {
   function enhance(slot) {
     const eq = state.equipment[slot];
     if (!canEnhance(slot)) return;
-    state.materials["强化石"]--;
-    state.gold -= 20;
+    const cost = enhanceCost(eq);
+    state.materials["强化石"] -= cost.stones;
+    state.gold -= cost.gold;
     eq.level++;
     log(`${eq.name}强化到 +${eq.level}。`);
     render();
@@ -494,9 +517,10 @@ export function createInventoryRuntime(ctx) {
   function confirmEnhance(slot) {
     const eq = state.equipment[slot];
     if (!canEnhance(slot)) return;
+    const cost = enhanceCost(eq);
     showConfirm(
       "锻造强化",
-      `<p>在合成台消耗 20 金币和 1 个强化石，将 ${eq.name} 强化到 +${eq.level + 1}。</p>`,
+      `<p>在合成台消耗 ${cost.gold} 金币和 ${cost.stones} 个强化石，将 ${eq.name} 强化到 +${eq.level + 1}。</p>`,
       "强化",
       () => enhance(slot)
     );
@@ -504,15 +528,27 @@ export function createInventoryRuntime(ctx) {
 
   function canEnhance(slot) {
     const eq = state.equipment[slot];
-    return !!eq && (state.materials["强化石"] || 0) > 0 && state.gold >= 20;
+    if (!eq) return false;
+    const cost = enhanceCost(eq);
+    return (state.materials["强化石"] || 0) >= cost.stones && state.gold >= cost.gold;
   }
 
   function enhanceDisabledReason(slot) {
     const eq = state.equipment[slot];
     if (!eq) return "未装备";
-    if ((state.materials["强化石"] || 0) <= 0) return "缺少强化石";
-    if (state.gold < 20) return "金币不足";
+    const cost = enhanceCost(eq);
+    if ((state.materials["强化石"] || 0) < cost.stones) return `缺少强化石（需要 ${cost.stones}）`;
+    if (state.gold < cost.gold) return `金币不足（需要 ${cost.gold}）`;
     return "";
+  }
+
+  function enhanceCost(eq) {
+    const qualityTier = { 普通: 0, 优秀: 1, 稀有: 2, 史诗: 3, 传说: 4 }[eq?.quality] || 0;
+    const nextLevel = Number(eq?.level || 0);
+    return {
+      gold: 20 + 12 * nextLevel + 8 * qualityTier,
+      stones: 1 + Math.floor((nextLevel + 1) / 3)
+    };
   }
 
   // 消耗技能点和技能尘提升指定技能等级。
@@ -619,6 +655,7 @@ export function createInventoryRuntime(ctx) {
   function openMerchant() {
     const merchant = currentMerchant();
     const hasTask = questDefinitionsForGiver("shop").length > 0;
+    const trust = merchantTrust(state);
     const actions = [
       { text: "打开商店", action: openMerchantShop },
       { text: "售出装备", action: openMerchantSell }
@@ -633,7 +670,7 @@ export function createInventoryRuntime(ctx) {
         <div class="merchant-portrait">${sprite("merchant", ASSETS.shop, "商人")}</div>
         <div class="merchant-copy">
           <b>流动补给</b>
-          <small>商人拦住去路。购买、售出和分解都要在这里处理；偶尔也会带来路面委托。</small>
+          <small>商人拦住去路。购买、售出和分解都要在这里处理；偶尔也会带来路面委托。当前关系：${relationLabel(state, "merchants")} · 信任 ${trust}</small>
         </div>
       </div>
     </div>
@@ -723,13 +760,14 @@ export function createInventoryRuntime(ctx) {
   function merchantSellsUniversalKey(merchant = currentMerchant()) {
     if (!merchant) return false;
     if (merchant.sellsUniversalKey === undefined) {
-      merchant.sellsUniversalKey = random() < Math.min(0.48, 0.2 + state.floor * 0.018);
+      merchant.sellsUniversalKey =
+        random() < Math.min(0.28, 0.08 + state.floor * 0.006 + Math.max(0, merchantTrust(state)) * 0.012);
     }
     return !!merchant.sellsUniversalKey;
   }
 
   function universalKeyPrice() {
-    return 58;
+    return Math.max(42, Math.round(58 * merchantPriceFactor(state)));
   }
 
   function ensureMerchantStock(merchant = currentMerchant()) {
@@ -744,17 +782,50 @@ export function createInventoryRuntime(ctx) {
           sold: false
         };
       });
+      const scroll = merchantSkillScrollItem();
+      if (scroll) {
+        merchant.stock.push({
+          id: scroll.id,
+          item: scroll,
+          price: merchantSkillScrollPrice(scroll),
+          sold: false
+        });
+      }
     }
     return merchant.stock;
   }
 
   function merchantStockCount() {
-    return 1 + (random() < 0.7 ? 1 : 0) + (state.floor >= 5 && random() < 0.35 ? 1 : 0);
+    return 1 + (random() < 0.55 ? 1 : 0) + (state.floor >= 8 && random() < 0.18 ? 1 : 0);
   }
 
   function merchantEquipmentPrice(entry) {
     const qualityBonus = { 普通: 0, 优秀: 8, 稀有: 22, 史诗: 48, 传说: 90 }[entry.quality] || 0;
-    return Math.max(24, Math.round(itemScore(entry) * 1.45 + state.floor * 5 + qualityBonus));
+    return Math.max(
+      24,
+      Math.round((itemScore(entry) * 1.45 + state.floor * 5 + qualityBonus) * merchantPriceFactor(state))
+    );
+  }
+
+  function merchantSkillScrollItem() {
+    if (state.floor < 4) return null;
+    const trustBonus = Math.max(0, merchantTrust(state)) * 0.015;
+    const chance = Math.min(0.24, 0.06 + state.floor * 0.003 + trustBonus);
+    if (random() >= chance) return null;
+    const candidates = (api.classSkills?.() || []).filter((skill) => {
+      if (api.isSkillLearned?.(skill.id)) return false;
+      const levelReq = Number(skill.requires?.level || 1);
+      const floorReq = Number(skill.requires?.floor || 1);
+      return levelReq <= state.floor + 4 && floorReq <= state.floor + 3;
+    });
+    const skill = candidates.sort((a, b) => (a.requires?.level || 1) - (b.requires?.level || 1))[0];
+    return skill ? skillScrollItem(skill.id) : null;
+  }
+
+  function merchantSkillScrollPrice(scroll) {
+    const skill = skillById(scroll.skillId);
+    const reqLevel = Number(skill?.requires?.level || 2);
+    return Math.max(48, Math.round((44 + reqLevel * 9 + state.floor * 2) * merchantPriceFactor(state)));
   }
 
   function merchantStockItem(id) {
@@ -767,6 +838,10 @@ export function createInventoryRuntime(ctx) {
     if (!stock.length) return `<p>今天没有合适装备。</p>`;
     return stock
       .map(({ id, item: goods, price }) => {
+        if (goods.kind === "skillScroll") {
+          const skill = skillById(goods.skillId);
+          return `<button type="button" onclick="confirmBuyMerchantEquipment('${id}')"><span>${goods.name}</span><small>技能卷轴 · ${skill ? skillRequirementText(skill) : "未知技能"} · ${price} 金币</small></button>`;
+        }
         const summary = [
           SLOT_NAMES[goods.slot],
           goods.quality,
@@ -782,6 +857,15 @@ export function createInventoryRuntime(ctx) {
     const entry = merchantStockItem(id);
     if (!entry || entry.sold) {
       showEvent("货物已售", "<p>这件装备已经不在商人的货架上了。</p>", "知道了");
+      return;
+    }
+    if (entry.item.kind === "skillScroll") {
+      showConfirm(
+        "购买技能卷轴",
+        `<p>花费 ${entry.price} 金币购买 ${entry.item.name}。</p><p>${skillRequirementText(skillById(entry.item.skillId))}</p>`,
+        "购买",
+        () => buyMerchantEquipment(id)
+      );
       return;
     }
     showConfirm(
@@ -847,7 +931,7 @@ export function createInventoryRuntime(ctx) {
       "合成台",
       `
     <div class="forge-panel">
-      <div class="forge-summary">强化装备需要 <b>20 金币</b> 和 <b>1 个强化石</b>。当前：金币 ${state.gold}，强化石 ${state.materials["强化石"] || 0}。</div>
+      <div class="forge-summary">强化费用会随装备品质和强化等级提高。当前：金币 ${state.gold}，强化石 ${state.materials["强化石"] || 0}。</div>
       ${rows}
     </div>
   `,

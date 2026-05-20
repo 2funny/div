@@ -16,6 +16,8 @@ export interface Item {
   level?: number;
   amount?: number;
   effect?: string;
+  skillId?: string;
+  classId?: string;
 }
 
 export type EquipmentSet = Record<SlotKey, Item | null>;

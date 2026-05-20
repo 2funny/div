@@ -9,18 +9,23 @@ import { QUEST_DEFS } from "../quest/quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
 import { discoverLorePage } from "../quest/lore";
 import { advanceTutorial } from "../tutorial/tutorial";
-import { choice, rand, random } from "../random";
+import { overlevelXpMultiplier, skillPointGainForLevel, xpForNextLevel } from "../progression";
+import { choice, rand, random, uid } from "../random";
 import type { DamageStatus } from "../types/combat";
 
 const BASE_DODGE = 0.03;
 const SPEED_DODGE_SCALE = 0.005;
 const EVADE_SKILL_DODGE_BONUS = 0.35;
 const CHANCE_CAP = 0.95;
+const STANDARD_DODGE_CAP = 0.7;
+const EVADE_DODGE_CAP = 0.85;
 const CRIT_BASE = 0.06;
 const CRIT_LUCK_SCALE = 0.008;
 const DAMAGE_STATUS_TURNS = 3;
 const PLAYER_TO_ENEMY_DELAY = 920;
 const ENEMY_TURN_RECOVERY_DELAY = 120;
+const BATTLE_SKILL_LIMIT = 4;
+const MAX_SKILL_LEVEL = 8;
 
 // 战斗运行时聚合回合制战斗、技能升级、胜负结算和自动战斗策略。
 export function createCombatRuntime(ctx) {
@@ -69,6 +74,11 @@ export function createCombatRuntime(ctx) {
       skill = typeof skill === "string" ? skillById(skill) : skill;
       if (!skill) {
         log("技能未找到。");
+        render();
+        return;
+      }
+      if (!isSkillEquipped(skill.id)) {
+        log(`${skill.name}没有放入战斗技能栏。`);
         render();
         return;
       }
@@ -272,8 +282,8 @@ export function createCombatRuntime(ctx) {
     return clampChance(CRIT_BASE + (t.luk || 0) * CRIT_LUCK_SCALE);
   }
 
-  function dodgeChance(t, bonus = 0) {
-    return clampChance(BASE_DODGE + (t.spd || 0) * SPEED_DODGE_SCALE + bonus);
+  function dodgeChance(t, bonus = 0, max = STANDARD_DODGE_CAP) {
+    return clampChance(BASE_DODGE + (t.spd || 0) * SPEED_DODGE_SCALE + bonus, max);
   }
 
   function clampChance(value, max = CHANCE_CAP) {
@@ -297,7 +307,7 @@ export function createCombatRuntime(ctx) {
       : (skill.scale === "mag" ? t.mag : t.atk) * skill.power;
     const physicalWeight = skill.magMultiplier && !skill.atkMultiplier ? 0.18 : 0.3;
     const mitigation = (enemy.def || 0) * physicalWeight;
-    return Math.max(2, raw + state.floor - mitigation);
+    return Math.max(2, raw + state.floor * 0.35 - mitigation);
   }
 
   // 执行职业技能效果，例如护盾、中毒、灼烧或连射。
@@ -308,10 +318,10 @@ export function createCombatRuntime(ctx) {
       return dealDamage(enemy, skillDamageAmount(skill, t, enemy), "格挡反击", currentWeaponElement());
     }
     if (skill.type === "shield") {
-      state._guard = Math.max(1, Math.round(8 + t.mag * skill.power));
+      state._guard = shieldAmount(skill, t);
       setBattleFx("hero", { type: "shield", text: `+${state._guard}`, label: skill.name });
       setBattleFx("center", { type: "shield", text: "护盾展开" });
-      return `奥术护盾展开，抵挡 ${state._guard} 点伤害。`;
+      return `${skill.name}展开，抵挡 ${state._guard} 点伤害。`;
     }
     if (skill.type === "evade") {
       state._evade = true;
@@ -354,7 +364,21 @@ export function createCombatRuntime(ctx) {
   }
 
   function statusDamageAmount(skill) {
-    return 2 + Math.ceil(state.floor * 0.5) + (skill.statusBonus || 0);
+    const scaled = 1 + Math.ceil(state.floor * 0.2) + (skill.statusBonus || 0);
+    const cap = Math.max(1, Math.round(skillDamageAmount(skill, totals(), state.currentEnemy || {}) * 0.6));
+    return Math.min(scaled, cap);
+  }
+
+  function shieldAmount(skill, t) {
+    return Math.max(
+      1,
+      Math.round(
+        8 +
+          (t.mag || 0) * (skill.power || 1) +
+          (t.def || 0) * Number(skill.defMultiplier || 0) +
+          (state.maxHp || 0) * Number(skill.hpMultiplier || 0)
+      )
+    );
   }
 
   function applyDamageStatus(enemy, skill, damage) {
@@ -410,7 +434,14 @@ export function createCombatRuntime(ctx) {
   // 结算敌人攻击回合，包含闪避、防御减伤和死亡检测。
   function enemyTurn(enemy) {
     const t = totals();
-    const dodge = random() < dodgeChance(t, state._evade ? EVADE_SKILL_DODGE_BONUS : 0);
+    const usingEvade = !!state._evade;
+    const dodge =
+      random() <
+      dodgeChance(
+        t,
+        usingEvade ? EVADE_SKILL_DODGE_BONUS : 0,
+        usingEvade ? EVADE_DODGE_CAP : STANDARD_DODGE_CAP
+      );
     state._evade = false;
     if (dodge) {
       setBattleFx("hero", { type: "evade", text: "闪避", label: enemy.name });
@@ -545,11 +576,182 @@ export function createCombatRuntime(ctx) {
     return CLASSES[state.classId].skills.find((skill) => skill.id === id);
   }
 
+  function classSkills() {
+    return CLASSES[state.classId]?.skills || [];
+  }
+
+  function starterSkillIds() {
+    const starters = classSkills().filter((skill) => skill.starter).map((skill) => skill.id);
+    return starters.length ? starters : classSkills().slice(0, 3).map((skill) => skill.id);
+  }
+
+  function ensureSkillState() {
+    state.skillLevels = state.skillLevels || {};
+    state.skillBranches = state.skillBranches || {};
+    state.skillCooldowns = state.skillCooldowns || {};
+    const valid = new Set(classSkills().map((skill) => skill.id));
+    const starters = starterSkillIds();
+    const learned = Array.isArray(state.learnedSkillIds)
+      ? state.learnedSkillIds.filter((id) => valid.has(id))
+      : [];
+    for (const id of starters) {
+      if (!learned.includes(id)) learned.push(id);
+    }
+    state.learnedSkillIds = learned;
+    const equipped = Array.isArray(state.equippedSkillIds)
+      ? state.equippedSkillIds.filter((id) => learned.includes(id))
+      : [];
+    for (const id of starters) {
+      if (equipped.length >= BATTLE_SKILL_LIMIT) break;
+      if (!equipped.includes(id)) equipped.push(id);
+    }
+    state.equippedSkillIds = equipped.slice(0, BATTLE_SKILL_LIMIT);
+    for (const skill of classSkills()) state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
+  }
+
+  function learnedSkillIds() {
+    ensureSkillState();
+    return state.learnedSkillIds || [];
+  }
+
+  function equippedSkillIds() {
+    ensureSkillState();
+    return state.equippedSkillIds || [];
+  }
+
+  function learnedSkills() {
+    const learned = new Set(learnedSkillIds());
+    return classSkills().filter((skill) => learned.has(skill.id));
+  }
+
+  function battleSkills() {
+    const equipped = equippedSkillIds();
+    return equipped.map((id) => skillById(id)).filter(Boolean);
+  }
+
+  function isSkillLearned(skillId) {
+    return learnedSkillIds().includes(skillId);
+  }
+
+  function isSkillEquipped(skillId) {
+    return equippedSkillIds().includes(skillId);
+  }
+
+  function missingSkillRequirements(skill) {
+    const req = skill?.requires || {};
+    const t = totals();
+    const checks = [
+      ["level", "等级", state.level || 1, req.level],
+      ["floor", "到达层数", state.floor || 1, req.floor],
+      ["atk", "攻击", t.atk || 0, req.atk],
+      ["mag", "法强", t.mag || 0, req.mag],
+      ["def", "防御", t.def || 0, req.def],
+      ["res", "抗性", t.res || 0, req.res],
+      ["spd", "速度", t.spd || 0, req.spd],
+      ["luk", "幸运", t.luk || 0, req.luk],
+      ["hp", "生命上限", effectiveMaxHp(), req.hp],
+      ["mp", "法力上限", effectiveMaxMp(), req.mp]
+    ];
+    const missing = checks
+      .filter(([, , current, needed]) => needed != null && Number(current) < Number(needed))
+      .map(([, label, , needed]) => `${label} ${needed}`);
+    for (const id of req.skills || []) {
+      const required = skillById(id);
+      if (!isSkillLearned(id)) missing.push(`先学会${required?.name || id}`);
+    }
+    return missing;
+  }
+
+  function skillRequirementText(skill) {
+    const missing = missingSkillRequirements(skill);
+    if (!skill?.requires) return "无前置";
+    const req = skill.requires;
+    const parts = [
+      req.level ? `等级 ${req.level}` : "",
+      req.floor ? `到达第 ${req.floor} 层` : "",
+      req.atk ? `攻击 ${req.atk}` : "",
+      req.mag ? `法强 ${req.mag}` : "",
+      req.def ? `防御 ${req.def}` : "",
+      req.res ? `抗性 ${req.res}` : "",
+      req.spd ? `速度 ${req.spd}` : "",
+      req.luk ? `幸运 ${req.luk}` : "",
+      req.hp ? `生命上限 ${req.hp}` : "",
+      req.mp ? `法力上限 ${req.mp}` : "",
+      ...(req.skills || []).map((id) => `先学会${skillById(id)?.name || id}`)
+    ].filter(Boolean);
+    return `${parts.join(" / ")}${missing.length ? `（未满足：${missing.join("、")}）` : ""}`;
+  }
+
+  function canLearnSkill(skillId) {
+    const skill = skillById(skillId);
+    return !!skill && !isSkillLearned(skillId) && missingSkillRequirements(skill).length === 0;
+  }
+
+  function learnSkill(skillId, source = "训练") {
+    const skill = skillById(skillId);
+    if (!skill || isSkillLearned(skillId)) return false;
+    const missing = missingSkillRequirements(skill);
+    if (missing.length) {
+      showEvent("无法学习", `<p>${skill.name}的前置还未满足：${missing.join("、")}。</p>`, "知道了");
+      return false;
+    }
+    ensureSkillState();
+    state.learnedSkillIds.push(skillId);
+    if (state.equippedSkillIds.length < BATTLE_SKILL_LIMIT) state.equippedSkillIds.push(skillId);
+    log(`${source}：学会${skill.name}。`);
+    playSound("quest");
+    render();
+    return true;
+  }
+
+  function toggleBattleSkill(skillId) {
+    if (!isSkillLearned(skillId)) return false;
+    ensureSkillState();
+    const equipped = state.equippedSkillIds || [];
+    if (equipped.includes(skillId)) {
+      if (equipped.length <= 1) {
+        showEvent("无法移除", "<p>至少需要保留一个战斗技能。</p>", "知道了");
+        return false;
+      }
+      state.equippedSkillIds = equipped.filter((id) => id !== skillId);
+    } else {
+      if (equipped.length >= BATTLE_SKILL_LIMIT) {
+        showEvent("技能栏已满", `<p>战斗最多携带 ${BATTLE_SKILL_LIMIT} 个技能。先卸下一个技能。</p>`, "知道了");
+        return false;
+      }
+      state.equippedSkillIds = [...equipped, skillId];
+    }
+    render();
+    return true;
+  }
+
+  function skillScrollItem(skillId) {
+    const skill = skillById(skillId);
+    if (!skill) return null;
+    return {
+      id: uid(),
+      kind: "skillScroll",
+      name: `${skill.name}卷轴`,
+      skillId,
+      classId: state.classId
+    };
+  }
+
+  function eligibleScrollSkills() {
+    return classSkills().filter(
+      (skill) => !isSkillLearned(skill.id) && (state.floor || 1) + 4 >= (skill.requires?.floor || 1)
+    );
+  }
+
   function upgradedSkill(skill) {
     const level = skillLevel(skill.id);
     const branchId = state.skillBranches?.[skill.id];
     const branch = skill.branches?.find((entry) => entry.id === branchId) || null;
-    const scale = 1 + level * 0.1;
+    const scale = 1 + level * 0.075;
+    const baseDamage =
+      skill.baseDamage == null
+        ? undefined
+        : Number((skill.baseDamage * (1 + level * 0.045) + level * 1.35).toFixed(2));
     const power = Number((skill.power * scale + (branch?.powerBonus || 0)).toFixed(2));
     const multiplierBonus = branch?.powerBonus || 0;
     return {
@@ -558,6 +760,7 @@ export function createCombatRuntime(ctx) {
       branch,
       mp: Math.max(1, skill.mp + Math.floor(level / 3) + (branch?.mpDelta || 0)),
       cooldown: Math.max(0, (skill.cooldown ?? 1) + (branch?.cooldownDelta || 0)),
+      baseDamage,
       power,
       atkMultiplier:
         skill.atkMultiplier == null
@@ -589,15 +792,24 @@ export function createCombatRuntime(ctx) {
     if (!skill.cooldown) return;
     state.skillCooldowns = state.skillCooldowns || {};
     state.skillCooldowns[skill.id] = skill.cooldown;
+    state._cooldownGraceSkillIds = Array.from(
+      new Set([...(state._cooldownGraceSkillIds || []), skill.id])
+    );
   }
 
   function tickSkillCooldowns() {
     if (!state.skillCooldowns) return;
+    const grace = new Set(state._cooldownGraceSkillIds || []);
     for (const [skillId, turns] of Object.entries(state.skillCooldowns)) {
+      if (grace.has(skillId)) {
+        grace.delete(skillId);
+        continue;
+      }
       const next = Math.max(0, Number(turns) - 1);
       if (next > 0) state.skillCooldowns[skillId] = next;
       else delete state.skillCooldowns[skillId];
     }
+    state._cooldownGraceSkillIds = [...grace];
   }
 
   function skillPreviewText(skill) {
@@ -608,7 +820,7 @@ export function createCombatRuntime(ctx) {
       const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
       return `伤害 ${damage} · 格挡 ${6 + t.def}`;
     }
-    if (skill.type === "shield") return `护盾 ${Math.max(1, Math.round(8 + t.mag * skill.power))}`;
+    if (skill.type === "shield") return `护盾 ${shieldAmount(skill, t)}`;
     if (skill.type === "evade") {
       const bonus = evadeDamageBonus(skill);
       return `下回合闪避 +35%${bonus > 0 ? ` · 下次伤害 +${Math.round(bonus * 100)}%` : ""}`;
@@ -631,30 +843,38 @@ export function createCombatRuntime(ctx) {
 
   function skillUpgradeCost(skillId) {
     const nextLevel = skillLevel(skillId) + 1;
+    if (nextLevel > MAX_SKILL_LEVEL) return { points: 0, dust: 0, maxed: true };
     return { points: 1, dust: nextLevel };
   }
 
   function canUpgradeSkill(skillId) {
     const cost = skillUpgradeCost(skillId);
-    return (state.skillPoints || 0) >= cost.points && (state.skillDust || 0) >= cost.dust;
+    return (
+      isSkillLearned(skillId) &&
+      skillLevel(skillId) < MAX_SKILL_LEVEL &&
+      (state.skillPoints || 0) >= cost.points &&
+      (state.skillDust || 0) >= cost.dust
+    );
   }
 
   // 完成战斗结算：发放奖励、清除敌人格子，并检查 Boss 通关。
   // 胜利结算会同时处理经验、掉落、任务进度、封印解锁和楼层推进。
   function winBattle(enemy) {
+    const gainedXp = enemyXpReward(enemy);
     state.gold += enemy.gold;
-    state.xp += enemy.xp;
-    log(`击败${enemy.name}，获得 ${enemy.xp} 经验和 ${enemy.gold} 金币。`);
+    state.xp += gainedXp;
+    log(`击败${enemy.name}，获得 ${gainedXp} 经验和 ${enemy.gold} 金币。`);
     const cell = currentBattleCell(enemy);
     if (cell?.object === enemy) cell.object = null;
     else if (cell?.object && Number(cell.object.hp) <= 0) cell.object = null;
     delete state._battleCell;
     state.currentEnemy = null;
     state.skillCooldowns = {};
+    state._cooldownGraceSkillIds = [];
     setBattlePhase("idle");
     advanceTutorial(state, "battle");
     syncMusicToGame();
-    const rewards = [`经验 +${enemy.xp}`, `金币 +${enemy.gold}`];
+    const rewards = [`经验 +${gainedXp}`, `金币 +${enemy.gold}`];
     recordQuestKill(enemy, rewards);
     completeStairSeal(enemy, rewards);
     rewards.push(...maybeDrop(enemy));
@@ -677,6 +897,13 @@ export function createCombatRuntime(ctx) {
         [{ text: "收下", action: closeModal }]
       );
     }
+  }
+
+  function enemyXpReward(enemy) {
+    const base = Number(enemy?.xp || 0);
+    if (enemy?.type === "boss") return base;
+    const multiplier = overlevelXpMultiplier(state.level || 1, state.floor || 1);
+    return Math.max(1, Math.round(base * multiplier));
   }
 
   function currentBattleCell(enemy) {
@@ -758,6 +985,8 @@ export function createCombatRuntime(ctx) {
       state.materials["首领印记"] = (state.materials["首领印记"] || 0) + 1;
       drops.push("首领印记 +1");
     }
+    const scrollDrop = maybeDropSkillScroll(enemy);
+    if (scrollDrop) drops.push(scrollDrop);
     if (enemy.type === "boss") dropEquipment(enemy, drops);
     const rolls = lootRollCount(enemy, reward);
     for (let i = 0; i < rolls; i++) rollLootDrop(enemy, drops, reward);
@@ -774,6 +1003,33 @@ export function createCombatRuntime(ctx) {
           ? 0.42
           : Math.min(0.38, 0.16 + state.floor * 0.008);
     return base + (random() < extraChance + (reward > 1 ? 0.1 : 0) ? 1 : 0);
+  }
+
+  function maybeDropSkillScroll(enemy) {
+    if (!(enemy.type === "boss" || enemy.roomBoss)) return "";
+    const candidates = eligibleScrollSkills();
+    if (!candidates.length) return "";
+    const chance = enemy.type === "boss" ? 1 : 0.28;
+    if (random() >= chance) return "";
+    const skill = choice(candidates);
+    const scroll = skillScrollItem(skill.id);
+    if (!scroll) return "";
+    state.inventory = state.inventory || [];
+    state.inventory.push(scroll);
+    log(`${enemy.name}掉落了${scroll.name}。`);
+    return `技能卷轴：${skill.name}`;
+  }
+
+  function grantSkillScrollReward(source = "导师") {
+    const candidates = eligibleScrollSkills();
+    if (!candidates.length) return "";
+    const skill = candidates[0];
+    const scroll = skillScrollItem(skill.id);
+    if (!scroll) return "";
+    state.inventory = state.inventory || [];
+    state.inventory.push(scroll);
+    log(`${source}交给你${scroll.name}。`);
+    return `技能卷轴：${skill.name}`;
   }
 
   function rollLootDrop(enemy, drops, reward = 1) {
@@ -892,13 +1148,14 @@ export function createCombatRuntime(ctx) {
   function levelUp() {
     state.xp -= state.xpNext;
     state.level++;
-    state.xpNext = 16 + state.level * 8;
+    state.xpNext = xpForNextLevel(state.level);
     state.statPoints++;
-    state.skillPoints = (state.skillPoints || 0) + 1;
+    const gainedSkillPoints = skillPointGainForLevel(state.level);
+    state.skillPoints = (state.skillPoints || 0) + gainedSkillPoints;
     applyClassLevelGrowth();
     state.hp = effectiveMaxHp();
     state.mp = effectiveMaxMp();
-    log(`升级到 Lv.${state.level}，获得 1 点属性点和 1 点技能点。`);
+    log(`升级到 Lv.${state.level}，获得 1 点属性点${gainedSkillPoints ? "和 1 点技能点" : ""}。`);
   }
 
   function applyClassLevelGrowth() {
@@ -921,6 +1178,7 @@ export function createCombatRuntime(ctx) {
     state._nextDamageBonus = 0;
     state.currentEnemy = null;
     state.skillCooldowns = {};
+    state._cooldownGraceSkillIds = [];
     delete state._battleCell;
     setBattlePhase("idle");
     syncMusicToGame();
@@ -964,7 +1222,7 @@ export function createCombatRuntime(ctx) {
       rounds < 3 &&
       autoBattlePolicy(state.currentEnemy).allowed
     ) {
-      const bestSkill = CLASSES[state.classId].skills.find(
+      const bestSkill = battleSkills().find(
         (skill) =>
           state.mp >= upgradedSkill(skill).mp &&
           skill.type !== "evade" &&
@@ -975,25 +1233,15 @@ export function createCombatRuntime(ctx) {
     }
   }
 
-  // 一键战斗准入策略：显示胜率高于 60% 时允许使用。
+  // 一键战斗准入策略：显示胜率高于 68% 时允许使用。
   function autoBattlePolicy(enemy) {
     if (!enemy) return { allowed: false, score: 0, label: "未知", reason: "没有可结算的敌人" };
     const risk = battleRisk(enemy);
     const displayedWinRate = Math.round(risk.score * 100);
-    if (displayedWinRate <= 60) {
-      return { ...risk, allowed: false, reason: "胜率没有超过 60%" };
+    if (displayedWinRate <= 68) {
+      return { ...risk, allowed: false, reason: "胜率没有超过 68%" };
     }
-    return { ...risk, allowed: true, reason: "胜率高于 60%" };
-  }
-
-  // 兼容测试和老存档中缺少装备结构的场景，安全获取生命上限。
-  function safeEffectiveMaxHp() {
-    return state.equipment ? effectiveMaxHp() : state.maxHp;
-  }
-
-  // 兼容测试和老存档中缺少装备结构的场景，安全获取法力上限。
-  function safeEffectiveMaxMp() {
-    return state.equipment ? effectiveMaxMp() : state.maxMp;
+    return { ...risk, allowed: true, reason: "胜率高于 68%" };
   }
 
   // 根据玩家和敌人的综合强度估算战斗风险。
@@ -1003,7 +1251,7 @@ export function createCombatRuntime(ctx) {
     const skillPressure =
       (enemy.skills?.length || 0) * (enemy.type === "boss" ? 28 : enemy.type === "elite" ? 18 : 10);
     const enemyPower = enemy.hp * 1.08 + enemy.atk * 12 + enemy.def * 8 + skillPressure;
-    const score = heroPower / (heroPower + enemyPower);
+    const score = simulatedBattleScore(enemy, t, heroPower, enemyPower);
     const label =
       score >= 0.75
         ? "碾压"
@@ -1015,6 +1263,68 @@ export function createCombatRuntime(ctx) {
               ? "危险"
               : "致命";
     return { score, label };
+  }
+
+  function simulatedBattleScore(enemy, t, fallbackHeroPower, fallbackEnemyPower) {
+    const result = simulateBattleSample(enemy, t);
+    const enemyProgress = 1 - Math.max(0, result.enemyHp) / Math.max(1, Number(enemy.hp || enemy.maxHp || 1));
+    const heroRatio = result.heroHp / Math.max(1, result.heroMaxHp);
+    const winRate = result.enemyHp <= 0 && result.heroHp > 0 ? 1 : enemyProgress * 0.72 + heroRatio * 0.28;
+    const resourceFactor = Math.max(0.72, Math.min(1.08, heroRatio + potionSafetyFactor()));
+    const fallback = fallbackHeroPower / (fallbackHeroPower + fallbackEnemyPower);
+    return Math.max(0.05, Math.min(0.98, winRate * 0.72 + fallback * 0.2 + resourceFactor * 0.08));
+  }
+
+  function simulateBattleSample(enemy, t) {
+    const simEnemy = {
+      hp: Number(enemy.hp || 0),
+      atk: Number(enemy.atk || 0),
+      def: Number(enemy.def || 0),
+      element: enemy.element || null
+    };
+    const heroMaxHp = effectiveMaxHp();
+    let heroHp = Number(state.hp || 0);
+    let heroMp = Number(state.mp || 0);
+    let guard = 0;
+    const bestSkill = bestAutoBattleSkill(simEnemy, t);
+    for (let turn = 0; turn < 2; turn++) {
+      if (bestSkill && heroMp >= bestSkill.mp) {
+        heroMp -= bestSkill.mp;
+        simEnemy.hp -= Math.max(1, Math.round(skillDamageAmount(bestSkill, t, simEnemy)));
+      } else {
+        simEnemy.hp -= Math.max(1, Math.round(basicAttackDamage(t, simEnemy)));
+      }
+      if (simEnemy.hp <= 0) break;
+      if (heroHp <= heroMaxHp * 0.3) guard = Math.max(3, Math.round(3 + (t.def || 0)));
+      const resistMultiplier = incomingElementMultiplier(simEnemy.element);
+      let incoming = Math.max(
+        1,
+        Math.round(simEnemy.atk * 1.02 - (t.def || 0) * 0.28 - (t.res || 0) * 0.14)
+      );
+      incoming = Math.max(1, Math.round(incoming * resistMultiplier));
+      if (guard > 0) {
+        incoming = Math.max(0, incoming - guard);
+        guard = 0;
+      }
+      incoming = Math.round(incoming * (1 - dodgeChance(t, 0, STANDARD_DODGE_CAP)));
+      heroHp = Math.max(0, heroHp - incoming);
+      if (heroHp <= 0) break;
+    }
+    return { heroHp, heroMaxHp, enemyHp: simEnemy.hp };
+  }
+
+  function bestAutoBattleSkill(enemy, t) {
+    return (
+      battleSkills()
+        ?.map((skill) => upgradedSkill(skill))
+        .filter((skill) => skill.type !== "evade" && Number(skill.mp || 0) <= Number(state.mp || 0))
+        .sort((a, b) => skillDamageAmount(b, t, enemy) - skillDamageAmount(a, t, enemy))[0] || null
+    );
+  }
+
+  function potionSafetyFactor() {
+    const potions = (state.inventory || []).filter((entry) => entry.kind === "potion").length;
+    return Math.min(0.12, potions * 0.02);
   }
 
   // 消耗一个待分配属性点并提升指定基础属性。
@@ -1032,7 +1342,9 @@ export function createCombatRuntime(ctx) {
     autoBattlePolicy: withState(autoBattlePolicy),
     battleResultList,
     battleRisk: withState(battleRisk),
+    battleSkills: withState(battleSkills),
     canUpgradeSkill: withState(canUpgradeSkill),
+    canLearnSkill: withState(canLearnSkill),
     castSkill: withState(castSkill),
     completeStairSeal: withState(completeStairSeal),
     dealDamage: withState(dealDamage),
@@ -1040,17 +1352,29 @@ export function createCombatRuntime(ctx) {
     enemySkillTurn: withState(enemySkillTurn),
     enemyTurn: withState(enemyTurn),
     executeAutoBattle: withState(executeAutoBattle),
+    grantSkillScrollReward: withState(grantSkillScrollReward),
     levelUp: withState(levelUp),
     maybeDrop: withState(maybeDrop),
     recordQuestKill: withState(recordQuestKill),
-    safeEffectiveMaxHp: withState(safeEffectiveMaxHp),
-    safeEffectiveMaxMp: withState(safeEffectiveMaxMp),
-    skillById,
+    BATTLE_SKILL_LIMIT,
+    classSkills: withState(classSkills),
+    equippedSkillIds: withState(equippedSkillIds),
+    ensureSkillState: withState(ensureSkillState),
+    isSkillEquipped: withState(isSkillEquipped),
+    isSkillLearned: withState(isSkillLearned),
+    learnSkill: withState(learnSkill),
+    learnedSkillIds: withState(learnedSkillIds),
+    learnedSkills: withState(learnedSkills),
+    skillById: withState(skillById),
+    skillScrollItem: withState(skillScrollItem),
     skillLevel: withState(skillLevel),
     skillPreviewText: withState(skillPreviewText),
+    skillRequirementText: withState(skillRequirementText),
     skillUpgradeCost: withState(skillUpgradeCost),
+    toggleBattleSkill: withState(toggleBattleSkill),
     upgradedSkill: withState(upgradedSkill),
     useBattlePotion: withState(useBattlePotion),
-    winBattle: withState(winBattle)
+    winBattle: withState(winBattle),
+    MAX_SKILL_LEVEL
   };
 }

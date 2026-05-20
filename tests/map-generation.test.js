@@ -152,6 +152,10 @@ vm.runInContext(
   assert.strictEqual(state.map.effect?.id, "lava", "final floor should carry the lava special floor effect");
   assert(finalCells.some((cell) => cell.terrain === "lava"), "lava special floors should place blocking lava terrain");
   assert(finalCells.some((cell) => cell.object?.type === "boss"), "final floor should contain the final boss");
+  const finalBoss = finalCells.find((cell) => cell.object?.type === "boss")?.object;
+  assert.strictEqual(finalBoss.bossProfile, "throne", "final boss should use the throne theme boss profile");
+  assert(finalBoss.skills.some((skill) => skill.id === "memory-decree"), "theme boss should include a throne-specific skill");
+  assert(finalBoss.resistances.includes("dark"), "theme boss should carry profile-specific resistances");
   assert(!finalCells.some((cell) => cell.object?.type === "stairsDown"), "final floor should not contain downstairs");
 `,
   context

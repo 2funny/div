@@ -12,6 +12,23 @@ vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), 
 });
 vm.runInContext(
   `
+  function currentTestMap(size = 23) {
+    return {
+      size,
+      explorationVersion: 2,
+      cells: Array.from({ length: size }, (_, y) =>
+        Array.from({ length: size }, (_, x) => ({
+          x,
+          y,
+          terrain: x === 0 || y === 0 || x === size - 1 || y === size - 1 ? "wall" : "floor",
+          object: null,
+          seen: false,
+          visible: false
+        }))
+      )
+    };
+  }
+
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
   assert.strictEqual(saveSlots().length, 8, "start screen should expose multiple save slots");
   assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
@@ -35,7 +52,28 @@ vm.runInContext(
     equipment: {
       weapon: { id: "old", kind: "equip", name: "Old Sword", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 }
     },
+    map: currentTestMap(),
+    player: { x: 1, y: 1 },
     inventory: [],
+    materials: {},
+    runes: {},
+    floorStates: {},
+    quests: [],
+    lore: { chapters: [], pages: [] },
+    narrative: {
+      relations: {},
+      flags: {},
+      eventChoices: {},
+      rescuedNpcIds: [],
+      merchantTrust: 0,
+      factionLeanings: {}
+    },
+    skillLevels: {},
+    skillBranches: {},
+    skillCooldowns: {},
+    statPoints: 0,
+    skillPoints: 0,
+    skillDust: 0,
     log: []
   };
   currentSaveSlot = "slot-2";
@@ -58,6 +96,33 @@ vm.runInContext(
   assert.strictEqual(loadGame("slot-2"), true, "loading a selected slot should restore that save");
   assert.strictEqual(currentSaveSlot, "slot-2", "loading a slot should make it the active save target");
   assert.strictEqual(state.classId, savedState.classId, "loading should restore the selected slot state");
+  const slot2Floor = state.floor;
+  state.classId = "mage";
+  state.floor = 22;
+  state.floorStates = {
+    21: {
+      map: { size: 3, cells: [] },
+      player: { x: 1, y: 1 },
+      facing: "up",
+      narrative: {
+        relations: { survivors: 1 },
+        flags: {},
+        eventChoices: {},
+        rescuedNpcIds: [],
+        merchantTrust: 0,
+        factionLeanings: {}
+      }
+    }
+  };
+  currentSaveSlot = "slot-5";
+  saveGame(false);
+  assert.strictEqual(loadGame("slot-2"), true, "loading another slot should restore the requested save");
+  assert.strictEqual(state.classId, savedState.classId, "slot loading should keep save data isolated by slot id");
+  assert.strictEqual(state.floor, slot2Floor, "slot loading should not leak floor from another slot");
+  assert.strictEqual(loadGame("slot-5"), true, "loading the second slot should restore its own state");
+  assert.strictEqual(state.classId, "mage", "second slot should preserve its own class");
+  assert.strictEqual(state.floor, 22, "second slot should preserve its own floor");
+  assert(Array.isArray(state.floorStates["21"].narrative.rescuedNpcIds), "saved floor cache should preserve current narrative state");
   state = null;
   getElement("map").innerHTML = "";
   continueSavedGame("slot-2");
@@ -82,6 +147,7 @@ vm.runInContext(
   assert(!getElement("classSelect").innerHTML.includes("start-actions"), "deleting from the save list should not jump back to the start screen");
   returnHome(false);
   assert(getElement("classSelect").innerHTML.includes("start-actions"), "return home should work from the save list");
+  assert(Array.isArray(JSON.parse(localStorage.getItem(saveSlotKey("slot-2"))).quests), "current saves should carry quests explicitly");
   loadGame("slot-2");
 
   const randomBeforeEquipmentRules = Math.random;
@@ -97,6 +163,21 @@ vm.runInContext(
     Math.random = () => offClassRolls.shift() ?? 0.99;
     const offClassWeapon = randomEquipment();
     assert(!["bow", "crossbow", "dagger"].includes(offClassWeapon.weaponType), "30 percent equipment path should allow non-matching weapons");
+
+    state.classId = "warrior";
+    state.floor = 60;
+    Math.random = (() => {
+      const rolls = [0.21, 0.94, 0.99];
+      return () => rolls.shift() ?? 0.99;
+    })();
+    const deepHighRoll = randomEquipment();
+    assert.notStrictEqual(deepHighRoll.quality, "传说", "deep-floor quality bonus should not turn every high roll into legendary gear");
+    Math.random = (() => {
+      const rolls = [0.21, 0.951, 0.99];
+      return () => rolls.shift() ?? 0.99;
+    })();
+    const deepLegendaryRoll = randomEquipment();
+    assert.strictEqual(deepLegendaryRoll.quality, "传说", "near-perfect deep-floor rolls should still allow legendary gear");
   } finally {
     Math.random = randomBeforeEquipmentRules;
   }
@@ -154,6 +235,18 @@ vm.runInContext(
   activeInventoryTab = "equipment";
   assert(!inventory.includes("confirmDisassembleEquipment"), "inventory equipment rows should not keep a persistent disassemble action");
   assert(!inventory.includes("confirmSellEquipment"), "inventory equipment rows should not expose selling outside merchant dialogue");
+
+  state.equipment.weapon = { id: "forge-test", kind: "equip", name: "Forge Sword", slot: "weapon", quality: "传说", stats: { atk: 8, spd: 2 }, runeSlots: 2, runes: [], level: 2 };
+  state.gold = 100;
+  state.materials = { "强化石": 2 };
+  confirmEnhance("weapon");
+  assert(modalState().body.includes("76 金币"), "enhance confirmation should show quality and level scaled gold cost");
+  assert(modalState().body.includes("2 个强化石"), "enhance confirmation should show scaled stone cost");
+  modalState().actions.find((action) => action.text.includes("强化")).action();
+  assert.strictEqual(state.gold, 24, "enhancing high-quality upgraded equipment should spend scaled gold");
+  assert.strictEqual(state.materials["强化石"], 0, "enhancing high-quality upgraded equipment should spend scaled stones");
+  assert.strictEqual(state.equipment.weapon.level, 3, "enhance action should still raise equipment level");
+
   render = () => {};
   showEvent = (title, body) => { eventTitle = title; eventBody = body; };
   let eventTitle = "";

@@ -30,6 +30,44 @@ export const QUEST_DEFS = {
     rewardGold: (floor: number) => 8 + floor * 2,
     rewardDoorKey: true
   },
+  runeSurvey: {
+    id: "runeSurvey",
+    giver: "questNpc",
+    title: "符文测绘",
+    giverName: "符文测绘员",
+    desc: "清理被符文回声干扰的区域，记录地牢回路的变化。",
+    target: 1,
+    rewardGold: (floor: number) => 9 + floor * 2,
+    rewardSkillPoints: 1,
+    rewardSkillDust: 2,
+    rewardSkillScroll: true,
+    relation: "runebound"
+  },
+  wardenSeal: {
+    id: "wardenSeal",
+    giver: "questNpc",
+    title: "封印巡检",
+    giverName: "巡夜封印官",
+    desc: "检查本层松动的符文封印，清掉被封印气息引来的守卫。",
+    target: 2,
+    rewardGold: (floor: number) => 12 + floor * 3,
+    rewardKeys: 1,
+    rewardSkillPoints: 1,
+    relation: "wardens"
+  },
+  survivorTrace: {
+    id: "survivorTrace",
+    giver: "questNpc",
+    title: "幸存者暗记",
+    giverName: "暗记记录员",
+    desc: "沿着墙面暗记清理追踪者，让后续幸存者能辨认安全路线。",
+    target: 2,
+    rewardGold: (floor: number) => 11 + floor * 2,
+    rewardPotion: "hp",
+    rewardSkillPoints: 1,
+    rewardSkillScroll: true,
+    relation: "survivors"
+  },
   merchantRoute: {
     id: "merchantRoute",
     giver: "shop",

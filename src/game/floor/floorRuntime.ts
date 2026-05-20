@@ -28,6 +28,89 @@ const THEME_ENEMY_POOLS = {
   throne: ["王座近卫", "符文审判者", "记忆缝合体"]
 };
 
+const THEME_BOSS_PROFILES = {
+  moss: {
+    name: "苔石门卫",
+    element: "poison",
+    weaknesses: ["fire", "thunder"],
+    resistances: ["poison"],
+    skills: [{ id: "root-bind", name: "根缚", type: "weaken", element: "poison", power: 0.86, chance: 0.34 }]
+  },
+  mine: {
+    name: "矿脉巨像",
+    element: "thunder",
+    weaknesses: ["ice"],
+    resistances: ["thunder", "poison"],
+    skills: [{ id: "ore-shell", name: "矿壳", type: "guard", power: 1, chance: 0.36 }]
+  },
+  frost: {
+    name: "霜厅狼王",
+    element: "ice",
+    weaknesses: ["fire", "thunder"],
+    resistances: ["ice"],
+    skills: [{ id: "whiteout", name: "白霜突袭", type: "damage", element: "ice", power: 1.18, chance: 0.38 }]
+  },
+  fungal: {
+    name: "荧菌母巢",
+    element: "poison",
+    weaknesses: ["fire"],
+    resistances: ["poison", "dark"],
+    skills: [{ id: "spore-bloom", name: "孢潮", type: "drain", element: "poison", power: 0.96, chance: 0.32 }]
+  },
+  cistern: {
+    name: "沉钟潮主",
+    element: "ice",
+    weaknesses: ["thunder"],
+    resistances: ["ice", "poison"],
+    skills: [{ id: "bell-tide", name: "钟潮", type: "weaken", element: "ice", power: 0.92, chance: 0.34 }]
+  },
+  ember: {
+    name: "赤曜炉心",
+    element: "fire",
+    weaknesses: ["ice", "thunder"],
+    resistances: ["fire"],
+    skills: [{ id: "cinder-wave", name: "烬浪", type: "damage", element: "fire", power: 1.2, chance: 0.38 }]
+  },
+  archive: {
+    name: "缄默典狱",
+    element: "dark",
+    weaknesses: ["holy", "fire"],
+    resistances: ["dark"],
+    skills: [{ id: "ink-seal", name: "墨封", type: "weaken", element: "dark", power: 0.9, chance: 0.36 }]
+  },
+  astral: {
+    name: "星盘司祭",
+    element: "holy",
+    weaknesses: ["dark"],
+    resistances: ["holy", "thunder"],
+    skills: [{ id: "star-aegis", name: "星盾", type: "guard", power: 1, chance: 0.34 }]
+  },
+  shadow: {
+    name: "影幕执旗者",
+    element: "dark",
+    weaknesses: ["holy", "fire"],
+    resistances: ["dark"],
+    skills: [{ id: "banner-drain", name: "黑旗汲取", type: "drain", element: "dark", power: 0.98, chance: 0.34 }]
+  },
+  void: {
+    name: "裂隙朝圣者",
+    element: "dark",
+    weaknesses: ["holy"],
+    resistances: ["dark", "poison"],
+    skills: [{ id: "void-lash", name: "虚空鞭笞", type: "damage", element: "dark", power: 1.16, chance: 0.38 }]
+  },
+  throne: {
+    name: "符文守王",
+    element: "dark",
+    weaknesses: ["holy", "fire"],
+    resistances: ["dark", "thunder"],
+    skills: [
+      { id: "memory-decree", name: "记忆敕令", type: "weaken", element: "dark", power: 0.94, chance: 0.4 },
+      { id: "throne-aegis", name: "王座护印", type: "guard", power: 1, chance: 0.34 }
+    ]
+  }
+};
+
 type ScatterOptions = {
   rooms?: Array<{ id: string; threat?: string }>;
   preferRooms?: boolean;
@@ -121,7 +204,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         rooms
       });
       scatter(map, "trap", trapCountForFloor(), { minObjectDistance: 3 });
-      scatter(map, "altar", 2, { preferRooms: true, minObjectDistance: 6 });
+      scatter(map, "altar", altarCountForFloor(), { preferRooms: true, minObjectDistance: 6 });
       if (shouldPlaceMerchant()) scatter(map, "shop", 1, { minObjectDistance: 5 });
       if (state.floor % 3 === 2) scatter(map, "forge", 1, { minObjectDistance: 5 });
       resolveOutdoorFeatureCrowding(map);
@@ -147,7 +230,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       placeLavaFields(map);
       const rescueQuest = placeRescueQuest(map, rooms);
       ensureQuestRoomEncounters(map, rooms);
-      if (!rescueQuest) placeQuestNpc(map);
+      if (!rescueQuest) placeQuestNpc(map, defaultQuestNpcSource());
+      placeSkillTrainer(map);
       placeLockedRoomDoors(map, rooms);
       removeUnlockedRoomDoors(map);
       placeRoomEvents(map, rooms);
@@ -219,7 +303,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
 
   function monsterCountForFloor() {
     const bonus = currentFloorEffect() ? 1 : 0;
-    return Math.min(20, 9 + Math.floor(state.floor * 0.85) + bonus);
+    return Math.min(16, 8 + Math.floor(state.floor * 0.58) + bonus);
   }
 
   function treasureCountForFloor() {
@@ -233,10 +317,20 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     );
   }
 
+  function altarCountForFloor() {
+    if (state.floor <= 8) return 2;
+    return 1 + (random() < 0.2 ? 1 : 0);
+  }
+
   function shouldPlaceMerchant() {
-    const earlyFloorBonus = state.floor <= 2 ? 0.08 : 0;
-    const deepFloorBonus = Math.min(0.08, state.floor * 0.002);
-    return random() < Math.min(0.86, 0.74 + earlyFloorBonus + deepFloorBonus);
+    if (state.floor <= 8) {
+      const earlyFloorBonus = state.floor <= 2 ? 0.08 : 0;
+      return random() < Math.min(0.82, 0.68 + earlyFloorBonus);
+    }
+    if (state.floor <= 24) {
+      return random() < Math.min(0.65, 0.55 + state.floor * 0.004);
+    }
+    return random() < 0.52;
   }
 
   function decorateMerchant(merchant) {
@@ -1082,7 +1176,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     return { x: total.x / cells.length, y: total.y / cells.length };
   }
 
-  // 在地图上放置任务 NPC，并给旧版单任务字段保留兼容默认值。
+  // 在地图上放置任务 NPC。
   function placeQuestNpc(
     map: Cell[][],
     source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人" }
@@ -1106,14 +1200,54 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       source.roomName ||
       (targetFloor !== state.floor ? crossFloorTargetRoomName(targetFloor) : null);
     cell.object = { type: "questNpc", targetFloor, targetRoomName, ...objectSource };
-    state.quest = state.quest || {
-      id: "wardenErrand",
-      floor: state.floor,
-      kills: 0,
-      target: 2,
-      claimed: false
-    };
     return cell;
+  }
+
+  function defaultQuestNpcSource(floor = state.floor): QuestNpcSource {
+    if (floor >= 18 && floor % 7 === 0) {
+      return {
+        questId: "survivorTrace",
+        npcName: "暗记记录员",
+        target: 2,
+        targetFloor: nearbyQuestTargetFloor(floor)
+      };
+    }
+    if (floor >= 12 && floor % 4 === 0) {
+      return {
+        questId: "runeSurvey",
+        npcName: "符文测绘员",
+        target: 1,
+        targetFloor: nearbyQuestTargetFloor(floor)
+      };
+    }
+    if (floor >= 8 && floor % 6 === 0) {
+      return {
+        questId: "wardenSeal",
+        npcName: "巡夜封印官",
+        target: 2,
+        targetFloor: nearbyQuestTargetFloor(floor)
+      };
+    }
+    return { questId: "wardenErrand", npcName: "巡夜人" };
+  }
+
+  function placeSkillTrainer(map: Cell[][]) {
+    if (state.floor < 3 || state.floor >= MAX_FLOOR) return false;
+    if (!(state.floor % 5 === 3 || random() < 0.08)) return false;
+    return placeQuestNpc(map, {
+      questId: "skillTraining",
+      npcName: classTrainerName(),
+      trainer: true
+    } as QuestNpcSource);
+  }
+
+  function classTrainerName() {
+    const names = {
+      warrior: "剑术导师",
+      mage: "秘法导师",
+      ranger: "游侠导师"
+    };
+    return names[state.classId] || "职业导师";
   }
 
   // 偶尔把普通委托目标放到相邻楼层，避免跨层距离过大。
@@ -1375,6 +1509,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   function makeEnemy(eliteOrBoss = false) {
     const floor = state.floor;
     const boss = isFinalFloor(floor);
+    const deepFloor = Math.max(0, floor - 36);
     const names =
       floor < 4
         ? ["史莱姆", "洞穴鼠", "骷髅兵"]
@@ -1382,23 +1517,46 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           ? ["矿洞蝙蝠", "诅咒矿工", "石像守卫"]
           : ["冰霜狼", "寒冰法徒", "冰晶魔像"];
     const elite = eliteOrBoss && !boss;
-    const hp = Math.round(boss ? 90 + floor * 8 : elite ? 22 + floor * 5.2 : 12 + floor * 3);
+    const hp = Math.round(
+      (boss ? 90 + floor * 8 : elite ? 22 + floor * 5.2 : 12 + floor * 3) +
+        (boss ? deepFloor * 8 : elite ? deepFloor * 2.2 : deepFloor * 0.7)
+    );
     const enemy = {
       type: boss ? "boss" : elite ? "elite" : "monster",
       name: boss ? "符文守王" : elite ? `精英${choice(names)}` : choice(names),
       hp,
       maxHp: hp,
-      atk: Math.round(boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52),
-      def: Math.round(boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08),
+      atk: Math.round(
+        (boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52) +
+          (boss ? deepFloor * 0.18 : elite ? deepFloor * 0.12 : deepFloor * 0.05)
+      ),
+      def: Math.round(
+        (boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08) +
+          (boss ? deepFloor * 0.05 : elite ? deepFloor * 0.03 : 0)
+      ),
       spd: Math.round(boss ? 8 + floor * 0.45 : elite ? 4 + floor * 0.5 : 2 + floor * 0.35),
-      xp: scaledReward(boss ? 160 + floor * 8 : 5 + floor * 2.2 + (elite ? 8 : 0)),
+      xp: scaledReward(boss ? 130 + floor * 6 : 4 + floor * 1.25 + (elite ? 7 : 0)),
       gold: scaledReward(boss ? 220 + floor * 7 : rand(3, 6) + floor + (elite ? 5 : 0))
     };
+    applyThemeBossProfile(enemy, floor);
     applyThemeEnemyIdentity(enemy, floor);
     assignEnemyElement(enemy, names);
     assignEnemySkills(enemy);
     applyFloorEffectToEnemy(enemy);
     return maybeApplyEnemyAffix(enemy, eliteOrBoss);
+  }
+
+  function applyThemeBossProfile(enemy, floor = state.floor) {
+    if (enemy.type !== "boss") return enemy;
+    const themeId = themeForFloor(floor)?.id || "throne";
+    const profile = THEME_BOSS_PROFILES[themeId] || THEME_BOSS_PROFILES.throne;
+    enemy.name = profile.name;
+    enemy.bossProfile = themeId;
+    enemy.element = profile.element;
+    enemy.weaknesses = [...profile.weaknesses];
+    enemy.resistances = [...profile.resistances];
+    enemy.skills = [...profile.skills];
+    return enemy;
   }
 
   function applyThemeEnemyIdentity(enemy, floor = state.floor) {
@@ -1445,8 +1603,8 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const element = profile?.element || byName || themeElement || ladderElement;
     const def = ELEMENTS[element] || ELEMENTS.poison;
     enemy.element = def.value;
-    enemy.weaknesses = [...(profile?.weaknesses || def.weakAgainst)];
-    enemy.resistances = [...(profile?.resistances || def.strongAgainst)];
+    enemy.weaknesses = enemy.weaknesses || [...(profile?.weaknesses || def.weakAgainst)];
+    enemy.resistances = enemy.resistances || [...(profile?.resistances || def.strongAgainst)];
     if (enemy.type === "boss" && !enemy.weaknesses.includes("holy")) enemy.weaknesses.push("holy");
     if (enemy.type === "elite" && random() < 0.35) {
       enemy.resistances = [...new Set([...enemy.resistances, def.value])];
@@ -1525,7 +1683,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (random() > skillChance) return enemy;
     const pool = enemySkillPool(enemy);
     const skillCount = enemy.type === "boss" ? 3 : enemy.type === "elite" || enemy.roomBoss ? 2 : 1;
-    enemy.skills = [];
+    enemy.skills = enemy.skills || [];
     while (enemy.skills.length < skillCount && pool.length) {
       const skill = choice(pool);
       if (!enemy.skills.some((entry) => entry.id === skill.id)) enemy.skills.push(skill);

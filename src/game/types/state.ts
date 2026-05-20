@@ -35,7 +35,8 @@ export interface GameState {
   skillLevels?: Record<string, number>;
   skillBranches?: Record<string, string>;
   skillCooldowns?: Record<string, number>;
-  quest?: QuestState;
+  learnedSkillIds?: string[];
+  equippedSkillIds?: string[];
   quests?: QuestState[];
   lore?: LoreState;
   narrative?: NarrativeState;

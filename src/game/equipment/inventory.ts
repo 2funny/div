@@ -14,6 +14,10 @@ export function teleportBeacon(): Item {
   return { id: uid(), kind: "teleport", name: "商路信标" };
 }
 
+export function skillScroll(skillId: string, classId: string, name: string): Item {
+  return { id: uid(), kind: "skillScroll", name: `${name}卷轴`, skillId, classId };
+}
+
 export function item(
   name: string,
   slot: SlotKey,

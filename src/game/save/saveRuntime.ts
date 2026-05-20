@@ -1,4 +1,4 @@
-import { CLASSES, SAVE_KEY, isValidMapSize } from "../constants";
+import { CLASSES, SAVE_KEY } from "../constants";
 import {
   SAVE_SLOT_LIMIT,
   formatSaveTime,
@@ -7,9 +7,7 @@ import {
   saveSlotLabel,
   writeSaveIndex
 } from "./save";
-import { ensureLoreState, ensureNarrativeState, unlockLoreChaptersForFloor } from "../quest";
 import { escapeHtml } from "../render/html";
-import { createTutorialState } from "../tutorial/tutorial";
 import type { GameState } from "../types";
 
 const MAX_SAVED_FLOOR_STATES = 12;
@@ -24,7 +22,7 @@ type SaveSlotMeta = {
   updatedAt?: string;
 };
 
-// 存档运行时封装多槽 localStorage 读写、旧存档迁移和存档元信息维护。
+// 存档运行时封装多槽 localStorage 读写和存档元信息维护。
 export function createSaveRuntime(ctx) {
   const { api, slots } = ctx;
   let state = ctx.getState();
@@ -38,8 +36,6 @@ export function createSaveRuntime(ctx) {
   };
 
   const closeModal = (...args) => api.closeModal(...args);
-  const emptyEquipment = (...args) => api.emptyEquipment(...args);
-  const generateFloor = (...args) => api.generateFloor(...args);
   const render = (...args) => api.render(...args);
   const renderLog = (...args) => api.renderLog(...args);
   const renderStartScreen = (...args) => api.renderStartScreen(...args);
@@ -50,30 +46,11 @@ export function createSaveRuntime(ctx) {
 
   // 读取所有存档槽及摘要信息，渲染层只消费这个稳定列表。
   function saveSlots() {
-    migrateLegacySave();
     const index = readSaveIndex();
     return Array.from({ length: SAVE_SLOT_LIMIT }, (_, i) => {
       const id = `slot-${i + 1}`;
       return { id, label: saveSlotLabel(id), meta: index[id] || null };
     });
-  }
-
-  // 将早期单存档 key 迁移到 slot-1，避免升级后丢失旧角色。
-  function migrateLegacySave() {
-    const raw = localStorage.getItem(SAVE_KEY);
-    const index = readSaveIndex();
-    if (!raw || index["slot-1"] || localStorage.getItem(saveSlotKey("slot-1"))) return;
-    try {
-      const legacy = JSON.parse(raw);
-      localStorage.setItem(saveSlotKey("slot-1"), raw);
-      index["slot-1"] = saveMetaFromState(legacy);
-      writeSaveIndex(index);
-      slots.current = "slot-1";
-      localStorage.setItem(`${SAVE_KEY}-current`, slots.current);
-      localStorage.removeItem(SAVE_KEY);
-    } catch {
-      localStorage.removeItem(SAVE_KEY);
-    }
   }
 
   function saveMetaFromState(snapshot: Partial<GameState> = {}): SaveSlotMeta {
@@ -180,7 +157,7 @@ export function createSaveRuntime(ctx) {
     }
   }
 
-  // 从 localStorage 恢复存档，并补齐新版字段的默认值。
+  // 从当前多槽 localStorage 恢复存档。
   function cloneSaveSnapshot(snapshot) {
     return JSON.parse(JSON.stringify(snapshot));
   }
@@ -208,58 +185,15 @@ export function createSaveRuntime(ctx) {
   }
 
   function loadGame(slotId = slots.current || "slot-1") {
-    migrateLegacySave();
     const raw = localStorage.getItem(saveSlotKey(slotId));
     if (!raw) return false;
     setRuntimeState(JSON.parse(raw));
     slots.current = slotId;
     slots.pending = slotId;
     localStorage.setItem(`${SAVE_KEY}-current`, slots.current);
-    state.facing = state.facing || "down";
-    state.skillPoints = state.skillPoints || 0;
-    state.skillDust = state.skillDust || 0;
-    state.keys = state.keys || 0;
-    state.universalKeys = state.universalKeys || 0;
-    state.doorKeys = state.doorKeys || {};
-    state.doorKeyNames = state.doorKeyNames || {};
-    state.quest = state.quest || null;
-    state.quests = Array.isArray(state.quests) ? state.quests : [];
-    ensureLoreState(state);
-    ensureNarrativeState(state);
-    unlockLoreChaptersForFloor(state);
-    state.tutorial = state.tutorial || createTutorialState();
-    state.floorStates = state.floorStates || {};
-    for (const savedFloor of Object.values(state.floorStates || {}) as Partial<GameState>[]) {
-      if (savedFloor) ensureNarrativeState(savedFloor as GameState);
-    }
-    state.skillLevels = state.skillLevels || {};
-    state.skillBranches = state.skillBranches || {};
-    state.skillCooldowns = state.skillCooldowns || {};
-    for (const skill of CLASSES[state.classId].skills) {
-      state.skillLevels[skill.id] = state.skillLevels[skill.id] || 0;
-    }
-    if (
-      !state.map?.cells?.length ||
-      !isValidMapSize(state.map.size) ||
-      state.map.cells.length !== state.map.size
-    ) {
-      generateFloor();
-    }
-    if (state.map && state.map.explorationVersion !== 2) resetExploration();
     updateVisibility();
     updateSaveSlotMeta(slotId, state);
     return true;
-  }
-
-  // 重置探索可见性，用于老存档升级到新版视野逻辑。
-  function resetExploration() {
-    for (const row of state.map.cells) {
-      for (const cell of row) {
-        cell.seen = false;
-        cell.visible = false;
-      }
-    }
-    state.map.explorationVersion = 2;
   }
 
   // 显示弹窗，并使用调用方传入的按钮动作。
@@ -301,10 +235,8 @@ export function createSaveRuntime(ctx) {
     deleteSaveSlot: withState(deleteSaveSlot),
     loadGame: withState(loadGame),
     log: withState(log),
-    migrateLegacySave,
     newGamePrompt: withState(newGamePrompt),
     openSaveSlotPicker: withState(openSaveSlotPicker),
-    resetExploration: withState(resetExploration),
     returnHome: withState(returnHome),
     saveGame: withState(saveGame),
     saveGameToSlot: withState(saveGameToSlot),

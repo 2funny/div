@@ -48,10 +48,14 @@ export function createRenderRuntime(ctx) {
   const autoBattle = (...args) => api.autoBattle(...args);
   const autoBattlePolicy = (...args) => api.autoBattlePolicy(...args);
   const battleRisk = (...args) => api.battleRisk(...args);
+  const battleSkills = (...args) => api.battleSkills(...args);
+  const battleSkillLimit = api.BATTLE_SKILL_LIMIT || 4;
   const buy = (...args) => api.buy(...args);
+  const canLearnSkill = (...args) => api.canLearnSkill(...args);
   const canEnhance = (...args) => api.canEnhance(...args);
   const canUpgradeSkill = (...args) => api.canUpgradeSkill(...args);
   const canUnequipSlot = (...args) => api.canUnequipSlot(...args);
+  const classSkills = (...args) => api.classSkills(...args);
   const closeModal = (...args) => api.closeModal(...args);
   const currentStairsDown = (...args) => api.currentStairsDown(...args);
   const deleteSaveSlot = (...args) => api.deleteSaveSlot(...args);
@@ -65,6 +69,8 @@ export function createRenderRuntime(ctx) {
   const ensureQuestList = (...args) => api.ensureQuestList(...args);
   const generateFloor = (...args) => api.generateFloor(...args);
   const isDefeatedEnemy = (...args) => api.isDefeatedEnemy(...args);
+  const isSkillEquipped = (...args) => api.isSkillEquipped(...args);
+  const isSkillLearned = (...args) => api.isSkillLearned(...args);
   const knownTeleportTargets = (...args) => api.knownTeleportTargets(...args);
   const loadGame = (...args) => api.loadGame(...args);
   const move = (...args) => api.move(...args);
@@ -82,11 +88,13 @@ export function createRenderRuntime(ctx) {
   const skillById = (...args) => api.skillById(...args);
   const skillLevel = (...args) => api.skillLevel(...args);
   const skillPreviewText = (...args) => api.skillPreviewText(...args);
+  const skillRequirementText = (...args) => api.skillRequirementText(...args);
   const skillUpgradeCost = (...args) => api.skillUpgradeCost(...args);
   const startGame = (...args) => api.startGame(...args);
   const syncMusicToGame = (...args) => api.syncMusicToGame(...args);
   const themeForFloor = (...args) => api.themeForFloor(...args);
   const totals = (...args) => api.totals(...args);
+  const toggleBattleSkill = (...args) => api.toggleBattleSkill(...args);
   const unequipItem = (...args) => api.unequipItem(...args);
   const updateVisibility = (...args) => api.updateVisibility(...args);
   const upgradedSkill = (...args) => api.upgradedSkill(...args);
@@ -142,7 +150,7 @@ export function createRenderRuntime(ctx) {
 
   function saveSlotCard(slot) {
     const meta = slot.meta;
-    const className = escapeHtml(meta?.className || "鍐掗櫓鑰?");
+    const className = escapeHtml(meta?.className || "冒险者");
     if (!meta) {
       return `
       <article class="save-slot empty">
@@ -176,7 +184,7 @@ export function createRenderRuntime(ctx) {
 
   function startNewGame(slotId = nextNewGameSlot()) {
     if (!slotId) {
-      showModal("存档已满", "<p>所有存档槽都已有记录。请先删除一个旧存档，再开始新游戏。</p>", [
+      showModal("存档已满", "<p>所有存档槽都已有记录。请先删除一个存档，再开始新游戏。</p>", [
         { text: "取消", action: closeModal },
         {
           text: "查看存档",
@@ -249,7 +257,6 @@ export function createRenderRuntime(ctx) {
               .join("")}</div>`
           : ""
       }
-      <ul>${cls.skills.map((skill) => `<li>${skill.name}：${skill.desc}</li>`).join("")}</ul>
       <button type="button" onclick="startGame('${id}', '${slotId}')">开始</button>
     </article>
   `
@@ -789,6 +796,7 @@ export function createRenderRuntime(ctx) {
     if (!locked) {
       return {
         locked,
+        phase,
         className: "ready",
         icon: "令",
         kicker: "行动权",
@@ -802,6 +810,7 @@ export function createRenderRuntime(ctx) {
     if (phase === "enemy-windup") {
       return {
         locked,
+        phase,
         className: "windup enemy",
         icon: "警",
         kicker: "敌方锁定",
@@ -815,6 +824,7 @@ export function createRenderRuntime(ctx) {
     if (phase === "enemy-action" || phase === "enemy-turn") {
       return {
         locked,
+        phase,
         className: "impact enemy",
         icon: "击",
         kicker: "敌方行动",
@@ -827,6 +837,7 @@ export function createRenderRuntime(ctx) {
     }
     return {
       locked,
+      phase,
       className: "ready",
       icon: "令",
       kicker: "行动权",
@@ -915,38 +926,42 @@ export function createRenderRuntime(ctx) {
   function renderSkillActionButtons(mode = "compact") {
     const turn = currentBattleTurnState();
     const locked = turn.locked;
-    return CLASSES[state.classId].skills
+    const skills = battleSkills();
+    if (!skills.length) {
+      return mode === "battle"
+        ? `<p class="battle-empty-supplies">未携带技能</p>`
+        : `<p>未携带技能。</p>`;
+    }
+    return skills
       .map((skill) => {
         const upgraded = upgradedSkill(skill);
         const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
         const hasMp = state.mp >= upgraded.mp;
         const cooldown = Math.max(0, Number(state.skillCooldowns?.[skill.id] || 0));
+        const displayCooldown = cooldown;
         const ready = cooldown <= 0;
         const disabled = locked || !hasMp || !ready ? "disabled" : "";
         const title = locked
           ? `title="${turn.disabledTitle}"`
           : !ready
-            ? `title="冷却中，还需 ${cooldown} 回合"`
+            ? `title="冷却中，还需 ${displayCooldown} 回合"`
             : !hasMp
               ? `title="法力不足"`
               : "";
         if (mode === "battle") {
-          const cooldownText = !ready ? ` · 冷却 ${cooldown}` : "";
-          const mpText = locked
-            ? `${upgraded.mp} MP${cooldownText}`
-            : hasMp
-              ? `${upgraded.mp} MP${cooldownText}`
-              : `${upgraded.mp} MP · MP不足${cooldownText}`;
+          const baseCooldownText = `冷却 ${upgraded.cooldown || 0} 回合`;
+          const mpText = hasMp || locked ? `${upgraded.mp} MP` : `${upgraded.mp} MP不足`;
+          const cooldownMeta = `<span>${baseCooldownText}</span>${!ready ? `<span class="danger">剩余 ${displayCooldown}</span>` : ""}`;
           const elementText = elementName(upgraded.element);
           const branchText = upgraded.branch ? `${upgraded.branch.name} · ` : "";
           const note = locked
             ? turn.shortHint
             : !ready
-              ? `冷却中，还需 ${cooldown} 回合`
+              ? `冷却中，还需 ${displayCooldown} 回合`
               : `${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}`;
-          return `<button class="battle-skill-card" type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><small>${note}</small></button>`;
+          return `<button class="battle-skill-card" type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><span class="battle-skill-meta">${cooldownMeta}</span><small>${note}</small></button>`;
         }
-        return `<button type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP${!ready ? ` · 冷却 ${cooldown}` : ""}</button>`;
+        return `<button type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP · 冷却 ${upgraded.cooldown || 0} 回合${!ready ? ` · 剩余 ${displayCooldown}` : ""}</button>`;
       })
       .join("");
   }
@@ -1490,7 +1505,7 @@ export function createRenderRuntime(ctx) {
       ? runes
           .map(
             ([name, count]) =>
-              `<div class="item-row rune-row inventory-card"><div class="item-main"><span class="item-kicker">符文</span><b>${name}符文</b><small>${runeEffectText(name)}。需要镶嵌到带符文槽的装备上才生效。</small><span class="item-tags"><i>3 合 1 升级</i></span></div><div class="item-side"><span class="item-quantity">x${count}</span><div class="item-actions"><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div></div></div>`
+              `<div class="item-row rune-row inventory-card"><div class="item-main"><span class="item-kicker">符文</span><b>${name}符文</b><small>${runeEffectText(name)}</small></div><div class="item-side"><span class="item-quantity">x${count}</span><div class="item-actions"><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div></div></div>`
           )
           .join("")
       : `<p>暂无符文。</p>`;
@@ -1513,21 +1528,123 @@ export function createRenderRuntime(ctx) {
     const runes = runeEntries().filter(([, count]) => count > 0);
     $("tabBody").innerHTML = `
     <div class="item-row"><div>材料<small>强化石 ${state.materials["强化石"] || 0}，魔尘 ${state.materials["魔尘"] || 0}</small></div></div>
-    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>3 合 1 升级</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("") : "<p>暂无符文。</p>"}
+    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>${runeEffectText(name)}</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("") : "<p>暂无符文。</p>"}
   `;
   }
 
   // 渲染职业技能列表和技能升级按钮。
-  function renderSkills() {
-    const skills = CLASSES[state.classId].skills;
-    $("tabBody").innerHTML = `
-    <div class="item-row"><div>技能资源<small>技能点 ${state.skillPoints || 0}，技能尘 ${state.skillDust || 0}</small></div></div>
-    ${skills
+  function skillLoadoutMarkup(equipped = battleSkills(), interactive = true) {
+    const slots = Array.from({ length: battleSkillLimit }, (_, index) => {
+      const skill = equipped[index];
+      const action = interactive ? ` onclick="openSkillLoadout()"` : "";
+      if (!skill) {
+        return `<button class="skill-slot empty" type="button"${action}><span>空位</span><small>点击装备技能</small></button>`;
+      }
+      const upgraded = upgradedSkill(skill);
+      const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
+      return `<button class="skill-slot equipped" type="button"${action}><span>${skill.name}${level}</span><small>${skillPreviewText(upgraded)} · ${upgraded.mp} MP</small></button>`;
+    }).join("");
+    return `<section class="skill-loadout"><div class="skill-loadout-head"><div><span>已装备技能</span><b>${equipped.length}/${battleSkillLimit}</b></div>${interactive ? `<button type="button" onclick="openSkillLoadout()">调整</button>` : ""}</div><div class="skill-loadout-slots">${slots}</div></section>`;
+  }
+
+  function changeBattleSkillFromModal(skillId) {
+    if (!toggleBattleSkill(skillId)) return;
+    syncState();
+    openSkillLoadout();
+  }
+
+  function updateBattleSkillFromList(skillId) {
+    syncState();
+    if (isSkillEquipped(skillId)) {
+      toggleBattleSkill(skillId);
+      return;
+    }
+    const equippedCount = battleSkills().length;
+    if (equippedCount < battleSkillLimit) {
+      setBattleSkillSlot(equippedCount, skillId);
+      return;
+    }
+    openSkillLoadout();
+  }
+
+  function setBattleSkillSlot(slotIndex, skillId) {
+    syncState();
+    const learnedIds = new Set(classSkills().filter((skill) => isSkillLearned(skill.id)).map((skill) => skill.id));
+    const ids = [...(state.equippedSkillIds || [])].filter((id) => learnedIds.has(id)).slice(0, battleSkillLimit);
+    const current = ids[slotIndex] || "";
+    if (!skillId) {
+      if (!current) return;
+      if (ids.length <= 1) {
+        showEvent("无法移除", "<p>至少需要保留一个战斗技能。</p>", "知道了");
+        return;
+      }
+      ids.splice(slotIndex, 1);
+    } else if (learnedIds.has(skillId)) {
+      const existingIndex = ids.indexOf(skillId);
+      if (existingIndex === slotIndex) return;
+      if (existingIndex >= 0) {
+        ids.splice(existingIndex, 1);
+        if (existingIndex < slotIndex) slotIndex -= 1;
+      }
+      if (slotIndex >= ids.length) ids.push(skillId);
+      else ids[slotIndex] = skillId;
+    }
+    state.equippedSkillIds = ids.slice(0, battleSkillLimit);
+    render();
+    openSkillLoadout();
+  }
+
+  function openSkillLoadout() {
+    syncState();
+    const learned = classSkills().filter((skill) => isSkillLearned(skill.id));
+    const equipped = battleSkills();
+    const options = learned
       .map((skill) => {
         const upgraded = upgradedSkill(skill);
+        return `<option value="${skill.id}">${skill.name} Lv.${upgraded.level} · ${skillPreviewText(upgraded)}</option>`;
+      })
+      .join("");
+    const picker = learned.length
+      ? Array.from({ length: battleSkillLimit }, (_, index) => {
+          const skill = equipped[index];
+          const upgraded = skill ? upgradedSkill(skill) : null;
+          return `<div class="skill-picker-row ${skill ? "equipped" : ""}"><div class="item-main"><span class="item-kicker">技能槽 ${index + 1}</span><b>${skill ? `${skill.name} Lv.${upgraded.level}` : "空位"}</b>${skill ? `<small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i></span>` : `<small>选择一个已学会技能装备到这里。</small>`}</div><select onchange="setBattleSkillSlot(${index}, this.value)"><option value="" ${skill ? "" : "selected"}>空位</option>${options.replace(`value="${skill?.id}"`, `value="${skill?.id}" selected`)}</select></div>`;
+        }).join("")
+      : `<p>还没有已学会的技能。</p>`;
+    showModal(
+      "调整已装备技能",
+      `<div class="skill-loadout-modal"><div class="skill-picker-list">${picker}</div></div>`,
+      [
+        {
+          text: "完成",
+          action: () => {
+            closeModal();
+            renderSkills();
+          }
+        }
+      ]
+    );
+  }
+
+  function renderSkills() {
+    const skills = classSkills();
+    const learnedCount = skills.filter((skill) => isSkillLearned(skill.id)).length;
+    const equippedCount = battleSkills().length;
+    $("tabBody").innerHTML = `
+    <div class="item-row"><div>技能资源<small>技能点 ${state.skillPoints || 0}，技能尘 ${state.skillDust || 0} · 已学 ${learnedCount}/${skills.length} · 携带 ${equippedCount}/${battleSkillLimit}</small></div></div>
+    ${skillLoadoutMarkup()}
+    ${skills
+      .map((skill) => {
+        const learned = isSkillLearned(skill.id);
+        const equipped = isSkillEquipped(skill.id);
+        const learnable = canLearnSkill(skill.id);
+        const upgraded = upgradedSkill(skill);
         const cost = skillUpgradeCost(skill.id);
-        const disabled = canUpgradeSkill(skill.id) ? "" : "disabled";
-        return `<div class="item-row skill-row inventory-card"><div class="item-main"><span class="item-kicker">职业技能${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name} Lv.${upgraded.level}</b><small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i><i>升级 ${cost.points} 点 / ${cost.dust} 尘</i></span></div><div class="item-actions"><button type="button" ${disabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button></div></div>`;
+        const upgradeDisabled = learned && canUpgradeSkill(skill.id) ? "" : "disabled";
+        const equipDisabled = learned ? "" : "disabled";
+        const learnState = learned ? (equipped ? "已携带" : "已学会") : learnable ? "可学习" : "未满足前置";
+        const requirement = skillRequirementText(skill);
+        return `<div class="item-row skill-row inventory-card ${learned ? "" : "locked"}"><div class="item-main"><span class="item-kicker">${learnState}${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name}${learned ? ` Lv.${upgraded.level}` : ""}</b><small>${learned ? upgraded.branch?.desc || skill.desc : requirement}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i>${learned ? `<i>升级 ${cost.points} 点 / ${cost.dust} 尘</i>` : `<i>${skill.desc}</i>`}</span></div><div class="item-actions"><button type="button" ${upgradeDisabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button><button type="button" ${equipDisabled} onclick="updateBattleSkillFromList('${skill.id}')">${equipped ? "卸下" : "携带"}</button></div></div>`;
       })
       .join("")}
   `;
@@ -1673,6 +1790,7 @@ export function createRenderRuntime(ctx) {
     battleStatusPill,
     badgeForObject,
     centerFxMarkup,
+    changeBattleSkillFromModal: withState(changeBattleSkillFromModal),
     clickTile: withState(clickTile),
     combatantFxMarkup,
     confirmBuy: withState(confirmBuy),
@@ -1706,6 +1824,7 @@ export function createRenderRuntime(ctx) {
     newGameInSlot: withState(newGameInSlot),
     nextNewGameSlot: withState(nextNewGameSlot),
     objectSprite,
+    openSkillLoadout: withState(openSkillLoadout),
     percentScore,
     potionRow: withState(potionRow),
     render: withState(render),
@@ -1736,6 +1855,7 @@ export function createRenderRuntime(ctx) {
     selectInventoryTab: withState(selectInventoryTab),
     selectMinimapTile: withState(selectMinimapTile),
     selectedTileText: withState(selectedTileText),
+    setBattleSkillSlot: withState(setBattleSkillSlot),
     shouldShowMapObject: withState(shouldShowMapObject),
     showEquipmentSlot: withState(showEquipmentSlot),
     showInventoryEquipmentCompare: withState(showInventoryEquipmentCompare),
@@ -1743,6 +1863,7 @@ export function createRenderRuntime(ctx) {
     sprite,
     startNewGame: withState(startNewGame),
     statsText,
-    tileLabel: withState(tileLabel)
+    tileLabel: withState(tileLabel),
+    updateBattleSkillFromList: withState(updateBattleSkillFromList)
   };
 }

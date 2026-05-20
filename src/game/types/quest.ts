@@ -27,4 +27,7 @@ export interface NarrativeState {
   relations: Record<string, number>;
   flags: Record<string, boolean>;
   eventChoices: Record<string, string>;
+  rescuedNpcIds: string[];
+  merchantTrust: number;
+  factionLeanings: Record<string, number>;
 }

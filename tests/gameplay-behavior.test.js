@@ -199,6 +199,34 @@ vm.runInContext(
   assert(state.mp < 12, "battle skills should spend mp when invoked by skill id");
   assert(state.currentEnemy.hp < 40, "battle skills invoked by id should damage the enemy");
 
+  const randomBeforeDeepSkill = Math.random;
+  try {
+    state = {
+      classId: "warrior",
+      floor: 60,
+      hp: 120,
+      maxHp: 120,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 14, mag: 0, def: 20, res: 0, spd: 0, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      skillLevels: {},
+      skillBranches: {},
+      skillCooldowns: {},
+      currentEnemy: { type: "monster", name: "Deep Skill Dummy", hp: 100, maxHp: 100, atk: 1, def: 0 },
+      log: []
+    };
+    Math.random = () => 0.99;
+    Date.now = () => realDateNowForSkill() + 1000;
+    attackEnemy("skill", "heavy", true);
+    Date.now = realDateNowForSkill;
+    assert(state.currentEnemy.hp > 50, "deep-floor skill damage should use a softened floor bonus instead of adding the full floor value");
+  } finally {
+    Math.random = randomBeforeDeepSkill;
+    Date.now = realDateNowForSkill;
+  }
+
   const randomBeforeCombatRules = Math.random;
   try {
     Math.random = () => 0.99;
@@ -289,6 +317,34 @@ vm.runInContext(
     Date.now = realDateNowForClampRules;
   }
 
+  const randomBeforeEvadeCap = Math.random;
+  try {
+    state = {
+      classId: "ranger",
+      floor: 1,
+      hp: 100,
+      maxHp: 100,
+      mp: 20,
+      maxMp: 20,
+      stats: { atk: 1, mag: 0, def: 0, res: 0, spd: 1000, luk: 0 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      skillLevels: {},
+      skillBranches: {},
+      skillCooldowns: {},
+      currentEnemy: { type: "monster", name: "Evade Cap Dummy", hp: 20, maxHp: 20, atk: 10, def: 0 },
+      log: []
+    };
+    Math.random = () => 0.9;
+    Date.now = () => realDateNowForClampRules() + 1000;
+    attackEnemy("skill", "step", true);
+    Date.now = realDateNowForClampRules;
+    assert(state.hp < 100, "evade stance should still cap below guaranteed evasion");
+  } finally {
+    Math.random = randomBeforeEvadeCap;
+    Date.now = realDateNowForClampRules;
+  }
+
   state = {
     classId: "warrior",
     floor: 2,
@@ -309,8 +365,11 @@ vm.runInContext(
   Date.now = () => realDateNowForCooldown() + 1000;
   attackEnemy("skill", "heavy", true);
   const mpAfterHeavy = state.mp;
-  assert.strictEqual(state.skillCooldowns.heavy, 1, "skills should keep turn-based cooldown after the enemy response");
+  assert.strictEqual(state.skillCooldowns.heavy, 2, "the casting turn should not count toward skill cooldown");
   attackEnemy("skill", "heavy", true);
+  assert.strictEqual(state.skillCooldowns.heavy, 2, "failed cooldown casts should not advance cooldown");
+  attackEnemy("attack", null, true);
+  assert.strictEqual(state.skillCooldowns.heavy, 1, "only a later complete action round should reduce cooldown");
   Date.now = realDateNowForCooldown;
   Math.random = randomBeforeCombatRules;
   assert.strictEqual(state.mp, mpAfterHeavy, "skills on cooldown should not spend mp again");
@@ -362,7 +421,7 @@ vm.runInContext(
   attackEnemy("attack", null, true);
   Date.now = realDateNowForCooldown;
   Math.random = randomBeforeCombatRules;
-  assert.strictEqual(state.currentEnemy.hp, 86, "upgraded evade should make the next attack hit harder");
+  assert.strictEqual(state.currentEnemy.hp, 87, "upgraded evade should make the next attack hit harder");
 
   const randomBeforeRangerSkill = Math.random;
   try {
@@ -387,11 +446,83 @@ vm.runInContext(
     Date.now = () => realDateNowForCooldown() + 1000;
     attackEnemy("skill", "double", true);
     Date.now = realDateNowForCooldown;
-    assert.strictEqual(state.currentEnemy.hp, 83, "ranger skill follow-up should add one normal attack, not recursively cast the skill");
+    assert.strictEqual(state.currentEnemy.hp, 80, "ranger skill follow-up should add one normal attack, not recursively cast the skill");
     assert(state.log.some((entry) => entry.includes("追击")), "ranger skill follow-up should be logged as a follow-up effect");
   } finally {
     Math.random = randomBeforeRangerSkill;
   }
+
+  state = {
+    classId: "warrior",
+    floor: 1,
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 10, mag: 0, def: 0, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    skillLevels: { heavy: 3 },
+    skillBranches: {},
+    skillCooldowns: {},
+    log: []
+  };
+  const baseHeavy = CLASSES.warrior.skills.find((skill) => skill.id === "heavy");
+  const upgradedHeavy = upgradedSkill(baseHeavy);
+  assert(upgradedHeavy.baseDamage > baseHeavy.baseDamage, "skill upgrades should increase base damage");
+  assert(upgradedHeavy.atkMultiplier > baseHeavy.atkMultiplier, "skill upgrades should increase stat multiplier");
+
+  state = {
+    classId: "warrior",
+    floor: 8,
+    level: 8,
+    hp: 90,
+    maxHp: 90,
+    mp: 30,
+    maxMp: 30,
+    stats: { atk: 8, mag: 0, def: 8, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    skillLevels: {},
+    skillBranches: {},
+    skillCooldowns: {},
+    learnedSkillIds: ["heavy", "guard", "roar"],
+    equippedSkillIds: ["heavy", "guard", "roar"],
+    log: []
+  };
+  ensureSkillState();
+  assert.strictEqual(classSkills().length, 9, "each class should expose a broad skill pool");
+  assert.strictEqual(canLearnSkill("execution"), false, "late skills should stay locked behind level and stat requirements");
+  assert(skillRequirementText(skillById("execution")).includes("等级 14"), "locked skills should explain their level requirement");
+  assert.strictEqual(learnSkill("shieldBash", "导师训练"), true, "eligible mentor training should unlock a new skill");
+  assert(state.learnedSkillIds.includes("shieldBash"), "learned skills should be persisted on state");
+  assert(state.equippedSkillIds.includes("shieldBash"), "new skills should auto-equip when there is room");
+  state.inventory = [{ id: "scroll-aimed", kind: "skillScroll", name: "瞄准射击卷轴", skillId: "aimedShot", classId: "ranger" }];
+  useItem("scroll-aimed");
+  assert(state.inventory.length === 1, "wrong-class skill scrolls should not be consumed");
+
+  state = {
+    classId: "ranger",
+    floor: 8,
+    level: 8,
+    hp: 80,
+    maxHp: 80,
+    mp: 30,
+    maxMp: 30,
+    stats: { atk: 8, mag: 0, def: 0, res: 0, spd: 12, luk: 6 },
+    equipment: emptyEquipment(),
+    inventory: [{ id: "scroll-aimed", kind: "skillScroll", name: "瞄准射击卷轴", skillId: "aimedShot", classId: "ranger" }],
+    skillLevels: {},
+    skillBranches: {},
+    skillCooldowns: {},
+    learnedSkillIds: ["double", "step", "poison"],
+    equippedSkillIds: ["double", "step", "poison"],
+    log: []
+  };
+  useItem("scroll-aimed");
+  assert(state.learnedSkillIds.includes("aimedShot"), "matching skill scrolls should unlock the skill");
+  assert.strictEqual(state.inventory.length, 0, "learned skill scrolls should be consumed");
+  assert(state.equippedSkillIds.length <= 4, "battle skill loadout should stay capped");
 
   state = {
     floor: 3,
@@ -451,6 +582,15 @@ vm.runInContext(
   assert(modalState().body.includes("封印守卫"), "sealed downstairs should explain the unlock target");
   completeStairSeal({ sealId: "seal-test", name: "封印守卫" });
   assert.strictEqual(state.map.cells[2][2].object.locked, false, "defeating a seal guardian should unlock the downstairs");
+
+  state.floor = 25;
+  state.hp = 60;
+  state.mp = 20;
+  state.map.cells[2][2].object.locked = false;
+  nextFloor();
+  assert.strictEqual(state.floor, 26, "unsealed downstairs should move to the next floor");
+  assert.strictEqual(state.hp, 60, "deep floors should stop granting stair hp recovery");
+  assert.strictEqual(state.mp, 20, "deep floors should stop granting stair mp recovery");
 
   state.map.rooms = [{ id: "room-8-1", name: "12号房" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12", "room doors should expose only the compact room number");
@@ -522,17 +662,17 @@ vm.runInContext(
   assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "auto battle should follow win rate instead of a fixed mp reserve");
   state.mp = 60;
   state.currentEnemy = { type: "elite", name: "Elite Guard", hp: 20, maxHp: 20, atk: 4, def: 1 };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "elite enemies above 60% win rate should be eligible for auto battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "elite enemies above 68% win rate should be eligible for auto battle");
   state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "affixed enemies above 60% win rate should be eligible for auto battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "affixed enemies above 68% win rate should be eligible for auto battle");
   state.currentEnemy = { type: "monster", name: "Skilled Guard", hp: 20, maxHp: 20, atk: 4, def: 1, skills: [{ id: "harden", name: "Harden", type: "guard" }] };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "skilled enemies above 60% win rate should be eligible for auto battle");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, true, "skilled enemies above 68% win rate should be eligible for auto battle");
   state.currentEnemy = { type: "monster", name: "Overwhelming Guard", hp: 240, maxHp: 240, atk: 46, def: 20 };
-  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "auto battle should stop when the win rate is 60% or lower");
+  assert.strictEqual(autoBattlePolicy(state.currentEnemy).allowed, false, "auto battle should stop when the win rate is 68% or lower");
   state.currentEnemy = { type: "monster", name: "Armored Guard", hp: 20, maxHp: 20, atk: 4, def: 1, affix: { id: "armored", name: "坚甲" } };
   autoBattle();
   assert(modalState().body.includes("胜率"), "auto battle confirmation should show the estimated win rate");
-  assert(modalState().actions.some((action) => action.text.includes("开始一键战斗")), "auto battle should be available above 60% win rate");
+  assert(modalState().actions.some((action) => action.text.includes("开始一键战斗")), "auto battle should be available above 68% win rate");
 
   state = {
     floor: 1,
@@ -695,12 +835,7 @@ vm.runInContext(
   assert.strictEqual(tileLabel({ seen: true, terrain: "floor", object: null, roomId: "room-1-0" }), "地面：可通行", "empty corridor or room floor labels should not claim the selected tile is a room");
 
   state.floor = 1;
-  state.quest = { id: "wardenErrand", floor: 1, kills: 1, target: 2, claimed: false };
   state.quests = [];
-  const rewards = [];
-  recordQuestKill({ type: "monster", name: "Slime" }, rewards);
-  assert.strictEqual(state.quest.kills, 1, "legacy quest should not progress before being accepted into the quest list");
-
   let questModal = null;
   showModal = (title, body, actions) => { questModal = { title, body, actions }; };
   openQuestNpc();
@@ -758,6 +893,26 @@ vm.runInContext(
   recordQuestKill({ type: "monster", name: "Target Floor" }, crossRewards);
   assert.strictEqual(crossFloorQuest.kills, 1, "cross-floor quests should progress on their target floor");
   assert(renderQuestList().includes("目标第 3 层"), "quest list should show the target floor when it differs from the giver floor");
+
+  state.floor = 6;
+  state.quests = [];
+  state.gold = 0;
+  state.skillDust = 0;
+  state.narrative = { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} };
+  const surveyQuest = acceptQuest("runeSurvey", {
+    type: "questNpc",
+    questId: "runeSurvey",
+    npcName: "符文测绘员",
+    targetFloor: 6
+  });
+  assert(renderQuestList().includes("符文测绘"), "quest list should render the rune survey branch");
+  const surveyRewards = [];
+  recordQuestKill({ type: "monster", name: "Echo" }, surveyRewards);
+  assert.strictEqual(surveyQuest.completed, true, "rune survey quests should complete through the shared kill progress path");
+  claimQuestReward("runeSurvey");
+  assert.strictEqual(state.skillDust, 2, "rune survey quests should reward skill dust");
+  assert.strictEqual(state.narrative.relations.runebound, 1, "rune survey quests should strengthen runebound relations");
+  assert.strictEqual(state.narrative.factionLeanings.runebound, 1, "rune survey quests should update runebound faction leaning");
 
   state = {
     floor: 2,
@@ -845,7 +1000,59 @@ vm.runInContext(
   assert.strictEqual(state.narrative.relations.wardens, 1, "room event choices should leave persistent relationship changes");
   assert.strictEqual(state.narrative.flags.altar_salvaged, true, "room event choices should set persistent narrative flags");
   assert.strictEqual(state.narrative.eventChoices.cracked_altar, "salvage_altar_dust", "room event choices should be recorded for later consequences");
-  assert(roomEventsForFloor(8).length >= 6, "room event pools should have enough varied mid-run events");
+  assert.strictEqual(state.narrative.factionLeanings.wardens, 1, "room event choices should update long-term faction leaning");
+  assert(roomEventsForFloor(8).length >= 7, "room event pools should have enough varied mid-run events");
+  assert(roomEventsForFloor(12).length >= 9, "room event pools should expand with mid-run relationship events");
+
+  state = {
+    floor: 8,
+    hp: 70,
+    maxHp: 100,
+    mp: 10,
+    maxMp: 20,
+    gold: 0,
+    keys: 0,
+    inventory: [],
+    materials: {},
+    runes: {},
+    narrative: { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: ["1:room-1-0:矿工托兰"], merchantTrust: 0, factionLeanings: {} },
+    map: { cells: [[{ x: 0, y: 0, terrain: "floor", object: null, seen: true, visible: true }]] },
+    player: { x: 0, y: 0 },
+    log: []
+  };
+  const survivorMarkCell = { object: { type: "roomEvent", eventId: "survivor_mark", name: "幸存者暗记" } };
+  resolveCell(survivorMarkCell);
+  assert(modalState().actions.some((action) => action.text.includes("按暗记")), "rescued NPC history should unlock survivor follow-up room event rewards");
+  modalState().actions.find((action) => action.text.includes("按暗记")).action();
+  assert.strictEqual(survivorMarkCell.object, null, "survivor follow-up room event should be consumed");
+  assert(state.gold > 0, "survivor follow-up should grant a material reward");
+  assert(state.inventory.some((entry) => entry.kind === "potion"), "survivor follow-up should leave a supply item");
+  assert.strictEqual(state.narrative.factionLeanings.survivors, 1, "survivor follow-up should update faction leaning");
+
+  state = {
+    floor: 12,
+    hp: 80,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 30,
+    gold: 0,
+    keys: 0,
+    universalKeys: 0,
+    inventory: [],
+    materials: {},
+    runes: {},
+    narrative: { relations: { merchants: 4 }, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 3, factionLeanings: {} },
+    map: { cells: [[{ x: 0, y: 0, terrain: "floor", object: null, seen: true, visible: true }]] },
+    player: { x: 0, y: 0 },
+    log: []
+  };
+  const merchantLedgerCell = { object: { type: "roomEvent", eventId: "merchant_ledger", name: "商路账簿" } };
+  resolveCell(merchantLedgerCell);
+  assert(modalState().actions.some((action) => action.text.includes("兑现")), "merchant trust should unlock ledger credit choices");
+  modalState().actions.find((action) => action.text.includes("兑现")).action();
+  assert.strictEqual(merchantLedgerCell.object, null, "merchant ledger event should be consumed");
+  assert.strictEqual(state.universalKeys, 1, "merchant ledger credit should grant one universal key");
+  assert.strictEqual(state.narrative.factionLeanings.merchants, 1, "merchant ledger credit should update merchant faction leaning");
 
   state = {
     floor: 4,
@@ -869,7 +1076,61 @@ vm.runInContext(
   claimQuestReward("wardenErrand");
   assert.strictEqual(state.gold, 31, "trusted quest givers should pay a relationship bonus");
   assert.strictEqual(state.narrative.relations.wardens, 7, "claiming a quest should strengthen the related long-term relationship");
+  assert.strictEqual(state.narrative.factionLeanings.wardens, 1, "claiming a warden quest should improve the related faction leaning");
   assert(modalState().body.includes("巡夜人信赖"), "quest reward modal should surface relationship consequences");
+
+  state = {
+    floor: 4,
+    gold: 0,
+    keys: 0,
+    inventory: [],
+    quests: [{
+      id: "merchantRoute",
+      giver: "shop",
+      floor: 4,
+      targetFloor: 4,
+      kills: 2,
+      target: 2,
+      accepted: true,
+      completed: true,
+      claimed: false
+    }],
+    narrative: { relations: { merchants: 2 }, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 2, factionLeanings: {} },
+    log: []
+  };
+  claimQuestReward("merchantRoute");
+  assert.strictEqual(state.narrative.merchantTrust, 3, "merchant quests should build long-term merchant trust");
+
+  state = {
+    floor: 2,
+    gold: 200,
+    player: { x: 1, y: 1 },
+    map: { cells: [[{ x: 1, y: 1, terrain: "floor", object: { type: "shop", sellsUniversalKey: true } }]] },
+    inventory: [],
+    equipment: emptyEquipment(),
+    stats: { atk: 0, mag: 0, def: 0, res: 0, spd: 0, luk: 0 },
+    narrative: { relations: { merchants: 6 }, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 6, factionLeanings: {} },
+    log: []
+  };
+  openMerchant();
+  assert(modalState().body.includes("信任 6"), "merchant dialogue should surface long-term merchant trust");
+
+  state = {
+    floor: 1,
+    classId: "warrior",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 0, mag: 0, def: 0, res: 0, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    quests: [{ id: "rescueRoom", giver: "questNpc", floor: 1, roomId: "room-1-0", accepted: true, completed: false, claimed: false, kills: 1, target: 1, roomCleared: true }],
+    narrative: { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} },
+    log: []
+  };
+  openRescueNpc({ type: "rescueNpc", npcName: "矿工托兰", roomId: "room-1-0" });
+  assert(state.narrative.rescuedNpcIds.length > 0, "rescue completion should persist the rescued npc id");
 
   state = {
     floor: 1,
@@ -970,6 +1231,61 @@ vm.runInContext(
   assert.strictEqual(state.tutorial.step, "quest", "tutorial should advance after equipping loot");
   acceptQuest("wardenErrand", { type: "questNpc", questId: "wardenErrand", targetFloor: 1 });
   assert.strictEqual(state.tutorial.step, "done", "tutorial should complete after accepting a quest");
+
+  state = {
+    floor: 24,
+    classId: "warrior",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    gold: 0,
+    keys: 0,
+    stats: { atk: 20, mag: 0, def: 8, res: 4, spd: 0, luk: 0 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    quests: [],
+    narrative: { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} },
+    log: []
+  };
+  const sealQuest = acceptQuest("wardenSeal", { type: "questNpc", questId: "wardenSeal", targetFloor: 24 });
+  assert.strictEqual(sealQuest.target, 2, "warden seal branch should create a normal kill objective");
+  sealQuest.kills = 2;
+  sealQuest.completed = true;
+  claimQuestReward("wardenSeal");
+  assert.strictEqual(state.keys, 1, "warden seal branch should reward a rune key");
+  assert.strictEqual(state.narrative.factionLeanings.wardens, 1, "warden seal branch should affect warden leaning");
+
+  state = {
+    floor: 42,
+    classId: "ranger",
+    hp: 100,
+    maxHp: 100,
+    mp: 20,
+    maxMp: 20,
+    gold: 0,
+    keys: 0,
+    stats: { atk: 20, mag: 0, def: 8, res: 4, spd: 12, luk: 8 },
+    equipment: emptyEquipment(),
+    inventory: [],
+    quests: [],
+    narrative: { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} },
+    lore: { chapters: [], pages: [] },
+    log: []
+  };
+  const traceQuest = acceptQuest("survivorTrace", { type: "questNpc", questId: "survivorTrace", targetFloor: 42 });
+  traceQuest.kills = 2;
+  traceQuest.completed = true;
+  claimQuestReward("survivorTrace");
+  assert(state.inventory.some((entry) => entry.kind === "potion"), "survivor trace branch should pay out supplies");
+  assert.strictEqual(state.narrative.factionLeanings.survivors, 1, "survivor trace branch should affect survivor leaning");
+  const discoveredPages = [];
+  for (let i = 0; i < 8; i++) {
+    const page = discoverLorePage(state, i % 2 === 0 ? "elite" : "lockedChest");
+    if (page) discoveredPages.push(page.id);
+  }
+  assert(discoveredPages.includes("class-echoes"), "mid-run lore should include class echo storytelling");
+  assert(discoveredPages.includes("survivor-cairn"), "mid-run lore should include survivor route storytelling");
 `,
   context
 );

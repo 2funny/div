@@ -5,6 +5,7 @@ export type RoomEventChoice = {
   text: string;
   desc: string;
   relation?: { id: "wardens" | "merchants" | "survivors" | "runebound"; delta: number };
+  factionLeaning?: { id: string; delta: number };
   flag?: string;
   canChoose?: (ctx: RoomEventContext) => boolean;
   apply: (ctx: RoomEventContext) => RoomEventResult;
@@ -64,6 +65,7 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         text: "献出生命",
         desc: "损失少量生命，换取一枚随机符文。",
         relation: { id: "runebound", delta: 2 },
+        factionLeaning: { id: "runebound", delta: 2 },
         flag: "altar_blood_pact",
         canChoose: ({ state }) => (state.hp || 0) > Math.ceil((state.maxHp || 1) * 0.18),
         apply: ({ state, randomRune }) => {
@@ -83,6 +85,7 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         text: "刮取粉尘",
         desc: "不冒险，只收集少量魔尘和金币。",
         relation: { id: "wardens", delta: 1 },
+        factionLeaning: { id: "wardens", delta: 1 },
         flag: "altar_salvaged",
         apply: ({ state, scaledReward }) => {
           const gold = scaledReward(8 + (state.floor || 1) * 2);
@@ -110,6 +113,7 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         text: "用钥匙开启",
         desc: "消耗一把符文钥匙，获得一件装备。",
         relation: { id: "merchants", delta: 2 },
+        factionLeaning: { id: "merchants", delta: 1 },
         flag: "cache_opened_cleanly",
         canChoose: ({ state }) => (state.keys || 0) > 0,
         apply: ({ state, randomEquipment }) => {
@@ -128,6 +132,7 @@ export const ROOM_EVENTS: RoomEventDef[] = [
         text: "强行撬开",
         desc: "受到机关伤害，但能拿到金币和材料。",
         relation: { id: "merchants", delta: -1 },
+        factionLeaning: { id: "merchants", delta: -1 },
         flag: "cache_forced",
         apply: ({ state, scaledReward }) => {
           const damage = 6 + Math.ceil((state.floor || 1) * 0.8);
@@ -319,6 +324,147 @@ export const ROOM_EVENTS: RoomEventDef[] = [
           return {
             log: `你打碎回声神龛，在碎片中找到${loot.name}。`,
             body: `<p>生命 -${damage}</p><p>获得装备：${loot.name}</p>`
+          };
+        }
+      }
+    ]
+  },
+  {
+    id: "survivor_mark",
+    category: "reward",
+    risk: "safe",
+    title: "幸存者暗记",
+    summary: "墙角刻着一枚新鲜的安全标记，旁边压着一小包用油布裹住的补给。",
+    minFloor: 7,
+    choices: [
+      {
+        id: "claim_survivor_cache",
+        text: "按暗记取物",
+        desc: "需要曾经完成救援。获得金币和一瓶生命药水。",
+        relation: { id: "survivors", delta: 1 },
+        factionLeaning: { id: "survivors", delta: 1 },
+        flag: "survivor_cache_claimed",
+        canChoose: ({ state }) => (state.narrative?.rescuedNpcIds?.length || 0) > 0,
+        apply: ({ state, scaledReward }) => {
+          const gold = scaledReward(14 + (state.floor || 1) * 2);
+          state.gold = (state.gold || 0) + gold;
+          state.inventory = state.inventory || [];
+          state.inventory.push({
+            id: `survivor-potion-${Date.now()}`,
+            kind: "potion",
+            name: "幸存者药水",
+            effect: "hp",
+            amount: 24 + Math.ceil((state.floor || 1) * 1.2)
+          });
+          return {
+            log: "你认出幸存者暗记，取走他们留给后来者的补给。",
+            body: `<p>金币 +${gold}</p><p>获得幸存者药水 +1</p>`
+          };
+        }
+      },
+      {
+        id: "copy_survivor_mark",
+        text: "临摹暗记",
+        desc: "记录这枚标记，获得少量技能尘。",
+        relation: { id: "survivors", delta: 1 },
+        flag: "survivor_mark_copied",
+        apply: ({ state }) => {
+          state.skillDust = (state.skillDust || 0) + 1;
+          return {
+            log: "你临摹下幸存者暗记，学会了一种更隐蔽的路径标识。",
+            body: "<p>技能尘 +1</p>"
+          };
+        }
+      }
+    ]
+  },
+  {
+    id: "warden_seal",
+    category: "trade",
+    risk: "low",
+    title: "巡夜人封条",
+    summary: "一道旧封条钉在墙缝里，符文还在压住门后的低语。",
+    minFloor: 9,
+    choices: [
+      {
+        id: "reinforce_warden_seal",
+        text: "补强封条",
+        desc: "消耗魔尘，换取巡夜人留下的钥匙和金币。",
+        relation: { id: "wardens", delta: 2 },
+        factionLeaning: { id: "wardens", delta: 2 },
+        flag: "warden_seal_reinforced",
+        canChoose: ({ state }) => (state.materials?.["魔尘"] || 0) > 0,
+        apply: ({ state, scaledReward }) => {
+          const gold = scaledReward(18 + (state.floor || 1) * 2);
+          state.materials = state.materials || {};
+          state.materials["魔尘"] = Math.max(0, (state.materials["魔尘"] || 0) - 1);
+          state.keys = (state.keys || 0) + 1;
+          state.gold = (state.gold || 0) + gold;
+          return {
+            log: "你补强巡夜人封条，墙缝里掉出一枚备用钥匙。",
+            body: `<p>魔尘 -1</p><p>符文钥匙 +1<br>金币 +${gold}</p>`
+          };
+        }
+      },
+      {
+        id: "strip_warden_seal",
+        text: "揭下封条",
+        desc: "冒着低语侵蚀，获得更多魔尘。",
+        relation: { id: "runebound", delta: 1 },
+        factionLeaning: { id: "wardens", delta: -1 },
+        flag: "warden_seal_stripped",
+        apply: ({ state }) => {
+          const damage = 7 + Math.ceil((state.floor || 1) * 0.7);
+          state.hp = Math.max(1, (state.hp || 1) - damage);
+          state.materials = state.materials || {};
+          state.materials["魔尘"] = (state.materials["魔尘"] || 0) + 2;
+          return {
+            log: "你揭下巡夜人封条，低语擦过耳后，封条化成了魔尘。",
+            body: `<p>生命 -${damage}</p><p>魔尘 +2</p>`
+          };
+        }
+      }
+    ]
+  },
+  {
+    id: "merchant_ledger",
+    category: "reward",
+    risk: "safe",
+    title: "商路账簿",
+    summary: "一册防潮账簿压在石缝里，页脚写着几处仍可兑现的补给暗号。",
+    minFloor: 10,
+    choices: [
+      {
+        id: "redeem_ledger_credit",
+        text: "兑现暗号",
+        desc: "需要商人信任。获得金币和一把万能钥匙。",
+        relation: { id: "merchants", delta: 1 },
+        factionLeaning: { id: "merchants", delta: 1 },
+        flag: "merchant_ledger_redeemed",
+        canChoose: ({ state }) => (state.narrative?.merchantTrust || 0) >= 3,
+        apply: ({ state, scaledReward }) => {
+          const gold = scaledReward(20 + (state.floor || 1) * 2);
+          state.gold = (state.gold || 0) + gold;
+          state.universalKeys = (state.universalKeys || 0) + 1;
+          return {
+            log: "你用商路暗号兑现了账簿上的一笔旧账。",
+            body: `<p>金币 +${gold}</p><p>万能钥匙 +1</p>`
+          };
+        }
+      },
+      {
+        id: "sell_ledger_pages",
+        text: "撕下可用页",
+        desc: "取走能用的账页，获得金币。",
+        relation: { id: "merchants", delta: -1 },
+        factionLeaning: { id: "merchants", delta: -1 },
+        flag: "merchant_ledger_sold",
+        apply: ({ state, scaledReward }) => {
+          const gold = scaledReward(28 + (state.floor || 1) * 3);
+          state.gold = (state.gold || 0) + gold;
+          return {
+            log: "你撕下账簿里还能卖钱的页码。",
+            body: `<p>金币 +${gold}</p>`
           };
         }
       }

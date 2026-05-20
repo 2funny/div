@@ -1,5 +1,12 @@
 import { advanceTutorial } from "../tutorial/tutorial";
-import { adjustRelation, relationLabel, relationRewardBonus } from "./narrative";
+import {
+  adjustFactionLeaning,
+  adjustMerchantTrust,
+  adjustRelation,
+  recordRescuedNpc,
+  relationLabel,
+  relationRewardBonus
+} from "./narrative";
 import { QUEST_DEFS } from "./quests";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
@@ -19,8 +26,49 @@ export function createQuestRuntime(ctx) {
   const roomName = (...args) => api.roomName(...args);
   const showEvent = (...args) => api.showEvent(...args);
   const showModal = (...args) => api.showModal(...args);
+  const grantSkillScrollReward = (...args) => api.grantSkillScrollReward?.(...args);
+  const canLearnSkill = (...args) => api.canLearnSkill?.(...args);
+  const classSkills = (...args) => api.classSkills?.(...args) || [];
+  const isSkillLearned = (...args) => api.isSkillLearned?.(...args);
+  const learnSkill = (...args) => api.learnSkill?.(...args);
+  const skillRequirementText = (...args) => api.skillRequirementText?.(...args) || "";
   function openQuestNpc(source = null) {
+    if (source?.trainer) {
+      openSkillTrainer(source);
+      return;
+    }
     openQuestFromGiver("questNpc", source || currentQuestSource("questNpc"));
+  }
+
+  function openSkillTrainer(source = null) {
+    const name = source?.npcName || "职业导师";
+    const skills = classSkills()
+      .filter((skill) => !isSkillLearned(skill.id))
+      .sort((a, b) => Number(canLearnSkill(b.id)) - Number(canLearnSkill(a.id)));
+    const learnable = skills.filter((skill) => canLearnSkill(skill.id));
+    const rows = skills
+      .slice(0, 6)
+      .map((skill) => {
+        const ready = canLearnSkill(skill.id);
+        return `<article class="quest-row inventory-card"><div><b>${skill.name}</b><small>${skill.desc}</small><span class="item-tags"><i>${skillRequirementText(skill)}</i></span></div><span class="quest-state">${ready ? "可学习" : "未满足"}</span></article>`;
+      })
+      .join("");
+    const actions = [
+      ...learnable.slice(0, 6).map((skill) => ({
+        text: `学习${skill.name}`,
+        action: () => {
+          closeModal();
+          learnSkill(skill.id, "导师训练");
+          source.trained = true;
+        }
+      })),
+      { text: "离开", action: closeModal }
+    ];
+    showModal(
+      name,
+      `<div class="quest-panel"><b>${name}</b><p>导师会教授当前职业已经满足前置的新技能；战斗仍最多携带 4 个技能。</p></div><section class="quest-list">${rows || "<p>暂时没有可教授的新技能。</p>"}</section>`,
+      actions
+    );
   }
 
   // 读取当前格子上的任务来源物件，供任务弹窗生成动态文案。
@@ -73,26 +121,17 @@ export function createQuestRuntime(ctx) {
     };
   }
 
-  // 确保旧版单任务字段存在，兼容早期存档结构。
-  function ensureQuest() {
-    if (!state.quest || state.quest.floor !== state.floor) {
-      state.quest = { id: "wardenErrand", floor: state.floor, kills: 0, target: 2, claimed: false };
-    }
-    return state.quest;
-  }
-
   // 获取某类任务发布者可提供的任务定义。
   function questDefinitionsForGiver(giver) {
     return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver) as any[];
   }
 
-  // 确保新版多任务列表存在，兼容旧存档。
+  // 读取当前任务列表。
   function ensureQuestList() {
-    state.quests = Array.isArray(state.quests) ? state.quests : [];
     return state.quests;
   }
 
-  // 计算任务金币奖励，兼容固定值和按楼层动态计算两种写法。
+  // 计算任务金币奖励，支持固定值和按楼层动态计算两种定义写法。
   function questRewardGold(def, floor = state.floor) {
     const base = typeof def.rewardGold === "function" ? def.rewardGold(floor) : def.rewardGold || 0;
     const multiplier = floor === state.floor ? floorEffectReward() : 1;
@@ -101,6 +140,7 @@ export function createQuestRuntime(ctx) {
   }
 
   function relationForQuest(def) {
+    if (def.relation) return def.relation;
     if (def.id === "merchantRoute" || def.giver === "shop") return "merchants";
     if (def.id === "rescueRoom") return "survivors";
     return "wardens";
@@ -146,7 +186,7 @@ export function createQuestRuntime(ctx) {
     return `第 ${targetFloor} 层${room ? ` · ${room}` : ""}`;
   }
 
-  // 接受任务并写入任务列表，旧版巡夜人任务同步到 state.quest。
+  // 接受任务并写入任务列表。
   function acceptQuest(id, source = null) {
     const def = source ? questDefFromSource(source.type || "questNpc", source) : QUEST_DEFS[id];
     if (!def) return null;
@@ -156,7 +196,6 @@ export function createQuestRuntime(ctx) {
       ensureQuestList().push(quest);
     }
     quest.accepted = true;
-    if (id === "wardenErrand") state.quest = quest;
     advanceTutorial(state, "quest");
     log(`接受任务：${def.title}。`);
     render();
@@ -180,6 +219,9 @@ export function createQuestRuntime(ctx) {
       def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
       def.rewardDoorKey ? `${def.doorKeyName || progress.doorKeyName || "房门钥匙"} +1` : "",
       rewardGold ? `金币 +${rewardGold}` : "",
+      def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
+      def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
+      def.rewardSkillScroll ? "职业技能卷轴" : "",
       def.rewardPotion ? "小型生命药水 +1" : ""
     ]
       .filter(Boolean)
@@ -246,6 +288,10 @@ export function createQuestRuntime(ctx) {
     quest.claimed = true;
     const relationId = relationForQuest(def);
     adjustRelation(state, relationId, def.id === "rescueRoom" ? 2 : 1);
+    if (relationId === "merchants") adjustMerchantTrust(state, 1);
+    if (relationId === "survivors") adjustFactionLeaning(state, "survivors", 1);
+    if (relationId === "wardens") adjustFactionLeaning(state, "wardens", 1);
+    if (relationId === "runebound") adjustFactionLeaning(state, "runebound", 1);
     state.keys = (state.keys || 0) + (def.rewardKeys || 0);
     if (def.rewardDoorKey && quest.doorKeyId) {
       state.doorKeys = state.doorKeys || {};
@@ -254,6 +300,9 @@ export function createQuestRuntime(ctx) {
       state.doorKeyNames[quest.doorKeyId] = quest.doorKeyName || def.doorKeyName || "房门钥匙";
     }
     state.gold += rewardGold;
+    state.skillPoints = (state.skillPoints || 0) + (def.rewardSkillPoints || 0);
+    state.skillDust = (state.skillDust || 0) + (def.rewardSkillDust || 0);
+    const scrollReward = def.rewardSkillScroll ? grantSkillScrollReward(def.giverName) : "";
     if (def.rewardPotion) {
       state.inventory = state.inventory || [];
       state.inventory.push(potion("小型生命药水", "hp", 18));
@@ -267,6 +316,9 @@ export function createQuestRuntime(ctx) {
           ? `${quest.doorKeyName || def.doorKeyName || "房门钥匙"} +1`
           : "",
         rewardGold ? `金币 +${rewardGold}` : "",
+        def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
+        def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
+        scrollReward,
         def.rewardPotion ? "小型生命药水 +1" : ""
       ]
         .filter(Boolean)
@@ -300,6 +352,8 @@ export function createQuestRuntime(ctx) {
     quest.rescued = true;
     quest.completed = true;
     adjustRelation(state, "survivors", 2);
+    adjustFactionLeaning(state, "survivors", 2);
+    recordRescuedNpc(state, `${state.floor}:${obj.roomId}:${name}`);
     log(`${name}已经安全，回到${quest.giverName || "救援斥候卡尔"}处领取报酬。`);
     playSound("quest");
     showEvent("救援完成", `<p>${name}已经安全。回到救援斥候卡尔处领取报酬。</p>`, "继续");
@@ -319,7 +373,6 @@ export function createQuestRuntime(ctx) {
     claimQuestReward: withState(claimQuestReward),
     createQuestState,
     currentQuestSource: withState(currentQuestSource),
-    ensureQuest: withState(ensureQuest),
     ensureQuestList: withState(ensureQuestList),
     openQuestFromGiver: withState(openQuestFromGiver),
     openQuestNpc: withState(openQuestNpc),

@@ -14,7 +14,10 @@ export function ensureNarrativeState(state: GameState): NarrativeState {
   const narrative: NarrativeState = {
     relations: { ...(current.relations || {}) },
     flags: { ...(current.flags || {}) },
-    eventChoices: { ...(current.eventChoices || {}) }
+    eventChoices: { ...(current.eventChoices || {}) },
+    rescuedNpcIds: Array.isArray(current.rescuedNpcIds) ? [...current.rescuedNpcIds] : [],
+    merchantTrust: Number(current.merchantTrust || 0),
+    factionLeanings: { ...(current.factionLeanings || {}) }
   };
   state.narrative = narrative;
   return narrative;
@@ -66,4 +69,44 @@ export function recordEventChoice(state: GameState, eventId: string, choiceId: s
 export function eventChoiceCount(state: GameState, choiceId: string) {
   const choices = Object.values(ensureNarrativeState(state).eventChoices);
   return choices.filter((choice) => choice === choiceId).length;
+}
+
+export function recordRescuedNpc(state: GameState, npcId: string) {
+  if (!npcId) return;
+  const narrative = ensureNarrativeState(state);
+  if (!narrative.rescuedNpcIds.includes(npcId)) narrative.rescuedNpcIds.push(npcId);
+}
+
+export function hasRescuedNpc(state: GameState, npcId: string) {
+  return !!npcId && ensureNarrativeState(state).rescuedNpcIds.includes(npcId);
+}
+
+export function adjustMerchantTrust(state: GameState, delta: number) {
+  const narrative = ensureNarrativeState(state);
+  narrative.merchantTrust = Math.max(-10, Math.min(10, Number(narrative.merchantTrust || 0) + delta));
+  return narrative.merchantTrust;
+}
+
+export function merchantTrust(state: GameState) {
+  return Number(ensureNarrativeState(state).merchantTrust || 0);
+}
+
+export function merchantPriceFactor(state: GameState) {
+  const trust = merchantTrust(state);
+  if (trust >= 6) return 0.88;
+  if (trust >= 3) return 0.94;
+  if (trust <= -4) return 1.12;
+  return 1;
+}
+
+export function adjustFactionLeaning(state: GameState, id: string, delta: number) {
+  if (!id) return 0;
+  const narrative = ensureNarrativeState(state);
+  const next = Number(narrative.factionLeanings[id] || 0) + delta;
+  narrative.factionLeanings[id] = Math.max(-20, Math.min(20, next));
+  return narrative.factionLeanings[id];
+}
+
+export function factionLeaning(state: GameState, id: string) {
+  return Number(ensureNarrativeState(state).factionLeanings[id] || 0);
 }

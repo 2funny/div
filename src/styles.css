@@ -69,6 +69,17 @@ button:disabled:hover {
   background: #263040;
 }
 
+button:focus-visible,
+[role="button"]:focus-visible,
+.legend-item:focus-visible,
+.panel button:focus-visible,
+.modal-card button:focus-visible,
+.class-card button:focus-visible {
+  outline: 2px solid rgba(240, 195, 91, 0.95);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(240, 195, 91, 0.18);
+}
+
 .shell {
   width: min(1800px, calc(100vw - 20px));
   height: 100vh;
@@ -134,6 +145,8 @@ h2 {
 }
 
 .class-card {
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(180deg, #242c39, #171c24);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -181,6 +194,11 @@ h2 {
   padding-left: 18px;
   color: #cfd7e6;
   line-height: 1.7;
+}
+
+.class-card > button {
+  margin-top: 16px;
+  align-self: flex-start;
 }
 
 .start-card {
@@ -419,7 +437,7 @@ h2 {
   align-items: center;
   gap: 6px;
   min-height: 40px;
-  padding: 0 10px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #151a23;
@@ -434,8 +452,9 @@ h2 {
 
 .stat button {
   flex: 0 0 auto;
+  width: 26px;
   min-height: 26px;
-  padding: 0 8px;
+  padding: 0;
 }
 
 .points {
@@ -773,11 +792,14 @@ h2 {
 .battle-stage {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 16px;
+  justify-content: flex-start;
+  gap: 10px;
   flex: 1 1 auto;
-  min-height: min(580px, calc(100vh - 185px));
-  padding: 18px;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  padding: 12px;
   border: 1px solid rgba(240, 195, 91, 0.18);
   border-radius: 8px;
   background:
@@ -802,8 +824,8 @@ h2 {
   align-items: center;
   justify-content: center;
   min-width: 0;
-  min-height: 340px;
-  padding: 18px;
+  min-height: 220px;
+  padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: rgba(16, 21, 30, 0.78);
@@ -1340,7 +1362,7 @@ h2 {
 
 .battle-command-panel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   align-items: stretch;
 }
 
@@ -1349,8 +1371,8 @@ h2 {
   grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-height: 54px;
-  padding: 9px 12px;
+  min-height: 46px;
+  padding: 7px 10px;
   border: 1px solid rgba(125, 216, 255, 0.2);
   border-radius: 8px;
   background: rgba(12, 18, 26, 0.72);
@@ -1473,8 +1495,8 @@ h2 {
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 46px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 7px 9px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(10, 14, 20, 0.58);
@@ -1588,7 +1610,7 @@ h2 {
 
 .battle-command-side {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1597,7 +1619,7 @@ h2 {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: rgba(7, 10, 15, 0.58);
-  padding: 10px;
+  padding: 8px;
 }
 
 .battle-action-grid {
@@ -1610,8 +1632,8 @@ h2 {
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 56px;
-  padding: 9px 11px;
+  min-height: 48px;
+  padding: 7px 9px;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(16, 21, 30, 0.64);
   text-align: left;
@@ -1672,7 +1694,7 @@ h2 {
 .battle-action.auto {
   width: 100%;
   grid-template-columns: 1fr;
-  min-height: 74px;
+  min-height: 58px;
   border-color: rgba(110, 168, 255, 0.34);
   background: linear-gradient(180deg, rgba(110, 168, 255, 0.14), rgba(16, 21, 30, 0.64));
 }
@@ -1709,11 +1731,11 @@ h2 {
 
 .battle-skill-card {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
   justify-items: start;
-  gap: 8px;
-  min-height: 76px;
-  padding: 10px;
+  gap: 6px;
+  min-height: 78px;
+  padding: 9px;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(16, 21, 30, 0.64);
   text-align: left;
@@ -1735,6 +1757,10 @@ h2 {
 
 .battle-card-head i {
   flex: 0 0 auto;
+  max-width: 82px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 2px 6px;
   border: 1px solid rgba(110, 168, 255, 0.26);
   border-radius: 999px;
@@ -1756,6 +1782,30 @@ h2 {
   color: #9de6c9;
   font-size: 12px;
   font-weight: 800;
+}
+
+.battle-skill-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.battle-skill-meta span {
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #cfd7e6;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.battle-skill-meta span.danger {
+  border-color: rgba(217, 141, 141, 0.26);
+  background: rgba(217, 141, 141, 0.08);
+  color: #d98d8d;
 }
 
 .battle-skill-card:disabled .battle-card-head i {
@@ -1837,6 +1887,16 @@ h2 {
 .mini-cell:focus-visible {
   outline: 0;
   filter: brightness(1.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 .mini-cell.in-view {
@@ -3001,16 +3061,18 @@ h2 {
 .context-body,
 .tab-body {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-top: 0;
 }
 
 .context-body {
   align-content: start;
-  flex: 0 0 124px;
-  min-height: 124px;
-  max-height: 124px;
-  overflow: auto;
+  flex: 0 0 86px;
+  height: 86px;
+  min-height: 86px;
+  max-height: 86px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .tutorial-card {
@@ -3040,28 +3102,36 @@ h2 {
 }
 
 .tile-info {
-  padding: 8px;
+  padding: 6px 7px;
   border: 1px solid rgba(240, 195, 91, 0.45);
   border-radius: 6px;
   background: rgba(240, 195, 91, 0.08);
   color: #f7e7b6;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .action-panel {
   display: flex;
   flex-direction: column;
+  height: 100%;
   width: 410px;
   max-width: 410px;
   min-width: 0;
   box-sizing: border-box;
   overflow: hidden;
-  gap: 10px;
+  gap: 6px;
+}
+
+.action-panel button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .action-panel > h2 {
-  flex: 0 0 28px;
-  min-height: 28px;
+  flex: 0 0 24px;
+  min-height: 24px;
   display: flex;
   align-items: center;
   overflow: hidden;
@@ -3071,9 +3141,9 @@ h2 {
 .tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  flex: 0 0 38px;
-  min-height: 38px;
+  gap: 5px;
+  flex: 0 0 31px;
+  min-height: 31px;
   margin-top: 0;
 }
 
@@ -3082,12 +3152,51 @@ h2 {
   grid-auto-rows: max-content;
   min-width: 0;
   overflow-x: hidden;
-  overflow-y: scroll;
+  overflow-y: auto;
+  flex: 0 0 314px;
+  height: 314px;
+  min-height: 314px;
+  max-height: 314px;
+}
+
+.context-body,
+.tab-body,
+.log {
   scrollbar-gutter: stable;
-  flex: 0 0 320px;
-  height: 320px;
-  min-height: 320px;
-  max-height: 320px;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.context-body:hover,
+.context-body:focus-within,
+.tab-body:hover,
+.tab-body:focus-within,
+.log:hover,
+.log:focus-within {
+  scrollbar-color: rgba(156, 168, 189, 0.42) transparent;
+}
+
+.context-body::-webkit-scrollbar,
+.tab-body::-webkit-scrollbar,
+.log::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.context-body::-webkit-scrollbar-thumb,
+.tab-body::-webkit-scrollbar-thumb,
+.log::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.context-body:hover::-webkit-scrollbar-thumb,
+.context-body:focus-within::-webkit-scrollbar-thumb,
+.tab-body:hover::-webkit-scrollbar-thumb,
+.tab-body:focus-within::-webkit-scrollbar-thumb,
+.log:hover::-webkit-scrollbar-thumb,
+.log:focus-within::-webkit-scrollbar-thumb {
+  background: rgba(156, 168, 189, 0.42);
 }
 
 .item-row {
@@ -3096,7 +3205,7 @@ h2 {
   justify-content: space-between;
   gap: 8px;
   align-items: center;
-  padding: 8px;
+  padding: 7px 9px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #151a23;
@@ -3104,11 +3213,11 @@ h2 {
 
 .inventory-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(76px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(68px, auto);
   align-items: center;
-  gap: 10px;
-  min-height: 64px;
-  padding: 10px;
+  gap: 9px;
+  min-height: 60px;
+  padding: 8px 10px;
   border-color: rgba(255, 255, 255, 0.09);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent), rgba(14, 18, 26, 0.78);
@@ -3120,7 +3229,7 @@ h2 {
 
 .item-main {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -3128,13 +3237,15 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.2;
 }
 
 .item-kicker {
   color: #8bb7ff;
   font-size: 11px;
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.1;
 }
 
 .item-tags {
@@ -3157,37 +3268,58 @@ h2 {
 
 .item-actions {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   justify-items: end;
 }
 
 .item-side {
   display: grid;
-  gap: 6px;
-  justify-items: end;
+  gap: 5px;
+  justify-items: center;
   align-self: center;
-  min-width: 72px;
+  min-width: 68px;
+}
+
+.equipment-card .item-side,
+.item-side.equipment-actions {
+  justify-items: end;
+}
+
+.consumable-row .item-side,
+.rune-row .item-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 92px;
+}
+
+.consumable-row .item-actions,
+.rune-row .item-actions {
+  display: flex;
 }
 
 .item-actions > button,
 .equipment-actions button {
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: 26px;
+  padding: 3px 8px;
   font-size: 12px;
 }
 
 .item-row small {
   display: block;
-  margin-top: 3px;
+  margin-top: 2px;
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.32;
 }
 
 .item-quantity {
   flex: 0 0 auto;
   margin-left: 0;
   align-self: center;
-  justify-self: end;
-  padding: 3px 7px;
+  justify-self: center;
+  padding: 2px 6px;
   border: 1px solid rgba(240, 195, 91, 0.28);
   border-radius: 999px;
   background: rgba(240, 195, 91, 0.09);
@@ -3197,10 +3329,144 @@ h2 {
   line-height: 1;
 }
 
+.skill-loadout {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid rgba(125, 216, 255, 0.18);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(125, 216, 255, 0.07), rgba(240, 195, 91, 0.03)),
+    rgba(12, 17, 25, 0.82);
+}
+
+.skill-loadout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.skill-loadout-head div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skill-loadout-head span {
+  color: #8bb7ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.skill-loadout-head b {
+  color: #ffe6a8;
+  font-size: 14px;
+}
+
+.skill-loadout-head button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.skill-loadout-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.skill-slot {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #edf5ff;
+  text-align: left;
+}
+
+.skill-slot span,
+.skill-slot small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-slot span {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.skill-slot small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.skill-slot.empty {
+  border-style: dashed;
+  color: #9aa8bc;
+}
+
+.modal-card:has(.skill-loadout-modal) {
+  width: min(680px, 100%);
+}
+
+.skill-loadout-modal {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.skill-picker-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(52vh, 460px);
+  overflow: auto;
+}
+
+.skill-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  background: rgba(12, 17, 25, 0.72);
+}
+
+.skill-picker-row.equipped {
+  border-color: rgba(240, 195, 91, 0.26);
+  background:
+    linear-gradient(180deg, rgba(240, 195, 91, 0.08), transparent),
+    rgba(12, 17, 25, 0.78);
+}
+
+.skill-picker-row > button,
+.skill-picker-row > select {
+  min-width: 160px;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.skill-picker-row > select {
+  max-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111722;
+  color: #e7eefb;
+}
+
 .inventory-subtabs {
   display: flex;
-  gap: 4px;
-  padding: 3px;
+  gap: 3px;
+  padding: 2px;
   overflow-x: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
@@ -3211,7 +3477,7 @@ h2 {
   flex: 1 0 auto;
   min-width: 0;
   min-height: 26px;
-  padding: 0 10px;
+  padding: 0 9px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -3228,12 +3494,12 @@ h2 {
 .inventory-group {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
 }
 
 .inventory-group + .inventory-group {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -3523,32 +3789,36 @@ h2 {
 
 .log-panel {
   margin-top: 0;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
-  min-height: 0;
-  flex: 1 1 auto;
+  flex: 1 1 164px;
+  height: auto;
+  min-height: 164px;
+  max-height: none;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .log-panel > h2 {
-  flex: 0 0 26px;
-  min-height: 26px;
+  flex: 0 0 22px;
+  min-height: 22px;
+  font-size: 15px;
 }
 
 .log {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
   max-height: none;
+  padding-top: 4px;
   overflow: auto;
   color: #ccd6e6;
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.38;
 }
 
 .stat-allocator,
@@ -4371,16 +4641,17 @@ h2 {
   }
 
   .tab-body {
-    flex: 0 0 auto;
+    flex: 0 0 300px;
     height: 300px;
     min-height: 300px;
     max-height: 300px;
   }
 
   .context-body {
-    flex: 0 0 auto;
-    min-height: 96px;
-    max-height: none;
+    flex: 0 0 86px;
+    height: 86px;
+    min-height: 86px;
+    max-height: 86px;
   }
 
   .log {

@@ -10,7 +10,6 @@ import {
   RUNES,
   SAVE_KEY,
   SLOT_NAMES,
-  SLOTS,
   STAT_NAMES,
   THEMES,
   VISION_RADIUS
@@ -19,14 +18,14 @@ import { ENEMY_AFFIXES } from "./combat/enemies";
 import { ELEMENT_IDS, elementName } from "./combat/elements";
 import {
   WEAPON_TYPES,
-  randomWeaponTypeForClass,
   weaponPrimaryStat,
   weaponPrimaryStats,
   weaponTypeName
 } from "./equipment/equipmentRules";
-import { equipmentName } from "./equipment/equipmentNames";
+import { randomEquipmentForState } from "./equipment/equipmentDrops";
 import { QUEST_DEFS } from "./quest/quests";
-import { choice, rand, random, uid } from "./random";
+import { xpForNextLevel } from "./progression";
+import { random } from "./random";
 import {
   SAVE_SLOT_LIMIT,
   saveSlotKey,
@@ -79,7 +78,6 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 let autosaveDirty = false;
 
 const $ = requiredById;
-const mutableElementIds = () => [...ELEMENT_IDS];
 const inputValue = (id: string, fallback = "") =>
   (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value || fallback;
 
@@ -176,7 +174,7 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     floor: 1,
     level: 1,
     xp: 0,
-    xpNext: 16,
+    xpNext: xpForNextLevel(1),
     gold: 12,
     hp: cls.hp,
     maxHp: cls.hp,
@@ -190,13 +188,21 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     universalKeys: 0,
     doorKeys: {},
     doorKeyNames: {},
-    quest: null,
     quests: [],
     lore: { chapters: [], pages: [] },
-    narrative: { relations: {}, flags: {}, eventChoices: {} },
+    narrative: {
+      relations: {},
+      flags: {},
+      eventChoices: {},
+      rescuedNpcIds: [],
+      merchantTrust: 0,
+      factionLeanings: {}
+    },
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     skillBranches: {},
     skillCooldowns: {},
+    learnedSkillIds: cls.skills.filter((skill) => skill.starter).map((skill) => skill.id),
+    equippedSkillIds: cls.skills.filter((skill) => skill.starter).map((skill) => skill.id).slice(0, 4),
     inventory: starterInventory(classId),
     materials: { 强化石: 1, 魔尘: 0 },
     runes: { 火焰1: 1, 守护1: 1 },
@@ -247,7 +253,6 @@ const {
   claimQuestReward,
   createQuestState,
   currentQuestSource,
-  ensureQuest,
   ensureQuestList,
   openQuestFromGiver,
   openQuestNpc,
@@ -283,80 +288,7 @@ const {
   updateVisibility
 } = interactionRuntime;
 function randomEquipment() {
-  const slot = choice(SLOTS);
-  const quality = qualityRoll();
-  const weaponType = slot === "weapon" ? randomWeaponTypeForClass(state.classId || "warrior") : "";
-  const bonus = qualityBonus(quality) + Math.floor(state.floor / 4);
-  const stats = equipmentStatsForDrop(slot, bonus, weaponType);
-  const equipment = item(
-    equipmentName(slot, quality, weaponType),
-    slot,
-    quality,
-    stats,
-    quality === "普通" ? 0 : quality === "优秀" ? 1 : 2
-  );
-  if (weaponType) equipment.weaponType = weaponType;
-  if (
-    slot === "weapon" &&
-    (state.floor >= 4 || quality !== "普通") &&
-    random() < weaponElementChance(quality)
-  ) {
-    equipment.element = choice(mutableElementIds());
-    equipment.name = `${elementName(equipment.element)}纹${equipment.name}`;
-  }
-  if (slot !== "weapon" && state.floor >= 4 && random() < elementResistanceChance(quality)) {
-    const resistance = choice(mutableElementIds());
-    equipment.elementResistances = [resistance];
-    equipment.name = `${elementName(resistance)}抗${equipment.name}`;
-  }
-  return equipment;
-}
-
-function equipmentStatsForDrop(slot, bonus, weaponType = "") {
-  if (slot === "weapon") {
-    const stats = {};
-    const primaryStats = weaponPrimaryStats(weaponType);
-    primaryStats.forEach((stat, index) => {
-      const value =
-        stat === "hp"
-          ? 4 + state.floor + bonus * 2
-          : stat === "mp"
-            ? 2 + Math.ceil(state.floor * 0.5) + bonus
-            : index === 0
-              ? bonus
-              : Math.max(1, Math.ceil(bonus * 0.65));
-      stats[stat] = (stats[stat] || 0) + value;
-    });
-    return stats;
-  }
-  const main =
-    slot === "armor" ? "def" : slot === "boots" ? "spd" : slot === "ring" ? "luk" : "res";
-  const stats = { [main]: bonus };
-  if (slot === "armor") stats.hp = 4 + state.floor;
-  return stats;
-}
-
-function weaponElementChance(quality) {
-  return { 普通: 0.08, 优秀: 0.18, 稀有: 0.32, 史诗: 0.48, 传说: 0.7 }[quality] || 0.18;
-}
-
-function elementResistanceChance(quality) {
-  return { 普通: 0.08, 优秀: 0.16, 稀有: 0.28, 史诗: 0.42, 传说: 0.58 }[quality] || 0.16;
-}
-
-// 抽取装备品质，楼层会略微提高高品质概率；幸运只保留给战斗暴击率。
-function qualityRoll() {
-  const r = random() + Math.min(0.12, state.floor * 0.012);
-  if (r > 0.96) return "传说";
-  if (r > 0.86) return "史诗";
-  if (r > 0.68) return "稀有";
-  if (r > 0.38) return "优秀";
-  return "普通";
-}
-
-// 把装备品质转换成基础属性预算。
-function qualityBonus(quality) {
-  return { 普通: 1, 优秀: 2, 稀有: 3, 史诗: 4, 传说: 6 }[quality];
+  return randomEquipmentForState(state);
 }
 
 // 消耗祭坛格子，恢复玩家部分生命和法力。
@@ -387,12 +319,15 @@ function nextFloor() {
   state.floor++;
   state.facing = "down";
   enterFloor("down");
-  state.hp = Math.min(effectiveMaxHp(), state.hp + 5);
-  state.mp = Math.min(effectiveMaxMp(), state.mp + 3);
+  const recovery = stairRecovery("down");
+  state.hp = Math.min(effectiveMaxHp(), state.hp + recovery.hp);
+  state.mp = Math.min(effectiveMaxMp(), state.mp + recovery.mp);
   log(`进入第 ${state.floor} 层。`);
   announceLoreUnlocks(unlockLoreChaptersForFloor(state));
   saveGame(false);
-  showToast(`<p>你沿着下行楼梯抵达第 ${state.floor} 层。</p>`);
+  showToast(
+    `<p>你沿着下行楼梯抵达第 ${state.floor} 层。${recovery.hp || recovery.mp ? `生命 +${recovery.hp}，法力 +${recovery.mp}。` : "这一层没有额外回复。"} </p>`
+  );
 }
 
 // 获取玩家当前脚下的下行楼梯对象。
@@ -409,12 +344,21 @@ function previousFloor() {
   state.facing = "up";
   enterFloor("up");
   updateVisibility();
-  state.hp = Math.min(effectiveMaxHp(), state.hp + 3);
-  state.mp = Math.min(effectiveMaxMp(), state.mp + 1);
+  const recovery = stairRecovery("up");
+  state.hp = Math.min(effectiveMaxHp(), state.hp + recovery.hp);
+  state.mp = Math.min(effectiveMaxMp(), state.mp + recovery.mp);
   log(`返回第 ${state.floor} 层。`);
   unlockLoreChaptersForFloor(state);
   saveGame(false);
-  showToast(`<p>你沿着上行楼梯回到第 ${state.floor} 层。</p>`);
+  showToast(
+    `<p>你沿着上行楼梯回到第 ${state.floor} 层。${recovery.hp || recovery.mp ? `生命 +${recovery.hp}，法力 +${recovery.mp}。` : "这一层没有额外回复。"} </p>`
+  );
+}
+
+function stairRecovery(direction: "up" | "down") {
+  if (state.floor <= 8) return direction === "down" ? { hp: 5, mp: 3 } : { hp: 3, mp: 1 };
+  if (state.floor <= 24) return direction === "down" ? { hp: 3, mp: 2 } : { hp: 2, mp: 1 };
+  return { hp: 0, mp: 0 };
 }
 
 function announceLoreUnlocks(chapters = []) {
@@ -802,22 +746,35 @@ const {
   autoBattlePolicy,
   battleResultList,
   battleRisk,
+  battleSkills,
+  BATTLE_SKILL_LIMIT,
   canUpgradeSkill,
+  canLearnSkill,
   castSkill,
   completeStairSeal,
   dealDamage,
   death,
   enemyTurn,
   executeAutoBattle,
+  grantSkillScrollReward,
   levelUp,
   maybeDrop,
   recordQuestKill,
-  safeEffectiveMaxHp,
-  safeEffectiveMaxMp,
+  classSkills,
+  equippedSkillIds,
+  ensureSkillState,
+  isSkillEquipped,
+  isSkillLearned,
+  learnSkill,
+  learnedSkillIds,
+  learnedSkills,
   skillById,
+  skillScrollItem,
   skillLevel,
   skillPreviewText,
+  skillRequirementText,
   skillUpgradeCost,
+  toggleBattleSkill,
   upgradedSkill,
   useBattlePotion,
   winBattle
@@ -902,6 +859,7 @@ const {
   battleStatusPill,
   badgeForObject,
   centerFxMarkup,
+  changeBattleSkillFromModal,
   clickTile,
   combatantFxMarkup,
   confirmBuy,
@@ -935,6 +893,7 @@ const {
   newGameInSlot,
   nextNewGameSlot,
   objectSprite,
+  openSkillLoadout,
   percentScore,
   potionRow,
   render,
@@ -965,6 +924,7 @@ const {
   selectInventoryTab,
   selectMinimapTile,
   selectedTileText,
+  setBattleSkillSlot,
   shouldShowMapObject,
   showEquipmentSlot,
   showInventoryEquipmentCompare,
@@ -972,7 +932,8 @@ const {
   sprite,
   startNewGame,
   statsText,
-  tileLabel
+  tileLabel,
+  updateBattleSkillFromList
 } = renderRuntime;
 
 const saveApi = {};
@@ -988,10 +949,8 @@ const {
   deleteSaveSlot,
   loadGame,
   log,
-  migrateLegacySave,
   newGamePrompt,
   openSaveSlotPicker,
-  resetExploration,
   returnHome,
   saveGame,
   saveGameToSlot,
@@ -1019,7 +978,10 @@ Object.assign(renderApi, {
   autoBattle,
   autoBattlePolicy,
   battleRisk,
+  battleSkills,
+  BATTLE_SKILL_LIMIT,
   buy,
+  canLearnSkill,
   canEnhance,
   canSellEquipmentHere,
   canUpgradeSkill,
@@ -1057,13 +1019,18 @@ Object.assign(renderApi, {
   skillById,
   skillLevel,
   skillPreviewText,
+  skillRequirementText,
   skillUpgradeCost,
+  classSkills,
+  isSkillEquipped,
+  isSkillLearned,
   startGame,
   syncMusicToGame,
   themeForFloor,
   totals,
   unequipItem,
   updateVisibility,
+  toggleBattleSkill,
   upgradedSkill
 });
 
@@ -1094,6 +1061,7 @@ Object.assign(combatApi, {
 });
 
 Object.assign(inventoryApi, {
+  canLearnSkill,
   canUpgradeSkill,
   closeModal,
   effectiveMaxHp,
@@ -1103,6 +1071,7 @@ Object.assign(inventoryApi, {
   equipmentSummary,
   cloneFloorMap,
   log,
+  learnSkill,
   openQuestFromGiver,
   playSound,
   potion,
@@ -1119,8 +1088,12 @@ Object.assign(inventoryApi, {
   showModal,
   showToast,
   saveCurrentFloor,
+  classSkills,
+  isSkillLearned,
   skillById,
+  skillScrollItem,
   skillLevel,
+  skillRequirementText,
   skillUpgradeCost,
   sprite,
   statsText,
@@ -1143,14 +1116,20 @@ Object.assign(saveApi, {
 });
 
 Object.assign(questApi, {
+  canLearnSkill,
+  classSkills,
   closeModal,
+  grantSkillScrollReward,
+  isSkillLearned,
+  learnSkill,
   log,
   playSound,
   potion,
   render,
   roomName,
   showEvent,
-  showModal
+  showModal,
+  skillRequirementText
 });
 
 Object.assign(interactionApi, {
@@ -1231,7 +1210,11 @@ const runtimeApi = {
   autoBattle,
   buy,
   cardinalNeighbors,
+  canLearnSkill,
+  canUpgradeSkill,
   canUnequipSlot,
+  changeBattleSkillFromModal,
+  classSkills,
   cellsWithin,
   clickTile,
   claimQuestReward,
@@ -1260,6 +1243,7 @@ const runtimeApi = {
   effectiveMaxMp,
   emptyEquipment,
   enhance,
+  ensureSkillState,
   ensureLoreState,
   ensureNarrativeState,
   enterBattle,
@@ -1281,7 +1265,12 @@ const runtimeApi = {
   initAudio,
   inventoryGroupMarkup,
   isDefeatedEnemy,
+  isSkillEquipped,
+  isSkillLearned,
   item,
+  learnSkill,
+  learnedSkillIds,
+  learnedSkills,
   levelUp,
   loadGame,
   makeEnemy,
@@ -1303,6 +1292,7 @@ const runtimeApi = {
   openQuestNpc,
   openRescueNpc,
   openSaveSlotPicker,
+  openSkillLoadout,
   openStatAllocator,
   placeTreasureEncounters,
   potion,
@@ -1327,6 +1317,8 @@ const runtimeApi = {
   renderSkills,
   renderSkillActionButtons,
   skillById,
+  skillRequirementText,
+  toggleBattleSkill,
   renderStartScreen,
   renderTab,
   resolveCell,
@@ -1344,6 +1336,7 @@ const runtimeApi = {
   setActiveTab,
   setActiveEquipmentFilter,
   setActiveInventoryTab,
+  setBattleSkillSlot,
   setAudioEnabledForRuntime,
   setCurrentSaveSlot,
   setState,
@@ -1366,8 +1359,10 @@ const runtimeApi = {
   unequipItem,
   updateSoundButton,
   updateVisibility,
+  updateBattleSkillFromList,
   unlockLoreChaptersForFloor,
   upgradeSkill,
+  upgradedSkill,
   useBattlePotion,
   useItem,
   validRoomDoor,
@@ -1402,7 +1397,10 @@ export {
   autoBattlePolicy,
   buy,
   cardinalNeighbors,
+  canLearnSkill,
+  canUpgradeSkill,
   canUnequipSlot,
+  classSkills,
   cellsWithin,
   clickTile,
   claimQuestReward,
@@ -1431,6 +1429,7 @@ export {
   effectiveMaxMp,
   emptyEquipment,
   enhance,
+  ensureSkillState,
   ensureLoreState,
   ensureNarrativeState,
   enterBattle,
@@ -1446,8 +1445,13 @@ export {
   inventoryGroupMarkup,
   initAudio,
   isDefeatedEnemy,
+  isSkillEquipped,
+  isSkillLearned,
   item,
   knownTeleportTargets,
+  learnSkill,
+  learnedSkillIds,
+  learnedSkills,
   levelUp,
   loadGame,
   makeEnemy,
@@ -1472,6 +1476,7 @@ export {
   openQuestNpc,
   openRescueNpc,
   openSaveSlotPicker,
+  openSkillLoadout,
   openStatAllocator,
   placeTreasureEncounters,
   potion,
@@ -1509,7 +1514,9 @@ export {
   sellEquipment,
   selectEquipmentFilter,
   selectInventoryTab,
+  setBattleSkillSlot,
   shouldShowMapObject,
+  changeBattleSkillFromModal,
   showConfirm,
   showEquipmentSlot,
   showEvent,
@@ -1521,15 +1528,20 @@ export {
   startNewGame,
   starterEquipment,
   starterInventory,
+  skillById,
+  skillRequirementText,
   tileLabel,
   toggleAudio,
+  toggleBattleSkill,
   teleportToTarget,
   triggerTrap,
   unequipItem,
   updateSoundButton,
   updateVisibility,
+  updateBattleSkillFromList,
   unlockLoreChaptersForFloor,
   upgradeSkill,
+  upgradedSkill,
   useBattlePotion,
   useItem,
   weaponPrimaryStats,

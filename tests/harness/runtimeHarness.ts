@@ -33,7 +33,14 @@ function normalizeState(nextState: unknown) {
   state.log ??= [];
   state.quests ??= [];
   state.lore ??= { chapters: [], pages: [] };
-  state.narrative ??= { relations: {}, flags: {}, eventChoices: {} };
+  state.narrative ??= {
+    relations: {},
+    flags: {},
+    eventChoices: {},
+    rescuedNpcIds: [],
+    merchantTrust: 0,
+    factionLeanings: {}
+  };
   state.floorStates ??= {};
   state.skillLevels ??= {};
   state.skillBranches ??= {};

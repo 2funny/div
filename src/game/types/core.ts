@@ -27,7 +27,23 @@ export interface Skill {
   hpMultiplier?: number;
   defMultiplier?: number;
   element?: string;
+  starter?: boolean;
+  requires?: SkillRequirement;
   branches?: SkillBranch[];
+}
+
+export interface SkillRequirement {
+  level?: number;
+  floor?: number;
+  atk?: number;
+  mag?: number;
+  def?: number;
+  res?: number;
+  spd?: number;
+  luk?: number;
+  hp?: number;
+  mp?: number;
+  skills?: string[];
 }
 
 export interface SkillBranch {

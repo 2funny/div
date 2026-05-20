@@ -4,7 +4,14 @@ import { choice, rand, random } from "../random";
 import { clearBattleFx } from "../combat/combatFx";
 import { roomEventById, roomEventMetaText } from "../events/roomEvents";
 import { discoverLorePage } from "../quest/lore";
-import { adjustRelation, markNarrativeFlag, recordEventChoice, relationLabel } from "../quest/narrative";
+import {
+  adjustFactionLeaning,
+  adjustMerchantTrust,
+  adjustRelation,
+  markNarrativeFlag,
+  recordEventChoice,
+  relationLabel
+} from "../quest/narrative";
 import { advanceTutorial } from "../tutorial/tutorial";
 
 // 交互运行时负责玩家移动、视野刷新和地图物件触发，不直接生成 UI 标记。
@@ -254,12 +261,12 @@ export function createInteractionRuntime(ctx) {
     const roll = random();
     let message = "";
     const reward = floorEffectReward();
-    if (roll < 0.42) {
+    if (roll < 0.3) {
       const loot = randomEquipment();
       state.inventory.push(loot);
       log(`打开宝箱，获得${loot.name}。`);
       message = `获得装备：${loot.name}`;
-    } else if (roll < 0.72) {
+    } else if (roll < 0.55) {
       const rune = choice(RUNES) + "1";
       state.runes[rune] = (state.runes[rune] || 0) + 1;
       log(`打开宝箱，获得${rune}符文。`);
@@ -360,7 +367,7 @@ export function createInteractionRuntime(ctx) {
   }
 
   function universalKeyChance() {
-    return Math.min(0.18, 0.08 + state.floor * 0.004);
+    return Math.min(0.08, 0.02 + state.floor * 0.002);
   }
 
   function openRoomEvent(cell) {
@@ -405,6 +412,8 @@ export function createInteractionRuntime(ctx) {
   function applyRoomEventConsequence(eventId, choice) {
     recordEventChoice(state, eventId, choice.id);
     if (choice.flag) markNarrativeFlag(state, choice.flag);
+    if (choice.factionLeaning) adjustFactionLeaning(state, choice.factionLeaning.id, choice.factionLeaning.delta);
+    if (choice.relation?.id === "merchants") adjustMerchantTrust(state, choice.relation.delta > 0 ? 1 : -1);
     if (!choice.relation) return "";
     const score = adjustRelation(state, choice.relation.id, choice.relation.delta);
     const sign = choice.relation.delta > 0 ? "+" : "";
