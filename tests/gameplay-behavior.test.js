@@ -312,6 +312,24 @@ vm.runInContext(
     enemyTurn(state.currentEnemy);
     Math.random = randomBeforeClampRules;
     assert(state.hp < 100, "extreme speed dodge chance should still cap below guaranteed evasion");
+
+    state = {
+      classId: "warrior",
+      floor: 1,
+      hp: 46,
+      maxHp: 46,
+      mp: 12,
+      maxMp: 12,
+      stats: { atk: 4, mag: 1, def: 5, res: 2, spd: 2, luk: 1 },
+      equipment: emptyEquipment(),
+      inventory: [],
+      currentEnemy: { type: "monster", name: "Opening Slime", hp: 15, maxHp: 15, atk: 3, def: 0 },
+      log: []
+    };
+    Math.random = () => 0.99;
+    enemyTurn(state.currentEnemy);
+    Math.random = randomBeforeClampRules;
+    assert(state.hp <= 40, "opening monsters should pressure a warrior by a meaningful hp percentage");
   } finally {
     Math.random = randomBeforeClampRules;
     Date.now = realDateNowForClampRules;
@@ -494,6 +512,10 @@ vm.runInContext(
   assert.strictEqual(classSkills().length, 9, "each class should expose a broad skill pool");
   assert.strictEqual(canLearnSkill("execution"), false, "late skills should stay locked behind level and stat requirements");
   assert(skillRequirementText(skillById("execution")).includes("等级 14"), "locked skills should explain their level requirement");
+  renderSkills();
+  const skillMarkup = document.getElementById("tabBody").innerHTML;
+  assert(skillMarkup.includes("skill-row inventory-card locked unmet"), "unmet skills should render as greyed locked rows");
+  assert(skillMarkup.includes("skill-requirement unmet"), "unmet skill prerequisites should render with warning styling");
   assert.strictEqual(learnSkill("shieldBash", "导师训练"), true, "eligible mentor training should unlock a new skill");
   assert(state.learnedSkillIds.includes("shieldBash"), "learned skills should be persisted on state");
   assert(state.equippedSkillIds.includes("shieldBash"), "new skills should auto-equip when there is room");
@@ -861,13 +883,27 @@ vm.runInContext(
   assert(questList.includes("已领取"), "claimed quests should remain visible in the task list");
 
   state = { floor: 1, lore: { chapters: [], pages: [] }, quests: [], log: [] };
-  const unlockedLore = unlockLoreChaptersForFloor(state);
-  assert.strictEqual(unlockedLore[0]?.id, "threshold", "new adventures should unlock the opening lore chapter");
+  const unlockedLore = unlockLoreChaptersForFloor(state, { skipOpening: true });
+  assert.strictEqual(unlockedLore.length, 0, "new adventures should not auto-unlock the opening lore chapter");
+  assert(renderQuestList().includes("寻找入口引路人"), "task tab should pin the opening main quest");
+  state.map = { rooms: [], cells: [[{ x: 0, y: 0, terrain: "floor", object: { type: "guideNpc", npcName: "旧灯引路人" }, seen: true }]] };
+  openGuideNpc(state.map.cells[0][0]);
+  assert(modalState().body.includes("符文地牢会移动入口"), "opening guide should explain the dungeon premise");
+  modalState().actions.find((action) => action.text.includes("收下残页")).action();
+  assert(state.lore.chapters.includes("threshold"), "opening guide should grant the first lore page");
+  assert.strictEqual(state.introGuideMet, true, "opening guide should be marked as met");
   const firstPage = discoverLorePage(state, "chest");
   assert.strictEqual(firstPage?.id, "threshold-scratch", "chests should be able to reveal eligible lore pages");
   const loreList = renderQuestList();
-  assert(loreList.includes("地牢残页"), "task tab should include the lore archive");
-  assert(loreList.includes("入口刻痕"), "discovered lore pages should render in the task tab");
+  assert(!loreList.includes("openLoreArchive"), "task tab should keep lore archive controls out of quest tracking");
+  assert(!loreList.includes("入口刻痕"), "discovered lore pages should open from the archive instead of rendering inline");
+  state.map.cells[0][0].object = null;
+  renderContext();
+  assert(document.getElementById("contextBody").innerHTML.includes("地牢残页"), "action panel should expose the lore archive shortcut");
+  openLoreArchive();
+  assert(modalState().body.includes("第一章：入口不会记人"), "lore archive should open the first discovered entry");
+  modalState().actions.find((action) => action.text.includes("下一页")).action();
+  assert(modalState().body.includes("入口刻痕"), "lore archive should page through discovered lore entries");
 
   const rescueSource = { type: "questNpc", questId: "rescueRoom", npcName: "救援斥候卡尔", roomId: "room-1-0", roomName: "1号房", rescueName: "矿工托兰", target: 1 };
   state.floor = 1;
@@ -913,6 +949,40 @@ vm.runInContext(
   assert.strictEqual(state.skillDust, 2, "rune survey quests should reward skill dust");
   assert.strictEqual(state.narrative.relations.runebound, 1, "rune survey quests should strengthen runebound relations");
   assert.strictEqual(state.narrative.factionLeanings.runebound, 1, "rune survey quests should update runebound faction leaning");
+
+  state.floor = 8;
+  state.quests = [];
+  state.runes = {};
+  state.questChains = {};
+  const calibrationQuest = acceptQuest("runeCalibration", {
+    type: "questNpc",
+    questId: "runeCalibration",
+    npcName: "回声校准师",
+    targetFloor: 8
+  });
+  const calibrationRewards = [];
+  recordQuestKill({ type: "monster", name: "Plain Target" }, calibrationRewards);
+  assert.strictEqual(calibrationQuest.kills, 0, "rune calibration should ignore non-runic targets");
+  recordQuestKill({ type: "monster", name: "Echo Target", affix: "burning" }, calibrationRewards);
+  recordQuestKill({ type: "elite", name: "Elite Echo" }, calibrationRewards);
+  assert.strictEqual(calibrationQuest.completed, true, "rune calibration should progress from runic or elite targets");
+  claimQuestReward("runeCalibration");
+  assert(Object.values(state.runes).some((count) => count > 0), "rune calibration should reward a rune");
+  assert.strictEqual(state.questChains.runeCalibration, 1, "chain quests should record completion counts");
+
+  state.floor = 10;
+  state.quests = [];
+  const bountyQuest = acceptQuest("eliteBounty", {
+    type: "questNpc",
+    questId: "eliteBounty",
+    npcName: "悬赏巡夜人",
+    targetFloor: 10
+  });
+  const bountyRewards = [];
+  recordQuestKill({ type: "monster", name: "Normal Target" }, bountyRewards);
+  assert.strictEqual(bountyQuest.kills, 0, "elite bounty should ignore ordinary monsters");
+  recordQuestKill({ type: "elite", name: "Bounty Target" }, bountyRewards);
+  assert.strictEqual(bountyQuest.completed, true, "elite bounty should complete from elite kills");
 
   state = {
     floor: 2,
@@ -1102,6 +1172,31 @@ vm.runInContext(
   assert.strictEqual(state.narrative.merchantTrust, 3, "merchant quests should build long-term merchant trust");
 
   state = {
+    floor: 6,
+    gold: 0,
+    keys: 0,
+    inventory: [],
+    quests: [{
+      id: "merchantCache",
+      giver: "shop",
+      floor: 6,
+      targetFloor: 6,
+      kills: 2,
+      target: 2,
+      accepted: true,
+      completed: true,
+      claimed: false
+    }],
+    questChains: {},
+    narrative: { relations: { merchants: 0 }, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} },
+    log: []
+  };
+  claimQuestReward("merchantCache");
+  assert(state.inventory.some((entry) => entry.kind === "teleport"), "merchant cache should reward a teleport beacon");
+  assert(state.inventory.some((entry) => entry.effect === "mp"), "merchant cache should reward a mana potion");
+  assert.strictEqual(state.questChains.merchantCache, 1, "merchant cache should record chain progress");
+
+  state = {
     floor: 2,
     gold: 200,
     player: { x: 1, y: 1 },
@@ -1152,8 +1247,8 @@ vm.runInContext(
   const waitingAfterPlayerAction = renderBattleCommandPanel();
   Date.now = realDateNowForTurnLock;
   state.currentEnemy = null;
-  assert(waitingAfterPlayerAction.includes("battle-turn-banner windup enemy"), "battle command panel should switch to the enemy windup after player damage");
-  assert(waitingAfterPlayerAction.includes("敌方锁定"), "battle command panel should show a useful enemy intent state");
+  assert(waitingAfterPlayerAction.includes("battle-timeline-node enemy"), "battle command panel should switch to enemy timeline state after player damage");
+  assert(waitingAfterPlayerAction.includes("预备"), "battle command panel should show a useful enemy intent state");
   assert(waitingAfterPlayerAction.includes("disabled title="), "battle actions should be disabled right after the player action ends");
 
   state = {
@@ -1173,9 +1268,9 @@ vm.runInContext(
   enemyTurn(state.currentEnemy);
   Math.random = randomBeforeCombatRules;
   const enemyActionFeed = renderBattleCommandPanel();
-  assert(enemyActionFeed.includes("battle-action-feed skill"), "battle command panel should include a recent enemy action feed");
-  assert(enemyActionFeed.includes("Skill Dummy使用重击"), "enemy action feed should show the skill the enemy used");
-  assert(enemyActionFeed.includes("造成"), "enemy action feed should show the result of the enemy action");
+  assert(enemyActionFeed.includes("battle-timeline-node enemy"), "battle command panel should include enemy action timeline nodes");
+  assert(enemyActionFeed.includes("Skill Dummy使用重击"), "enemy action timeline should show the skill the enemy used");
+  assert(enemyActionFeed.includes("造成"), "enemy action timeline should show the result of the enemy action");
 
   const tutorialMap = Array.from({ length: 5 }, (_, y) => Array.from({ length: 5 }, (_, x) => ({
     x,

@@ -92,7 +92,9 @@ const battleState = {
   phase: "idle",
   message: "",
   actor: "",
-  actionFeed: null
+  actionFeed: null,
+  actionTimeline: [],
+  turnSeq: 0
 };
 
 const uiState = {
@@ -218,7 +220,7 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
   state.hp = effectiveMaxHp();
   state.mp = effectiveMaxMp();
   generateFloor();
-  announceLoreUnlocks(unlockLoreChaptersForFloor(state));
+  repairDoorAccessBlockers();
   log(`你作为${cls.name}踏入了符文地牢。`);
   saveGame(false);
   render();
@@ -237,6 +239,7 @@ const {
   makeEnemyWithVariant,
   placeGuardNear,
   placeTreasureEncounters,
+  repairDoorAccessBlockers,
   roomName,
   roomThreat,
   floorEffectReward,
@@ -280,6 +283,7 @@ const {
   nearestGuardForTrap,
   openChest,
   openFenceGate,
+  openGuideNpc,
   openLockedDoor,
   openLockedChest,
   promptDangerousEnemy,
@@ -323,7 +327,7 @@ function nextFloor() {
   state.hp = Math.min(effectiveMaxHp(), state.hp + recovery.hp);
   state.mp = Math.min(effectiveMaxMp(), state.mp + recovery.mp);
   log(`进入第 ${state.floor} 层。`);
-  announceLoreUnlocks(unlockLoreChaptersForFloor(state));
+  announceLoreUnlocks(unlockLoreChaptersForFloor(state, { skipOpening: true }));
   saveGame(false);
   showToast(
     `<p>你沿着下行楼梯抵达第 ${state.floor} 层。${recovery.hp || recovery.mp ? `生命 +${recovery.hp}，法力 +${recovery.mp}。` : "这一层没有额外回复。"} </p>`
@@ -348,7 +352,7 @@ function previousFloor() {
   state.hp = Math.min(effectiveMaxHp(), state.hp + recovery.hp);
   state.mp = Math.min(effectiveMaxMp(), state.mp + recovery.mp);
   log(`返回第 ${state.floor} 层。`);
-  unlockLoreChaptersForFloor(state);
+  unlockLoreChaptersForFloor(state, { skipOpening: true });
   saveGame(false);
   showToast(
     `<p>你沿着上行楼梯回到第 ${state.floor} 层。${recovery.hp || recovery.mp ? `生命 +${recovery.hp}，法力 +${recovery.mp}。` : "这一层没有额外回复。"} </p>`
@@ -383,12 +387,14 @@ function enterFloor(direction) {
   const saved = state.floorStates[state.floor];
   if (saved?.map) {
     state.map = cloneFloorMap(saved.map);
+    repairDoorAccessBlockers();
     state.player = saved.player ? { ...saved.player } : entryPositionForDirection(direction);
     state.facing = saved.facing || state.facing || (direction === "up" ? "up" : "down");
     updateVisibility();
     return;
   }
   generateFloor();
+  repairDoorAccessBlockers();
   state.player = entryPositionForDirection(direction);
   updateVisibility();
 }
@@ -893,6 +899,7 @@ const {
   newGameInSlot,
   nextNewGameSlot,
   objectSprite,
+  openLoreArchive,
   openSkillLoadout,
   percentScore,
   potionRow,
@@ -926,6 +933,8 @@ const {
   selectedTileText,
   setBattleSkillSlot,
   shouldShowMapObject,
+  showCurrentEnemyDetail,
+  showEnemyDetailAt,
   showEquipmentSlot,
   showInventoryEquipmentCompare,
   showInventoryEquipmentDetail,
@@ -1106,6 +1115,7 @@ Object.assign(saveApi, {
   closeModal,
   emptyEquipment,
   generateFloor,
+  repairDoorAccessBlockers,
   render,
   renderLog,
   renderStartScreen,
@@ -1129,6 +1139,7 @@ Object.assign(questApi, {
   roomName,
   showEvent,
   showModal,
+  teleportBeacon,
   skillRequirementText
 });
 
@@ -1284,11 +1295,13 @@ const runtimeApi = {
   newGamePrompt,
   openForge,
   openFenceGate,
+  openGuideNpc,
   openLockedDoor,
   openLockedChest,
   openMerchant,
   openMerchantSell,
   openMerchantShop,
+  openLoreArchive,
   openQuestNpc,
   openRescueNpc,
   openSaveSlotPicker,
@@ -1298,6 +1311,7 @@ const runtimeApi = {
   potion,
   randomEquipment,
   recordQuestKill,
+  repairDoorAccessBlockers,
   render,
   renderBattleView,
   renderBattleCommandPanel,
@@ -1341,6 +1355,8 @@ const runtimeApi = {
   setCurrentSaveSlot,
   setState,
   showConfirm,
+  showCurrentEnemyDetail,
+  showEnemyDetailAt,
   showEquipmentSlot,
   showEvent,
   showInventoryEquipmentCompare,
@@ -1468,11 +1484,13 @@ export {
   objectSprite,
   openFenceGate,
   openForge,
+  openGuideNpc,
   openLockedDoor,
   openLockedChest,
   openMerchant,
   openMerchantSell,
   openMerchantShop,
+  openLoreArchive,
   openQuestNpc,
   openRescueNpc,
   openSaveSlotPicker,
@@ -1482,6 +1500,7 @@ export {
   potion,
   randomEquipment,
   recordQuestKill,
+  repairDoorAccessBlockers,
   render,
   renderBattleCommandPanel,
   renderBattleView,
@@ -1518,6 +1537,8 @@ export {
   shouldShowMapObject,
   changeBattleSkillFromModal,
   showConfirm,
+  showCurrentEnemyDetail,
+  showEnemyDetailAt,
   showEquipmentSlot,
   showEvent,
   showInventoryEquipmentCompare,

@@ -99,16 +99,52 @@ vm.runInContext(
   const outdoorFeatureTypes = new Set(["monster", "elite", "chest", "lockedChest", "altar"]);
   const outdoorFeatures = generatedCells.filter((cell) => !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));
   const startSafeObjects = new Set(["monster", "elite", "boss", "trap", "chest", "lockedChest", "altar", "shop", "forge", "questNpc", "rescueNpc", "roomEvent"]);
+  const doorBlockingObjects = new Set(["shop", "forge", "guideNpc", "questNpc", "rescueNpc", "roomEvent"]);
+  const isRoomDoorMarker = (cell) => cell?.terrain === "door" || ["lockedDoor", "roomEntrance"].includes(cell?.object?.type);
+  const isDoorAccessCell = (cell) => isRoomDoorMarker(cell) || cardinalNeighbors(generated, cell.x, cell.y).some(isRoomDoorMarker);
   assert(generatedCells.some((cell) => cell.object?.type === "roomEvent"), "generated floors should include at least one room event");
   assert(
     !generatedCells.some((cell) => startSafeObjects.has(cell.object?.type) && distance(cell, { x: 1, y: 1 }) <= 4),
     "generated floors should keep the starting area clear of encounters and interactables"
+  );
+  assert(
+    !generatedCells.some((cell) => doorBlockingObjects.has(cell.object?.type) && isDoorAccessCell(cell)),
+    "generated floors should keep NPCs and permanent interactables off room door approaches"
   );
   for (const feature of outdoorFeatures) {
     const crowdedNeighbor = cellsWithin(generated, feature.x, feature.y, 1)
       .some((cell) => cell !== feature && !cell.roomId && outdoorFeatureTypes.has(cell.object?.type));
     assert.strictEqual(crowdedNeighbor, false, "outdoor monsters, treasure, and altars should not pile up next to each other");
   }
+
+  state = {
+    floor: 1,
+    facing: "down",
+    player: { x: 1, y: 1 },
+    introGuideMet: false
+  };
+  generateFloor();
+  const firstFloorCells = state.map.cells.flat();
+  const guideNpc = firstFloorCells.find((cell) => cell.object?.type === "guideNpc");
+  assert(guideNpc, "first floor should include an opening guide NPC");
+  assert(distance(guideNpc, { x: 1, y: 1 }) <= 3, "opening guide should be near the entrance");
+
+  const chokeMap = Array.from({ length: 7 }, (_, y) => Array.from({ length: 7 }, (_, x) => ({
+    x,
+    y,
+    terrain: "wall",
+    object: null,
+    seen: false,
+    visible: false
+  })));
+  for (const [x, y] of [[1, 3], [2, 3], [3, 3], [4, 3], [5, 3], [4, 2], [5, 2], [4, 4], [5, 4]]) {
+    chokeMap[y][x].terrain = "floor";
+  }
+  chokeMap[3][3].object = { type: "questNpc", npcName: "堵门测试员" };
+  state = { floor: 3, map: { cells: chokeMap } };
+  repairDoorAccessBlockers(chokeMap);
+  assert.strictEqual(chokeMap[3][3].object, null, "door repair should move NPCs off one-tile room approaches");
+  assert(chokeMap.flat().some((cell) => cell.object?.type === "questNpc"), "door repair should preserve the relocated NPC");
 
   state = { floor: 3 };
   const size = 17;

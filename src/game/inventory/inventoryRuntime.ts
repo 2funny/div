@@ -147,7 +147,11 @@ export function createInventoryRuntime(ctx) {
   // 判断当前物件是否会阻挡移动，必须先交互才能继续。
   function isBlockingInteraction(obj) {
     if (!obj) return false;
-    if (["shop", "forge", "questNpc", "rescueNpc", "fenceGate", "lockedDoor"].includes(obj.type))
+    if (
+      ["shop", "forge", "guideNpc", "questNpc", "rescueNpc", "fenceGate", "lockedDoor"].includes(
+        obj.type
+      )
+    )
       return true;
     if (obj.type === "lockedChest") return (state.keys || 0) <= 0;
     return false;
@@ -581,7 +585,7 @@ export function createInventoryRuntime(ctx) {
     const currentBranch =
       skill.branches?.find((entry) => entry.id === state.skillBranches?.[skillId]) || null;
     const nextPower = Number(
-      (skill.power * (1 + nextLevel * 0.1) + (currentBranch?.powerBonus || 0)).toFixed(2)
+      (skill.power * (1 + nextLevel * 0.075) + (currentBranch?.powerBonus || 0)).toFixed(2)
     );
     const nextMp = Math.max(
       1,

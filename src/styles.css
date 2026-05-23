@@ -799,6 +799,7 @@ h2 {
   min-height: 0;
   max-height: 100%;
   overflow: auto;
+  scrollbar-width: none;
   padding: 12px;
   border: 1px solid rgba(240, 195, 91, 0.18);
   border-radius: 8px;
@@ -808,6 +809,10 @@ h2 {
   box-shadow:
     inset 0 0 42px rgba(0, 0, 0, 0.48),
     0 18px 44px rgba(0, 0, 0, 0.28);
+}
+
+.battle-stage::-webkit-scrollbar {
+  display: none;
 }
 
 .battle-board {
@@ -847,6 +852,32 @@ h2 {
 .battle-sprite .sprite {
   width: 100%;
   height: 100%;
+}
+
+.enemy-detail-sprite {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.enemy-detail-sprite:hover .sprite,
+.enemy-detail-sprite:focus-visible .sprite {
+  filter: drop-shadow(0 0 10px rgba(240, 195, 91, 0.32));
+  transform: translateY(-1px);
+}
+
+.enemy-detail-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-color: rgba(240, 195, 91, 0.3);
+  background: rgba(240, 195, 91, 0.1);
+  color: #ffe6a8;
+  font-size: 12px;
 }
 
 .combatant.fx-hit .battle-sprite,
@@ -1446,6 +1477,165 @@ h2 {
   color: #ffd2c4;
 }
 
+.battle-timeline {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0 4px;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.battle-timeline::-webkit-scrollbar {
+  display: none;
+}
+
+.battle-timeline-rail {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: max-content;
+  min-height: 140px;
+  padding: 8px 20px 8px 10px;
+  gap: 18px;
+}
+
+.battle-timeline-rail::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 70px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(125, 216, 255, 0.26), rgba(240, 195, 91, 0.4), rgba(255, 126, 91, 0.28));
+}
+
+.battle-timeline-node {
+  position: relative;
+  display: grid;
+  grid-template-rows: 52px 32px 52px;
+  justify-items: center;
+  width: 168px;
+  flex: 0 0 168px;
+  z-index: 1;
+}
+
+.battle-timeline-node i {
+  grid-row: 2;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  background: #101722;
+  color: #dfe8f6;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 900;
+  box-shadow: 0 0 0 3px rgba(7, 10, 15, 0.9);
+}
+
+.battle-timeline-node.hero i {
+  border-color: rgba(125, 216, 255, 0.46);
+  background: #122638;
+  color: #dff6ff;
+}
+
+.battle-timeline-node.enemy i {
+  border-color: rgba(255, 126, 91, 0.46);
+  background: #321713;
+  color: #ffd2c4;
+}
+
+.battle-timeline-node.active i {
+  animation: turnPulse 0.92s ease-in-out infinite;
+}
+
+.battle-timeline-card {
+  box-sizing: border-box;
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  width: 100%;
+  height: 52px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 7px 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(10, 14, 20, 0.68);
+}
+
+.battle-timeline-node.top .battle-timeline-card {
+  grid-row: 1;
+  align-self: start;
+}
+
+.battle-timeline-node.bottom .battle-timeline-card {
+  grid-row: 3;
+  align-self: end;
+}
+
+.battle-timeline-card b,
+.battle-timeline-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.battle-timeline-card b {
+  max-width: calc(100% - 38px);
+  color: #e7f1ff;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.battle-timeline-card span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.battle-timeline-card em {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #ffe6a8;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.05;
+  white-space: nowrap;
+}
+
+.battle-timeline-node.hero .battle-timeline-card {
+  border-color: rgba(125, 216, 255, 0.2);
+  background: rgba(15, 31, 43, 0.46);
+}
+
+.battle-timeline-node.enemy .battle-timeline-card {
+  border-color: rgba(255, 126, 91, 0.22);
+  background: rgba(43, 18, 15, 0.46);
+}
+
+.battle-timeline-node.shield .battle-timeline-card,
+.battle-timeline-node.heal .battle-timeline-card {
+  border-color: rgba(125, 212, 190, 0.24);
+  background: rgba(18, 42, 39, 0.42);
+}
+
+.battle-timeline-node.active .battle-timeline-card {
+  border-color: rgba(240, 195, 91, 0.36);
+  box-shadow: 0 0 0 1px rgba(240, 195, 91, 0.08);
+}
+
 .battle-turn-track {
   display: grid;
   grid-template-columns: 30px 28px 30px;
@@ -1656,6 +1846,12 @@ h2 {
   border-color: rgba(110, 168, 255, 0.32);
   background: rgba(110, 168, 255, 0.1);
   color: #bdd8ff;
+}
+
+.enemy-detail-action {
+  margin-bottom: 8px;
+  border-color: rgba(240, 195, 91, 0.22);
+  background: rgba(240, 195, 91, 0.08);
 }
 
 .battle-action-copy {
@@ -3111,6 +3307,23 @@ h2 {
   line-height: 1.35;
 }
 
+.tile-info-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tile.inspectable {
+  cursor: help;
+}
+
+.tile.inspectable.selected,
+.tile.inspectable:hover {
+  box-shadow:
+    inset 0 0 0 1px rgba(240, 195, 91, 0.54),
+    0 0 0 2px rgba(240, 195, 91, 0.12);
+}
+
 .action-panel {
   display: flex;
   flex-direction: column;
@@ -3264,6 +3477,33 @@ h2 {
   font-size: 11px;
   font-style: normal;
   line-height: 1.2;
+}
+
+.skill-row.unmet {
+  border-color: rgba(217, 141, 141, 0.2);
+  background:
+    linear-gradient(180deg, rgba(217, 141, 141, 0.055), rgba(255, 255, 255, 0.012)),
+    rgba(13, 16, 22, 0.72);
+  opacity: 0.72;
+}
+
+.skill-row.unmet b,
+.skill-row.unmet .item-tags i {
+  color: #8f98a8;
+}
+
+.skill-row.learnable {
+  border-color: rgba(125, 216, 255, 0.2);
+}
+
+.item-kicker.danger,
+.quest-state.danger,
+.skill-requirement.unmet {
+  color: #ff9f9f;
+}
+
+.skill-requirement.unmet {
+  font-weight: 700;
 }
 
 .item-actions {
@@ -3772,6 +4012,89 @@ h2 {
   margin-top: 12px;
 }
 
+.enemy-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.enemy-detail-head {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(240, 195, 91, 0.18);
+  border-radius: 8px;
+  background: rgba(9, 12, 18, 0.36);
+}
+
+.enemy-detail-head .sprite {
+  width: 76px;
+  height: 76px;
+}
+
+.enemy-detail-head div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.enemy-detail-head span {
+  color: #ffe6a8;
+  font-size: 12px;
+}
+
+.enemy-detail-head b {
+  overflow-wrap: anywhere;
+  color: #f3f7ff;
+  font-size: 18px;
+}
+
+.enemy-detail-head small,
+.enemy-scout-note {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.enemy-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.enemy-stat-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.enemy-stat-cell span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.enemy-stat-cell b {
+  color: #edf4ff;
+  font-size: 18px;
+}
+
+.enemy-stat-cell.masked {
+  border-color: rgba(240, 195, 91, 0.26);
+  background: rgba(240, 195, 91, 0.08);
+}
+
+.enemy-stat-cell.masked b {
+  color: #ffe6a8;
+}
+
+.enemy-detail-rows {
+  margin-top: 0;
+}
+
 .detail-row {
   display: grid;
   grid-template-columns: 76px minmax(0, 1fr);
@@ -4012,8 +4335,7 @@ h2 {
 }
 
 .quest-panel,
-.quest-list,
-.lore-archive {
+.quest-list {
   display: grid;
   gap: 8px;
 }
@@ -4095,27 +4417,7 @@ h2 {
   white-space: nowrap;
 }
 
-.lore-archive {
-  margin-top: 12px;
-}
-
-.lore-archive h3 {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0;
-  color: #ffe6a8;
-  font-size: 14px;
-}
-
-.lore-archive h3 small {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.lore-row {
+.lore-page {
   display: grid;
   gap: 5px;
   padding: 10px;
@@ -4126,8 +4428,28 @@ h2 {
     rgba(12, 16, 23, 0.66);
 }
 
-.lore-row small {
+.lore-page b {
+  color: #ffe6a8;
+}
+
+.lore-page p {
   line-height: 1.45;
+}
+
+.lore-shortcut {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  border-color: rgba(240, 195, 91, 0.24);
+  background: rgba(240, 195, 91, 0.07);
+  color: #ffe6a8;
+}
+
+.lore-shortcut small {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .forge-summary {
@@ -4313,6 +4635,19 @@ h2 {
 }
 
 @media (max-width: 560px) {
+  .enemy-detail-head {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .enemy-detail-head .sprite {
+    width: 58px;
+    height: 58px;
+  }
+
+  .enemy-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .reward-list,
   .reward-list.dense {
     grid-template-columns: 1fr;
@@ -4622,6 +4957,26 @@ h2 {
 
   .battle-center {
     min-height: 52px;
+  }
+
+  .battle-timeline-rail {
+    min-height: 132px;
+    gap: 12px;
+  }
+
+  .battle-timeline-rail::before {
+    top: 66px;
+  }
+
+  .battle-timeline-node {
+    grid-template-rows: 50px 30px 50px;
+    width: 154px;
+    flex-basis: 154px;
+  }
+
+  .battle-timeline-card {
+    height: 50px;
+    padding: 6px 7px 5px;
   }
 
   .battle-command-layout {

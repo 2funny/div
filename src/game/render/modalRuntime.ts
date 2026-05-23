@@ -6,7 +6,7 @@ export function createModalRuntime({ $, initAudio, resetStatDraft }) {
     $("modalActions").innerHTML = actions
       .map(
         (action, index) =>
-          `<button type="button" onclick="modalAction(${index})">${escapeHtml(action.text)}</button>`
+          `<button type="button" ${action.disabled ? "disabled" : ""} onclick="modalAction(${index})">${escapeHtml(action.text)}</button>`
       )
       .join("");
     window._modalActions = actions;

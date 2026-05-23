@@ -20,6 +20,31 @@ export const QUEST_DEFS = {
     rewardGold: (floor: number) => 14 + floor * 3,
     rewardKeys: 1
   },
+  eliteBounty: {
+    id: "eliteBounty",
+    giver: "questNpc",
+    title: "精英悬赏",
+    giverName: "悬赏巡夜人",
+    desc: "追猎本层更危险的精英怪，削弱地牢对巡夜人的反扑。",
+    target: 1,
+    targetKind: "elite",
+    rewardGold: (floor: number) => 18 + floor * 4,
+    rewardKeys: 1,
+    rewardSkillDust: 1,
+    relation: "wardens"
+  },
+  roomPurge: {
+    id: "roomPurge",
+    giver: "questNpc",
+    title: "房间净化",
+    giverName: "净化记录员",
+    desc: "清理指定房间里的怪物，回收房间门楣上异常跳动的符文残响。",
+    target: 2,
+    rewardGold: (floor: number) => 12 + floor * 3,
+    rewardSkillDust: 2,
+    rewardRune: true,
+    relation: "runebound"
+  },
   lockedRoomKey: {
     id: "lockedRoomKey",
     giver: "questNpc",
@@ -55,6 +80,19 @@ export const QUEST_DEFS = {
     rewardSkillPoints: 1,
     relation: "wardens"
   },
+  wardenRelay: {
+    id: "wardenRelay",
+    giver: "questNpc",
+    title: "巡夜接力",
+    giverName: "巡夜传令员",
+    desc: "把前哨路线打通。完成后会提高巡夜人对你的长期信任，并引出更深层封印委托。",
+    target: 2,
+    rewardGold: (floor: number) => 16 + floor * 3,
+    rewardKeys: 1,
+    rewardSkillPoints: 1,
+    relation: "wardens",
+    chainFlag: "wardenRelay"
+  },
   survivorTrace: {
     id: "survivorTrace",
     giver: "questNpc",
@@ -68,6 +106,33 @@ export const QUEST_DEFS = {
     rewardSkillScroll: true,
     relation: "survivors"
   },
+  survivorEscort: {
+    id: "survivorEscort",
+    giver: "questNpc",
+    title: "撤离掩护",
+    giverName: "幸存者领路人",
+    desc: "清掉通往撤离暗记的追踪者。完成后幸存者会在后续事件中留下更多可用线索。",
+    target: 2,
+    rewardGold: (floor: number) => 13 + floor * 2,
+    rewardPotion: "hp",
+    rewardBeacon: true,
+    relation: "survivors",
+    chainFlag: "survivorEscort"
+  },
+  runeCalibration: {
+    id: "runeCalibration",
+    giver: "questNpc",
+    title: "符文校准",
+    giverName: "回声校准师",
+    desc: "击败携带符文回声的目标，校准装备上的符文槽回路。",
+    target: 2,
+    targetKind: "runic",
+    rewardGold: (floor: number) => 8 + floor * 2,
+    rewardSkillDust: 3,
+    rewardRune: true,
+    relation: "runebound",
+    chainFlag: "runeCalibration"
+  },
   merchantRoute: {
     id: "merchantRoute",
     giver: "shop",
@@ -77,5 +142,18 @@ export const QUEST_DEFS = {
     target: 2,
     rewardGold: (floor: number) => 10 + floor * 3,
     rewardPotion: "hp"
+  },
+  merchantCache: {
+    id: "merchantCache",
+    giver: "shop",
+    title: "补给回收",
+    giverName: "流动商队",
+    desc: "清掉占据补给箱附近的怪物，商队会给你更实用的远行工具。",
+    target: 2,
+    rewardGold: (floor: number) => 12 + floor * 3,
+    rewardPotion: "mp",
+    rewardBeacon: true,
+    relation: "merchants",
+    chainFlag: "merchantCache"
   }
 } as const;

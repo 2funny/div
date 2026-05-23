@@ -3,7 +3,7 @@ import { cellsWithin, distance } from "../floor/mapGeometry";
 import { choice, rand, random } from "../random";
 import { clearBattleFx } from "../combat/combatFx";
 import { roomEventById, roomEventMetaText } from "../events/roomEvents";
-import { discoverLorePage } from "../quest/lore";
+import { discoverLorePage, grantOpeningLore } from "../quest/lore";
 import {
   adjustFactionLeaning,
   adjustMerchantTrust,
@@ -126,6 +126,8 @@ export function createInteractionRuntime(ctx) {
       openMerchant();
     } else if (obj.type === "forge") {
       openForge();
+    } else if (obj.type === "guideNpc") {
+      openGuideNpc(cell);
     } else if (obj.type === "questNpc") {
       openQuestNpc(obj);
     } else if (obj.type === "rescueNpc") {
@@ -139,6 +141,34 @@ export function createInteractionRuntime(ctx) {
     } else if (obj.type === "stairsUp") {
       previousFloor();
     }
+  }
+
+  function openGuideNpc(cell) {
+    const name = cell.object?.npcName || "旧灯引路人";
+    showModal(
+      name,
+      `
+      <div class="quest-panel">
+        <b>${name}</b>
+        <p>“你不是第一个走到这里的人，也不会是最后一个。符文地牢会移动入口，会记住招式，也会慢慢记住名字。”</p>
+        <p>“进去之前，先拿着这张残页。它不是地图，只是提醒你：这里发生过的事，会留下痕迹。”</p>
+      </div>
+    `,
+      [
+        {
+          text: "收下残页",
+          action: () => {
+            const chapter = grantOpeningLore(state);
+            state.introGuideMet = true;
+            cell.object = null;
+            if (chapter) log(`获得地牢残页：${chapter.title}。`);
+            playSound("quest");
+            closeModal();
+            render();
+          }
+        }
+      ]
+    );
   }
 
   // 处理踩到敌人后的进入战斗或危险确认流程。
@@ -204,6 +234,9 @@ export function createInteractionRuntime(ctx) {
     }
     syncMusicToGame();
     clearBattleFx();
+    battle.actionFeed = null;
+    battle.actionTimeline = [];
+    battle.turnSeq = 0;
     state._guard = 0;
     state._evade = false;
     state.skillCooldowns = {};
@@ -459,6 +492,7 @@ export function createInteractionRuntime(ctx) {
     nearestGuardForTrap,
     openChest: withState(openChest),
     openFenceGate: withState(openFenceGate),
+    openGuideNpc: withState(openGuideNpc),
     openLockedDoor: withState(openLockedDoor),
     openLockedChest: withState(openLockedChest),
     promptDangerousEnemy: withState(promptDangerousEnemy),

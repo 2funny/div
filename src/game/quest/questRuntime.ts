@@ -7,6 +7,8 @@ import {
   relationLabel,
   relationRewardBonus
 } from "./narrative";
+import { choice } from "../random";
+import { RUNES } from "../constants";
 import { QUEST_DEFS } from "./quests";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
@@ -32,6 +34,7 @@ export function createQuestRuntime(ctx) {
   const isSkillLearned = (...args) => api.isSkillLearned?.(...args);
   const learnSkill = (...args) => api.learnSkill?.(...args);
   const skillRequirementText = (...args) => api.skillRequirementText?.(...args) || "";
+  const teleportBeacon = (...args) => api.teleportBeacon?.(...args);
   function openQuestNpc(source = null) {
     if (source?.trainer) {
       openSkillTrainer(source);
@@ -50,7 +53,7 @@ export function createQuestRuntime(ctx) {
       .slice(0, 6)
       .map((skill) => {
         const ready = canLearnSkill(skill.id);
-        return `<article class="quest-row inventory-card"><div><b>${skill.name}</b><small>${skill.desc}</small><span class="item-tags"><i>${skillRequirementText(skill)}</i></span></div><span class="quest-state">${ready ? "可学习" : "未满足"}</span></article>`;
+        return `<article class="quest-row skill-row inventory-card ${ready ? "learnable" : "locked unmet"}"><div><b>${skill.name}</b><small class="${ready ? "" : "skill-requirement unmet"}">${ready ? skill.desc : skillRequirementText(skill)}</small><span class="item-tags"><i>${skillRequirementText(skill)}</i></span></div><span class="quest-state ${ready ? "" : "danger"}">${ready ? "可学习" : "未满足"}</span></article>`;
       })
       .join("");
     const actions = [
@@ -79,7 +82,7 @@ export function createQuestRuntime(ctx) {
 
   // 根据 NPC 或商人来源合成任务定义，救援任务会补入房间信息。
   function questDefFromSource(giver, source = null) {
-    const id = source?.questId;
+    const id = source?.questId || (giver === "shop" ? merchantQuestId() : null);
     const base =
       QUEST_DEFS[id] ||
       questDefinitionsForGiver(giver).find((quest) => quest.type !== "rescueRoom") ||
@@ -105,7 +108,13 @@ export function createQuestRuntime(ctx) {
     if (base.type !== "rescueRoom") {
       const targetFloor = source?.targetFloor || state.floor;
       const targetRoomName = source?.targetRoomName || source?.roomName || null;
-      return { ...base, targetFloor, targetRoomName };
+      return {
+        ...base,
+        giverName: source?.npcName || base.giverName,
+        target: source?.target || base.target,
+        targetFloor,
+        targetRoomName
+      };
     }
     return {
       ...base,
@@ -124,6 +133,14 @@ export function createQuestRuntime(ctx) {
   // 获取某类任务发布者可提供的任务定义。
   function questDefinitionsForGiver(giver) {
     return Object.values(QUEST_DEFS).filter((quest) => quest.giver === giver) as any[];
+  }
+
+  function merchantQuestId() {
+    const chain = state?.questChains || {};
+    if ((state.floor || 1) >= 6 && Number(chain.merchantCache || 0) <= Number(chain.merchantRoute || 0)) {
+      return "merchantCache";
+    }
+    return "merchantRoute";
   }
 
   // 读取当前任务列表。
@@ -222,7 +239,10 @@ export function createQuestRuntime(ctx) {
       def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
       def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
       def.rewardSkillScroll ? "职业技能卷轴" : "",
-      def.rewardPotion ? "小型生命药水 +1" : ""
+      def.rewardRune ? "随机符文 +1" : "",
+      def.rewardBeacon ? "商路信标 +1" : "",
+      def.rewardUniversalKey ? "万能钥匙 +1" : "",
+      def.rewardPotion ? potionRewardText(def.rewardPotion) : ""
     ]
       .filter(Boolean)
       .join("<br>");
@@ -303,10 +323,16 @@ export function createQuestRuntime(ctx) {
     state.skillPoints = (state.skillPoints || 0) + (def.rewardSkillPoints || 0);
     state.skillDust = (state.skillDust || 0) + (def.rewardSkillDust || 0);
     const scrollReward = def.rewardSkillScroll ? grantSkillScrollReward(def.giverName) : "";
+    const runeReward = grantRuneReward(def);
+    const beaconReward = grantBeaconReward(def);
+    const universalKeyReward = grantUniversalKeyReward(def);
     if (def.rewardPotion) {
       state.inventory = state.inventory || [];
-      state.inventory.push(potion("小型生命药水", "hp", 18));
+      state.inventory.push(
+        def.rewardPotion === "mp" ? potion("小型法力药水", "mp", 12) : potion("小型生命药水", "hp", 18)
+      );
     }
+    if (def.chainFlag) markQuestChain(def.chainFlag);
     log(`完成任务：${def.title}。`);
     showEvent(
       "任务完成",
@@ -319,7 +345,10 @@ export function createQuestRuntime(ctx) {
         def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
         def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
         scrollReward,
-        def.rewardPotion ? "小型生命药水 +1" : ""
+        runeReward,
+        beaconReward,
+        universalKeyReward,
+        def.rewardPotion ? potionRewardText(def.rewardPotion) : ""
       ]
         .filter(Boolean)
         .join("<br>")}</p><p>${relationLabel(state, relationId)}。</p>`,
@@ -327,6 +356,36 @@ export function createQuestRuntime(ctx) {
     );
     playSound("quest");
     render();
+  }
+
+  function potionRewardText(kind) {
+    return kind === "mp" ? "小型法力药水 +1" : "小型生命药水 +1";
+  }
+
+  function grantRuneReward(def) {
+    if (!def.rewardRune) return "";
+    const rune = `${choice(RUNES)}1`;
+    state.runes = state.runes || {};
+    state.runes[rune] = (state.runes[rune] || 0) + 1;
+    return `${rune}符文 +1`;
+  }
+
+  function grantBeaconReward(def) {
+    if (!def.rewardBeacon || !teleportBeacon) return "";
+    state.inventory = state.inventory || [];
+    state.inventory.push(teleportBeacon());
+    return "商路信标 +1";
+  }
+
+  function grantUniversalKeyReward(def) {
+    if (!def.rewardUniversalKey) return "";
+    state.universalKeys = (state.universalKeys || 0) + 1;
+    return "万能钥匙 +1";
+  }
+
+  function markQuestChain(flag) {
+    state.questChains = state.questChains || {};
+    state.questChains[flag] = Number(state.questChains[flag] || 0) + 1;
   }
 
   // 与救援目标对话，按房间清理状态推进救援任务。

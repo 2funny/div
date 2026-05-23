@@ -38,8 +38,10 @@ export interface GameState {
   learnedSkillIds?: string[];
   equippedSkillIds?: string[];
   quests?: QuestState[];
+  questChains?: Record<string, number>;
   lore?: LoreState;
   narrative?: NarrativeState;
+  introGuideMet?: boolean;
   log: string[];
   [key: string]: unknown;
 }

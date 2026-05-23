@@ -8,6 +8,7 @@ export const LEGEND_ITEMS = [
   ["altar", "祭坛", "恢复"],
   ["forge", "合成", "强化/符文"],
   ["shop", "商人", "补给"],
+  ["guideNpc", "引路", "主线引导"],
   ["questNpc", "委托", "中立委托人"],
   ["lockedDoor", "锁门", "需要指定钥匙或万能钥匙"],
   ["fenceGate", "门栅", "需要钥匙打开"],

@@ -163,16 +163,29 @@ export function ensureLoreState(state: GameState | null | undefined): LoreState 
   return lore;
 }
 
-export function unlockLoreChaptersForFloor(state: GameState | null | undefined): LoreChapter[] {
+export function unlockLoreChaptersForFloor(
+  state: GameState | null | undefined,
+  options: { skipOpening?: boolean } = {}
+): LoreChapter[] {
   if (!state) return [];
   const lore = ensureLoreState(state);
   const unlocked: LoreChapter[] = [];
   for (const chapter of LORE_CHAPTERS) {
+    if (options.skipOpening && chapter.id === "threshold") continue;
     if ((state.floor || 1) < chapter.floor || lore.chapters.includes(chapter.id)) continue;
     lore.chapters.push(chapter.id);
     unlocked.push(chapter);
   }
   return unlocked;
+}
+
+export function grantOpeningLore(state: GameState | null | undefined): LoreChapter | null {
+  if (!state) return null;
+  const lore = ensureLoreState(state);
+  const chapter = loreChapterById("threshold");
+  if (!chapter) return null;
+  if (!lore.chapters.includes(chapter.id)) lore.chapters.push(chapter.id);
+  return chapter;
 }
 
 export function discoverLorePage(

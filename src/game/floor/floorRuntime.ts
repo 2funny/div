@@ -228,6 +228,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       rooms = assignRoomLabels(map);
       normalizeQuestTargetRooms(rooms);
       placeLavaFields(map);
+      placeGuideNpc(map);
       const rescueQuest = placeRescueQuest(map, rooms);
       ensureQuestRoomEncounters(map, rooms);
       if (!rescueQuest) placeQuestNpc(map, defaultQuestNpcSource());
@@ -235,6 +236,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       placeLockedRoomDoors(map, rooms);
       removeUnlockedRoomDoors(map);
       placeRoomEvents(map, rooms);
+      relocateDoorAccessBlockers(map);
       const stairs = placeFloorStairs(map, true);
       state.map = {
         size,
@@ -838,12 +840,14 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const count = Math.min(events.length, state.floor >= 8 ? 2 : 1);
     const candidates = interiorCells(map)
       .filter((cell) => cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell))
+      .filter((cell) => !isDoorAccessCell(map, cell))
       .filter((cell) => !cell.roomId || !lockedRoomIds.has(cell.roomId))
       .filter((cell) => !isObjectCrowded(map, cell, { minObjectDistance: 4, preferRooms: true }))
       .sort(() => random() - 0.5);
     if (!candidates.length) {
       const fallback = interiorCells(map)
         .filter((cell) => cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell))
+        .filter((cell) => !isDoorAccessCell(map, cell))
         .filter((cell) => !cell.roomId || !lockedRoomIds.has(cell.roomId))
         .sort((a, b) => distance(b, START_POSITION) - distance(a, START_POSITION))[0];
       if (!fallback) return 0;
@@ -882,6 +886,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         cell.terrain === "floor" &&
         !cell.object &&
         !isInStartSafeZone(cell) &&
+        !isDoorAccessCell(map, cell) &&
         !isObjectCrowded(map, cell, options)
       ) {
         const threat = roomThreatFromRooms(options.rooms, cell.roomId);
@@ -904,6 +909,81 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       (nearby) =>
         nearby !== cell && nearby.object && !["stairsDown", "stairsUp"].includes(nearby.object.type)
     );
+  }
+
+  function relocateDoorAccessBlockers(map: Cell[][]) {
+    const blockingTypes = new Set(["shop", "forge", "questNpc", "rescueNpc", "roomEvent"]);
+    const blockers = map
+      .flat()
+      .filter((cell) => blockingTypes.has(cell.object?.type) && isDoorAccessCell(map, cell));
+    for (const cell of blockers) {
+      const object = cell.object;
+      cell.object = null;
+      const candidates = interiorCells(map)
+        .filter(
+          (candidate) =>
+            candidate.terrain === "floor" &&
+            !candidate.object &&
+            !isInStartSafeZone(candidate) &&
+            !isDoorAccessCell(map, candidate) &&
+            (object.type !== "rescueNpc" || candidate.roomId === object.roomId)
+        )
+        .sort((a, b) => distance(a, cell) - distance(b, cell));
+      const target = candidates[0];
+      if (!target) {
+        cell.object = object;
+        continue;
+      }
+      target.object = object;
+      if (["shop", "forge"].includes(object.type)) {
+        if (target.roomId) object.roomId = target.roomId;
+        else delete object.roomId;
+      }
+    }
+  }
+
+  function isDoorAccessCell(map: Cell[][], cell: Cell) {
+    if (!cell) return false;
+    if (isRoomDoorMarker(cell)) return true;
+    return cardinalNeighbors(map, cell.x, cell.y).some(isRoomDoorMarker) || isPassageChokeCell(map, cell);
+  }
+
+  function isRoomDoorMarker(cell: Cell) {
+    return (
+      cell?.terrain === "door" ||
+      cell?.object?.type === "lockedDoor" ||
+      cell?.object?.type === "roomEntrance"
+    );
+  }
+
+  function isPassageChokeCell(map: Cell[][], cell: Cell) {
+    if (!cell || !["floor", "door"].includes(cell.terrain)) return false;
+    const passable = (entry) => entry && ["floor", "door"].includes(entry.terrain);
+    const exits = cardinalNeighbors(map, cell.x, cell.y).filter(passable);
+    if (exits.length < 2) return false;
+    const start = exits[0];
+    const key = (entry) => `${entry.x},${entry.y}`;
+    const blockedKey = key(cell);
+    const visited = new Set([blockedKey, key(start)]);
+    const queue = [start];
+    while (queue.length) {
+      const current = queue.shift();
+      for (const next of cardinalNeighbors(map, current.x, current.y)) {
+        const nextKey = key(next);
+        if (!passable(next) || visited.has(nextKey)) continue;
+        visited.add(nextKey);
+        queue.push(next);
+      }
+    }
+    return exits.some((exit) => !visited.has(key(exit)));
+  }
+
+  function repairDoorAccessBlockers(map: Cell[][] = state?.map?.cells || []) {
+    if (!map?.length) return 0;
+    const before = map.flat().filter((cell) => cell.object).map((cell) => `${cell.x},${cell.y}`);
+    relocateDoorAccessBlockers(map);
+    const after = new Set(map.flat().filter((cell) => cell.object).map((cell) => `${cell.x},${cell.y}`));
+    return before.filter((key) => !after.has(key)).length;
   }
 
   function eliteChanceForThreat(threat = "quiet") {
@@ -1125,7 +1205,13 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         ...entry,
         cells: map
           .flat()
-          .filter((cell) => cell.roomId === entry.id && cell.terrain === "floor" && !cell.object)
+          .filter(
+            (cell) =>
+              cell.roomId === entry.id &&
+              cell.terrain === "floor" &&
+              !cell.object &&
+              !isDoorAccessCell(map, cell)
+          )
       }))
       .filter((entry) => entry.cells.length >= 5)
       .sort(
@@ -1177,6 +1263,22 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   // 在地图上放置任务 NPC。
+  function placeGuideNpc(map: Cell[][]) {
+    if (state.floor !== 1 || state.introGuideMet) return false;
+    const candidates = cellsWithin(map, START_POSITION.x, START_POSITION.y, 3)
+      .filter(
+        (cell) =>
+          cell.terrain === "floor" &&
+          !cell.object &&
+          !(cell.x === START_POSITION.x && cell.y === START_POSITION.y)
+      )
+      .sort((a, b) => distance(a, START_POSITION) - distance(b, START_POSITION));
+    const cell = candidates.find((candidate) => distance(candidate, START_POSITION) >= 2) || candidates[0];
+    if (!cell) return false;
+    cell.object = { type: "guideNpc", npcName: "旧灯引路人" };
+    return true;
+  }
+
   function placeQuestNpc(
     map: Cell[][],
     source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人" }
@@ -1186,7 +1288,10 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     const candidates = interiorCells(map)
       .filter(
         (cell) =>
-          cell.terrain === "floor" && !cell.object && !isInStartSafeZone(cell, START_SAFE_RADIUS)
+          cell.terrain === "floor" &&
+          !cell.object &&
+          !isInStartSafeZone(cell, START_SAFE_RADIUS) &&
+          !isDoorAccessCell(map, cell)
       )
       .filter((cell) => !cell.roomId || !blockedRoomIds.has(cell.roomId))
       .sort((a, b) => npcScore(map, b) - npcScore(map, a));
@@ -1204,19 +1309,36 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   }
 
   function defaultQuestNpcSource(floor = state.floor): QuestNpcSource {
+    const chain = state.questChains || {};
+    if (floor >= 20 && floor % 8 === 0 && Number(chain.wardenRelay || 0) > 0) {
+      return {
+        questId: "wardenSeal",
+        npcName: "巡夜封印官",
+        target: 2,
+        targetFloor: nearbyQuestTargetFloor(floor)
+      };
+    }
     if (floor >= 18 && floor % 7 === 0) {
       return {
-        questId: "survivorTrace",
-        npcName: "暗记记录员",
+        questId: Number(chain.survivorEscort || 0) > 0 ? "survivorTrace" : "survivorEscort",
+        npcName: Number(chain.survivorEscort || 0) > 0 ? "暗记记录员" : "幸存者领路人",
         target: 2,
+        targetFloor: nearbyQuestTargetFloor(floor)
+      };
+    }
+    if (floor >= 15 && floor % 5 === 0) {
+      return {
+        questId: "eliteBounty",
+        npcName: "悬赏巡夜人",
+        target: 1,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
     }
     if (floor >= 12 && floor % 4 === 0) {
       return {
-        questId: "runeSurvey",
-        npcName: "符文测绘员",
-        target: 1,
+        questId: Number(chain.runeCalibration || 0) > 0 ? "runeSurvey" : "runeCalibration",
+        npcName: Number(chain.runeCalibration || 0) > 0 ? "符文测绘员" : "回声校准师",
+        target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
     }
@@ -1227,6 +1349,12 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
+    }
+    if (floor >= 5 && floor % 5 === 0) {
+      return { questId: "wardenRelay", npcName: "巡夜传令员", target: 2 };
+    }
+    if (floor >= 4 && floor % 4 === 1) {
+      return { questId: "roomPurge", npcName: "净化记录员", target: 2 };
     }
     return { questId: "wardenErrand", npcName: "巡夜人" };
   }
@@ -1294,7 +1422,9 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
         ["monster", "elite"].includes(cell.object?.type)
       ).length;
       const needed = Math.max(0, Math.min(quest.target - quest.kills, 2) - existing);
-      for (const cell of cells.filter((entry) => !entry.object).slice(0, needed)) {
+      for (const cell of cells
+        .filter((entry) => !entry.object && !isDoorAccessCell(map, entry))
+        .slice(0, needed)) {
         cell.object = makeEnemyWithVariant(false);
         cell.object.roomId = room.id;
       }
@@ -1517,23 +1647,23 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           ? ["矿洞蝙蝠", "诅咒矿工", "石像守卫"]
           : ["冰霜狼", "寒冰法徒", "冰晶魔像"];
     const elite = eliteOrBoss && !boss;
-    const hp = Math.round(
+    const hpBase =
       (boss ? 90 + floor * 8 : elite ? 22 + floor * 5.2 : 12 + floor * 3) +
-        (boss ? deepFloor * 8 : elite ? deepFloor * 2.2 : deepFloor * 0.7)
-    );
+      (boss ? deepFloor * 8 : elite ? deepFloor * 2.2 : deepFloor * 0.7);
+    const atkBase =
+      (boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52) +
+      (boss ? deepFloor * 0.18 : elite ? deepFloor * 0.12 : deepFloor * 0.05);
+    const defBase =
+      (boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08) +
+      (boss ? deepFloor * 0.05 : elite ? deepFloor * 0.03 : 0);
+    const hp = Math.round(hpBase * enemyHpScale(floor, boss, elite));
     const enemy = {
       type: boss ? "boss" : elite ? "elite" : "monster",
       name: boss ? "符文守王" : elite ? `精英${choice(names)}` : choice(names),
       hp,
       maxHp: hp,
-      atk: Math.round(
-        (boss ? 14 + floor * 0.8 : elite ? 4 + floor * 0.86 : 2 + floor * 0.52) +
-          (boss ? deepFloor * 0.18 : elite ? deepFloor * 0.12 : deepFloor * 0.05)
-      ),
-      def: Math.round(
-        (boss ? 8 + floor * 0.25 : elite ? 1 + floor * 0.22 : floor * 0.08) +
-          (boss ? deepFloor * 0.05 : elite ? deepFloor * 0.03 : 0)
-      ),
+      atk: Math.round(atkBase * enemyAtkScale(floor, boss, elite)),
+      def: Math.round(defBase + enemyDefensePressure(floor, boss, elite)),
       spd: Math.round(boss ? 8 + floor * 0.45 : elite ? 4 + floor * 0.5 : 2 + floor * 0.35),
       xp: scaledReward(boss ? 130 + floor * 6 : 4 + floor * 1.25 + (elite ? 7 : 0)),
       gold: scaledReward(boss ? 220 + floor * 7 : rand(3, 6) + floor + (elite ? 5 : 0))
@@ -1544,6 +1674,23 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     assignEnemySkills(enemy);
     applyFloorEffectToEnemy(enemy);
     return maybeApplyEnemyAffix(enemy, eliteOrBoss);
+  }
+
+  function enemyHpScale(floor: number, boss: boolean, elite: boolean) {
+    if (boss || floor <= 8) return 1;
+    const pressure = (floor - 8) * (elite ? 0.024 : 0.019);
+    return 1 + Math.min(elite ? 1.25 : 1.1, pressure);
+  }
+
+  function enemyAtkScale(floor: number, boss: boolean, elite: boolean) {
+    if (boss || floor <= 8) return 1;
+    const pressure = (floor - 8) * (elite ? 0.012 : 0.01);
+    return 1 + Math.min(elite ? 0.62 : 0.52, pressure);
+  }
+
+  function enemyDefensePressure(floor: number, boss: boolean, elite: boolean) {
+    if (boss || floor <= 8) return 0;
+    return Math.round((floor - 8) * (elite ? 0.08 : 0.06));
   }
 
   function applyThemeBossProfile(enemy, floor = state.floor) {
@@ -1761,6 +1908,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     makeEnemyWithVariant: withState(makeEnemyWithVariant),
     placeGuardNear: withState(placeGuardNear),
     placeTreasureEncounters: withState(placeTreasureEncounters),
+    repairDoorAccessBlockers: withState(repairDoorAccessBlockers),
     roomName: withState(roomName),
     roomThreat: withState(roomThreat),
     floorEffectReward: withState(floorEffectReward),

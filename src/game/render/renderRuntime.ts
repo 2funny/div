@@ -26,7 +26,6 @@ import {
 } from "../quest/lore";
 import { cellsWithin, distance } from "../floor/mapGeometry";
 import { QUEST_DEFS } from "../quest/quests";
-import { currentTutorialStep } from "../tutorial/tutorial";
 import { syncWeatherCanvas } from "./weatherCanvas";
 import { escapeHtml } from "./html";
 import type { StatKey } from "../types";
@@ -416,6 +415,7 @@ export function createRenderRuntime(ctx) {
         const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
         const isSelected = ui.selectedTile?.x === cell.x && ui.selectedTile?.y === cell.y;
         const showObject = shouldShowMapObject(cell);
+        const isInspectable = showObject && isEnemyObject(cell.object);
         const tileSprite = isPlayer
           ? sprite(
               `player facing-${state.facing || "down"}`,
@@ -442,7 +442,8 @@ export function createRenderRuntime(ctx) {
           isPlayer ? " current" : "",
           "",
           isSelected ? " selected" : "",
-          cell.object ? ` object object-${cell.object.type}` : ""
+          cell.object ? ` object object-${cell.object.type}` : "",
+          isInspectable ? " inspectable" : ""
         ].join("");
         cells.push(
           `<button class="tile ${flags}" type="button"${title} aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${roomBadge}${hint}</button>`
@@ -603,6 +604,7 @@ export function createRenderRuntime(ctx) {
       altar: { cls: "altar", src: ASSETS.altar, alt: "祭坛" },
       forge: { cls: "forge", src: ASSETS.forge, alt: "合成台" },
       shop: { cls: "merchant", src: ASSETS.shop, alt: "商人" },
+      guideNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "引路人" },
       questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
       rescueNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "被困者" },
       lockedDoor: { cls: "locked-door", src: ASSETS.lockedDoor, alt: "上锁房门" },
@@ -688,8 +690,9 @@ export function createRenderRuntime(ctx) {
         ${centerFxMarkup()}
       </div>
       <div class="combatant enemy-combatant ${battleFxClass("enemy")}">
-        <div class="battle-sprite">${objectSprite(enemy)}</div>
+        <button class="battle-sprite enemy-detail-sprite" type="button" onclick="showCurrentEnemyDetail()" title="查看怪物信息">${objectSprite(enemy)}</button>
         ${combatantFxMarkup("enemy")}
+        <button class="enemy-detail-button" type="button" onclick="showCurrentEnemyDetail()">详情</button>
         <h2>${enemy.name}</h2>
         ${enemy.affix ? `<small class="enemy-affix">${enemyAffixText(enemy)}</small>` : ""}
         ${elementTags(enemy) ? `<small class="enemy-element">${elementTags(enemy)}</small>` : ""}
@@ -712,20 +715,7 @@ export function createRenderRuntime(ctx) {
     if (locked) scheduleBattleUnlockRender();
     return `
     <div class="battle-command-panel">
-      <div class="battle-turn-banner ${turn.className}">
-        <div class="battle-turn-pulse" aria-hidden="true"><span>${turn.icon}</span></div>
-        <div class="battle-turn-copy">
-          <small>${turn.kicker}</small>
-          <b>${turn.title}</b>
-          <span>${turn.detail}</span>
-        </div>
-        <div class="battle-turn-track" aria-hidden="true">
-          <i class="hero-step">你</i>
-          <em></em>
-          <i class="enemy-step">敌</i>
-        </div>
-      </div>
-      ${battleActionFeedMarkup()}
+      ${battleTimelineMarkup(turn)}
       <div class="battle-command-layout">
         <div class="battle-basic-actions battle-command-section">
           <div class="battle-panel-title">
@@ -767,6 +757,10 @@ export function createRenderRuntime(ctx) {
               <span>战术</span>
               ${policy ? `<small>${policy.label}</small>` : "<small>评估</small>"}
             </div>
+            <button class="battle-action enemy-detail-action" type="button" onclick="showCurrentEnemyDetail()">
+              <span class="battle-action-mark" aria-hidden="true">情</span>
+              <span class="battle-action-copy"><b>怪物详情</b><small>查看当前敌人的属性与抗性</small></span>
+            </button>
             <button class="battle-action auto" type="button" ${autoDisabled} ${locked ? `title="${turn.disabledTitle}"` : ""} onclick="autoBattle()">
               <span class="battle-action-head"><b>一键战斗</b>${policy ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
               <small>${locked ? turn.shortHint : policy?.allowed ? "低风险普通怪可自动结算 3 回合" : policy?.reason || "需要评估"}</small>
@@ -890,6 +884,78 @@ export function createRenderRuntime(ctx) {
     }, delay);
   }
 
+  function battleTimelineMarkup(turn) {
+    const history = Array.isArray(battle.actionTimeline) ? battle.actionTimeline : [];
+    const current = currentBattleTimelineNode(turn);
+    const entries = current ? [...history, current] : history;
+    const nodes = entries.length
+      ? entries
+          .map((entry, index) => battleTimelineNodeMarkup(entry, index, entry === current))
+          .join("")
+      : battleTimelineNodeMarkup(
+          {
+            seq: 0,
+            actor: "hero",
+            kind: "idle",
+            title: "战斗开始",
+            detail: "等待第一轮交锋。",
+            meta: "准备"
+          },
+          0,
+          true
+        );
+    return `<div class="battle-timeline" aria-label="战斗回合时间线"><div class="battle-timeline-rail">${nodes}</div></div>`;
+  }
+
+  function currentBattleTimelineNode(turn) {
+    if (!state.currentEnemy) return null;
+    if (turn.phase === "enemy-windup") {
+      return {
+        seq: "now",
+        actor: "enemy",
+        kind: "windup",
+        title: battle.message || `${state.currentEnemy.name}准备反击`,
+        detail: "敌方行动即将结算。",
+        meta: "预备"
+      };
+    }
+    if (turn.phase === "enemy-action" || turn.phase === "enemy-turn") {
+      return {
+        seq: "now",
+        actor: "enemy",
+        kind: "hit",
+        title: battle.message || `${state.currentEnemy.name}行动中`,
+        detail: "伤害与状态正在结算。",
+        meta: "结算"
+      };
+    }
+    return {
+      seq: "now",
+      actor: "hero",
+      kind: "ready",
+      title: "轮到你行动",
+      detail: "选择攻击、技能或补给。",
+      meta: "当前"
+    };
+  }
+
+  function battleTimelineNodeMarkup(entry, index, active = false) {
+    const actor = entry.actor === "enemy" ? "enemy" : "hero";
+    const side = index % 2 === 0 ? "top" : "bottom";
+    const actorText = actor === "hero" ? "你" : "敌";
+    const meta = entry.meta ? `<em>${escapeHtml(entry.meta)}</em>` : "";
+    return `
+      <article class="battle-timeline-node ${actor} ${side} ${escapeHtml(entry.kind || "info")} ${active ? "active" : ""}">
+        <div class="battle-timeline-card">
+          <b>${escapeHtml(entry.title || "战斗事件")}</b>
+          <span>${escapeHtml(entry.detail || "")}</span>
+          ${meta}
+        </div>
+        <i>${actorText}</i>
+      </article>
+    `;
+  }
+
   function battlePotionGroups() {
     const groups = new Map();
     for (const entry of state.inventory || []) {
@@ -1011,6 +1077,7 @@ export function createRenderRuntime(ctx) {
       forge: ["forge", ASSETS.forge, "合成台"],
       shop: ["merchant", ASSETS.shop, "商人"],
       roomEvent: ["room-event", null, "探索事件"],
+      guideNpc: ["quest-npc", ASSETS.questNpc, "引路人"],
       questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
       rescueNpc: ["quest-npc", ASSETS.questNpc, "被困者"],
       lockedDoor: ["locked-door", ASSETS.lockedDoor, "上锁房门"],
@@ -1051,6 +1118,7 @@ export function createRenderRuntime(ctx) {
       forge: "锻",
       shop: "商",
       roomEvent: "事",
+      guideNpc: "引",
       questNpc: "托",
       rescueNpc: "救",
       lockedDoor: "锁",
@@ -1085,6 +1153,7 @@ export function createRenderRuntime(ctx) {
       forge: "合成台：强化装备或合成符文",
       shop: "商人：购买药水和补给",
       roomEvent: cell.object.name ? `${cell.object.name}：可互动事件` : "可互动事件",
+      guideNpc: `${cell.object.npcName || "引路人"}：说明地牢背景，并交给你第一张残页`,
       questNpc: cell.object.npcName
         ? `${cell.object.npcName}：提供${cell.object.roomName || roomName(cell.object.roomId)}相关委托`
         : "中立委托人：完成任务获得钥匙和金币",
@@ -1108,7 +1177,9 @@ export function createRenderRuntime(ctx) {
     const cell = state.map.cells[ui.selectedTile.y]?.[ui.selectedTile.x];
     if (!cell || !cell.seen) return "";
     const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
-    return tileLabel(cell, isPlayer);
+    const base = tileLabel(cell, isPlayer);
+    if (!isEnemyObject(cell.object)) return base;
+    return `${base}<div class="tile-info-actions"><button type="button" onclick="showEnemyDetailAt(${cell.x},${cell.y})">查看属性</button></div>`;
   }
 
   // 根据职业选择玩家精灵资源。
@@ -1143,30 +1214,146 @@ export function createRenderRuntime(ctx) {
   // 选中地图格子；如果格子相邻，则直接尝试移动。
   function clickTile(x, y) {
     ui.selectedTile = { x, y };
+    const cell = state.map?.cells?.[y]?.[x];
+    if (cell?.seen && isEnemyObject(cell.object)) {
+      showEnemyDetailAt(x, y);
+      return;
+    }
     const dx = x - state.player.x;
     const dy = y - state.player.y;
     if (Math.abs(dx) + Math.abs(dy) === 1) move(dx, dy);
     else render();
   }
 
-  // 渲染右侧上下文操作区：战斗、商店、合成台或移动提示。
-  function renderTutorialPrompt() {
-    const step = currentTutorialStep(state);
-    if (!step) return "";
-    const tutorial = state.tutorial as { completed?: string[] };
-    const completed = tutorial?.completed?.length || 0;
+  function showEnemyDetailAt(x, y) {
+    const cell = state.map?.cells?.[y]?.[x];
+    if (!cell?.seen || !isEnemyObject(cell.object)) return;
+    ui.selectedTile = { x, y };
+    showEnemyDetail(cell.object, { mode: "map", cell });
+  }
+
+  function showCurrentEnemyDetail() {
+    const enemy = state.currentEnemy;
+    if (!isEnemyObject(enemy)) return;
+    showEnemyDetail(enemy, { mode: "battle" });
+  }
+
+  function showEnemyDetail(enemy, options: any = {}) {
+    const mode = options.mode || "map";
+    const cell = options.cell || null;
+    const actions = [{ text: "关闭", action: closeModal }];
+    if (cell && isAdjacentToPlayer(cell)) {
+      const dx = cell.x - state.player.x;
+      const dy = cell.y - state.player.y;
+      actions.push({
+        text: "进入战斗",
+        action: () => {
+          closeModal();
+          move(dx, dy);
+        }
+      });
+    }
+    showModal(`${enemy.name} 情报`, enemyDetailMarkup(enemy, mode), actions);
+  }
+
+  function enemyDetailMarkup(enemy, mode = "map") {
+    if (mode === "map" && !canScoutEnemy(enemy)) {
+      return `
+        <div class="enemy-detail">
+          <div class="enemy-detail-head">
+            ${objectSprite(enemy)}
+            <div>
+              <span>${enemyKindLabel(enemy)}</span>
+              <b>${escapeHtml(enemy.name)}</b>
+              <small>符文干扰过强，无法在战斗前读取完整属性。</small>
+            </div>
+          </div>
+          <p class="enemy-scout-note">Boss、钥匙守卫、房间首领和特殊目标需要进入战斗后再确认信息。</p>
+        </div>
+      `;
+    }
+    const scout = mode === "map";
+    const risk = state.currentEnemy === enemy ? autoBattlePolicy(enemy) : battleRisk(enemy);
+    const skills = enemy.skills?.length
+      ? enemy.skills.map((skill) => escapeHtml(skill.name)).join(" / ")
+      : "无";
+    const weaknesses = elementList(enemy.weaknesses) || "无";
+    const resistances = elementList(enemy.resistances) || "无";
     return `
-      <div class="tutorial-card">
-        <span>首局目标 ${completed + 1}/5</span>
-        <b>${escapeHtml(step.title)}</b>
-        <small>${escapeHtml(step.desc)}</small>
+      <div class="enemy-detail">
+        <div class="enemy-detail-head">
+          ${objectSprite(enemy)}
+          <div>
+            <span>${enemyKindLabel(enemy)}${enemy.affix ? ` · ${escapeHtml(enemyAffixText(enemy))}` : ""}</span>
+            <b>${escapeHtml(enemy.name)}</b>
+            <small>${risk ? `${risk.label} · 胜率估算 ${Math.round(risk.score * 100)}%` : "暂无评估"}</small>
+          </div>
+        </div>
+        <div class="enemy-stat-grid">
+          ${enemyStatCell("生命", Math.max(0, Math.round(enemy.hp)), Math.round(enemy.maxHp || enemy.hp || 0), effectiveMaxHp(), scout)}
+          ${enemyStatCell("攻击", enemy.atk, null, enemyAtkBenchmark(), scout)}
+          ${enemyStatCell("防御", enemy.def, null, Math.max(totals().atk || 0, totals().mag || 0), scout)}
+          ${enemyStatCell("速度", enemy.spd, null, totals().spd || 0, scout)}
+        </div>
+        <div class="equipment-detail enemy-detail-rows">
+          <div class="detail-row"><b>元素</b><span>${elementTags(enemy) || "无"}</span></div>
+          <div class="detail-row"><b>弱点</b><span>${weaknesses}</span></div>
+          <div class="detail-row"><b>抗性</b><span>${resistances}</span></div>
+          <div class="detail-row"><b>技能</b><span>${skills}</span></div>
+        </div>
+        ${scout ? `<p class="enemy-scout-note">“?” 表示该项超出当前角色的战前判断范围，进入战斗后可查看完整数值。</p>` : ""}
       </div>
     `;
   }
 
-  function prependTutorialPrompt() {
-    const prompt = renderTutorialPrompt();
-    if (prompt) $("contextBody").innerHTML = prompt + $("contextBody").innerHTML;
+  function enemyStatCell(label, value, maxValue, benchmark, scout) {
+    const masked = scout && shouldMaskEnemyStat(value, benchmark);
+    const display = masked ? "?" : maxValue == null ? Math.round(value || 0) : `${Math.round(value || 0)}/${maxValue}`;
+    return `<div class="enemy-stat-cell ${masked ? "masked" : ""}"><span>${label}</span><b>${display}</b></div>`;
+  }
+
+  function shouldMaskEnemyStat(value, benchmark) {
+    const safeValue = Number(value || 0);
+    const safeBenchmark = Math.max(1, Number(benchmark || 0));
+    return safeValue >= Math.max(safeBenchmark * 1.45, safeBenchmark + 14);
+  }
+
+  function enemyAtkBenchmark() {
+    const t = totals();
+    return Math.max(1, Number(t.def || 0) * 1.15 + Number(t.res || 0) * 0.3 + 8);
+  }
+
+  function elementList(ids = []) {
+    return ids.map((id) => elementName(id) || id).filter(Boolean).join(" / ");
+  }
+
+  function isEnemyObject(obj) {
+    return !!obj && ["monster", "elite", "boss"].includes(obj.type);
+  }
+
+  function canScoutEnemy(enemy) {
+    return (
+      isEnemyObject(enemy) &&
+      enemy.type !== "boss" &&
+      !enemy.roomBoss &&
+      !enemy.dropsKey &&
+      !enemy.rare &&
+      !enemy.sealId &&
+      !enemy.bossProfile
+    );
+  }
+
+  function enemyKindLabel(enemy) {
+    if (enemy.type === "boss") return "Boss";
+    if (enemy.roomBoss) return "房间首领";
+    if (enemy.dropsKey) return "钥匙守卫";
+    if (enemy.type === "elite") return "精英";
+    return "普通怪物";
+  }
+
+  function isAdjacentToPlayer(cell) {
+    if (!cell || !state?.player) return false;
+    return Math.abs(cell.x - state.player.x) + Math.abs(cell.y - state.player.y) === 1;
   }
 
   function renderContext() {
@@ -1183,6 +1370,7 @@ export function createRenderRuntime(ctx) {
       <button type="button" ${disabled} onclick="attackEnemy('attack')">普通攻击</button>
       ${renderSkillActionButtons()}
       <button type="button" ${disabled} onclick="attackEnemy('defend')">防御</button>
+      ${renderLoreShortcut()}
     `;
       return;
     }
@@ -1192,12 +1380,14 @@ export function createRenderRuntime(ctx) {
       $("contextBody").innerHTML = `
       <div class="tile-info">商人会打开交易弹窗，可购买补给、售出装备；装备分解也在商人交易窗口里。</div>
       <button type="button" onclick="openMerchant()">和商人交谈</button>
+      ${renderLoreShortcut()}
     `;
     } else if (cell.object?.type === "forge") {
       $("contextTitle").textContent = "合成台";
       $("contextBody").innerHTML = `
       <div class="tile-info">合成台用于强化已装备的装备。消耗金币和强化石，不在商人或祭坛处强化。</div>
       <button type="button" onclick="openForge()">打开合成台</button>
+      ${renderLoreShortcut()}
     `;
     } else {
       $("contextTitle").textContent = "行动";
@@ -1205,9 +1395,20 @@ export function createRenderRuntime(ctx) {
       $("contextBody").innerHTML = `
       ${selected ? `<div class="tile-info">${selected}</div>` : ""}
       <p>点击相邻格或使用方向键移动。探索宝箱、祭坛、商人和传送门。</p>
+      ${renderLoreShortcut()}
     `;
     }
-    prependTutorialPrompt();
+  }
+
+  function renderLoreShortcut() {
+    const count = unlockedLoreEntries().length;
+    if (!count) return "";
+    return `
+      <button class="lore-shortcut" type="button" onclick="openLoreArchive()">
+        <span>地牢残页</span>
+        <small>${count}/${LORE_TOTAL}</small>
+      </button>
+    `;
   }
 
   // 渲染当前侧边栏标签页。
@@ -1219,9 +1420,9 @@ export function createRenderRuntime(ctx) {
 
   function renderQuestList() {
     const quests = ensureQuestList();
-    const lore = renderLoreArchive();
+    const main = renderMainQuestRow();
     if (!quests.length) {
-      return `<section class="quest-list"><p>暂无任务。和商人或委托人交谈后，可以在这里追踪目标。</p></section>${lore}`;
+      return `<section class="quest-list">${main}<p>暂无委托。和商人或委托人交谈后，可以在这里追踪目标。</p></section>`;
     }
     const rows = quests
       .map((quest) => {
@@ -1251,60 +1452,114 @@ export function createRenderRuntime(ctx) {
         const rewards = [
           def.rewardKeys ? `钥匙 +${def.rewardKeys}` : "",
           rewardGold ? `金币 +${rewardGold}` : "",
-          def.rewardPotion ? "药水 +1" : ""
+          def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
+          def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
+          def.rewardRune ? "随机符文" : "",
+          def.rewardBeacon ? "商路信标" : "",
+          def.rewardPotion ? (def.rewardPotion === "mp" ? "法力药水 +1" : "生命药水 +1") : ""
         ]
           .filter(Boolean)
           .join(" · ");
+        const targetKind = questTargetKindText(def);
         return `
       <article class="quest-row inventory-card ${quest.completed && !quest.claimed ? "ready" : ""}">
         <div class="item-main">
           <span class="item-kicker">${def.giverName}</span>
           <b>${def.title}</b>
           <small>${def.desc}</small>
-          <span class="item-tags"><i>目标${location}</i><i>${quest.kills}/${quest.target}</i>${rewards ? `<i>${rewards}</i>` : ""}</span>
+          <span class="item-tags"><i>目标${location}</i>${targetKind ? `<i>${targetKind}</i>` : ""}<i>${quest.kills}/${quest.target}</i>${rewards ? `<i>${rewards}</i>` : ""}</span>
         </div>
         <span class="quest-state">${stateText}</span>
       </article>
     `;
       })
       .join("");
-    return `<section class="quest-list">${rows}</section>${lore}`;
+    return `<section class="quest-list">${main}${rows}</section>`;
   }
 
-  function renderLoreArchive() {
+  function questTargetKindText(def) {
+    if (def.targetKind === "elite") return "精英目标";
+    if (def.targetKind === "runic") return "符文回声";
+    if (def.targetKind === "monster") return "普通怪物";
+    return "";
+  }
+
+  function renderMainQuestRow() {
     const lore = ensureLoreState(state);
-    const chapters = lore.chapters.map(loreChapterById).filter(Boolean);
-    const pages = lore.pages.map(lorePageById).filter(Boolean);
-    if (!chapters.length && !pages.length) return "";
-    const chapterRows = chapters
-      .map(
-        (entry) => `
-      <article class="lore-row inventory-card">
-        <span class="item-kicker">主线 · 第 ${entry.floor} 层</span>
-        <b>${entry.title}</b>
-        <small>${entry.text}</small>
-      </article>
-    `
-      )
-      .join("");
-    const pageRows = pages
-      .map(
-        (entry) => `
-      <article class="lore-row inventory-card">
-        <span class="item-kicker">残页 · 第 ${entry.minFloor} 层后</span>
-        <b>${entry.title}</b>
-        <small>${entry.text}</small>
-      </article>
-    `
-      )
-      .join("");
-    const count = chapters.length + pages.length;
+    const hasOpening = lore.chapters.includes("threshold");
+    const nextChapter = LORE_CHAPTERS.find((chapter) => !lore.chapters.includes(chapter.id));
+    const title = hasOpening ? "追查符文地牢" : "寻找入口引路人";
+    const desc = hasOpening
+      ? "收集地牢残页，弄清入口为什么会移动，以及符文正在记录什么。"
+      : "入口附近有人在等你。先听完他的说明，再带着第一张残页进入地牢。";
+    const stateText = hasOpening ? "进行中" : "待接触";
+    const target = hasOpening
+      ? nextChapter
+        ? `深入第 ${nextChapter.floor} 层`
+        : "抵达王座深处"
+      : "和旧灯引路人交谈";
     return `
-    <section class="lore-archive">
-      <h3>地牢残页 <small>${count}/${LORE_TOTAL}</small></h3>
-      ${chapterRows}${pageRows}
-    </section>
-  `;
+      <article class="quest-row inventory-card main-quest-row">
+        <div class="item-main">
+          <span class="item-kicker">主线</span>
+          <b>${title}</b>
+          <small>${desc}</small>
+          <span class="item-tags"><i>${target}</i><i>残页 ${unlockedLoreEntries().length}/${LORE_TOTAL}</i></span>
+        </div>
+        <span class="quest-state">${stateText}</span>
+      </article>
+    `;
+  }
+
+  function unlockedLoreEntries() {
+    const lore = ensureLoreState(state);
+    return [
+      ...lore.chapters.map(loreChapterById).filter(Boolean).map((entry) => ({
+        type: "主线",
+        floorText: `第 ${entry.floor} 层`,
+        title: entry.title,
+        text: entry.text
+      })),
+      ...lore.pages.map(lorePageById).filter(Boolean).map((entry) => ({
+        type: "残页",
+        floorText: `第 ${entry.minFloor} 层后`,
+        title: entry.title,
+        text: entry.text
+      }))
+    ];
+  }
+
+  function openLoreArchive(index = 0) {
+    const entries = unlockedLoreEntries();
+    if (!entries.length) {
+      showEvent("地牢残页", "<p>还没有发现可翻阅的残页。</p>", "知道了");
+      return;
+    }
+    const safeIndex = Math.max(0, Math.min(entries.length - 1, Number(index) || 0));
+    const entry = entries[safeIndex];
+    showModal(
+      "地牢残页",
+      `
+      <article class="lore-page">
+        <span class="item-kicker">${entry.type} · ${entry.floorText} · ${safeIndex + 1}/${entries.length}</span>
+        <b>${escapeHtml(entry.title)}</b>
+        <p>${escapeHtml(entry.text)}</p>
+      </article>
+    `,
+      [
+        {
+          text: "上一页",
+          action: () => openLoreArchive(safeIndex - 1),
+          disabled: safeIndex === 0
+        },
+        {
+          text: "下一页",
+          action: () => openLoreArchive(safeIndex + 1),
+          disabled: safeIndex >= entries.length - 1
+        },
+        { text: "关闭", action: closeModal }
+      ]
+    );
   }
 
   // 渲染背包列表和物品操作按钮。
@@ -1644,7 +1899,10 @@ export function createRenderRuntime(ctx) {
         const equipDisabled = learned ? "" : "disabled";
         const learnState = learned ? (equipped ? "已携带" : "已学会") : learnable ? "可学习" : "未满足前置";
         const requirement = skillRequirementText(skill);
-        return `<div class="item-row skill-row inventory-card ${learned ? "" : "locked"}"><div class="item-main"><span class="item-kicker">${learnState}${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name}${learned ? ` Lv.${upgraded.level}` : ""}</b><small>${learned ? upgraded.branch?.desc || skill.desc : requirement}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i>${learned ? `<i>升级 ${cost.points} 点 / ${cost.dust} 尘</i>` : `<i>${skill.desc}</i>`}</span></div><div class="item-actions"><button type="button" ${upgradeDisabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button><button type="button" ${equipDisabled} onclick="updateBattleSkillFromList('${skill.id}')">${equipped ? "卸下" : "携带"}</button></div></div>`;
+        const lockClass = learned ? "" : learnable ? "learnable" : "locked unmet";
+        const stateClass = !learned && !learnable ? " danger" : "";
+        const requirementClass = !learned && !learnable ? " class=\"skill-requirement unmet\"" : "";
+        return `<div class="item-row skill-row inventory-card ${lockClass}"><div class="item-main"><span class="item-kicker${stateClass}">${learnState}${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name}${learned ? ` Lv.${upgraded.level}` : ""}</b><small${requirementClass}>${learned ? upgraded.branch?.desc || skill.desc : requirement}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i>${learned ? `<i>升级 ${cost.points} 点 / ${cost.dust} 尘</i>` : `<i>${skill.desc}</i>`}</span></div><div class="item-actions"><button type="button" ${upgradeDisabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button><button type="button" ${equipDisabled} onclick="updateBattleSkillFromList('${skill.id}')">${equipped ? "卸下" : "携带"}</button></div></div>`;
       })
       .join("")}
   `;
@@ -1824,6 +2082,7 @@ export function createRenderRuntime(ctx) {
     newGameInSlot: withState(newGameInSlot),
     nextNewGameSlot: withState(nextNewGameSlot),
     objectSprite,
+    openLoreArchive: withState(openLoreArchive),
     openSkillLoadout: withState(openSkillLoadout),
     percentScore,
     potionRow: withState(potionRow),
@@ -1857,6 +2116,8 @@ export function createRenderRuntime(ctx) {
     selectedTileText: withState(selectedTileText),
     setBattleSkillSlot: withState(setBattleSkillSlot),
     shouldShowMapObject: withState(shouldShowMapObject),
+    showCurrentEnemyDetail: withState(showCurrentEnemyDetail),
+    showEnemyDetailAt: withState(showEnemyDetailAt),
     showEquipmentSlot: withState(showEquipmentSlot),
     showInventoryEquipmentCompare: withState(showInventoryEquipmentCompare),
     showInventoryEquipmentDetail: withState(showInventoryEquipmentDetail),

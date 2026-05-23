@@ -39,6 +39,7 @@ export function createSaveRuntime(ctx) {
   const render = (...args) => api.render(...args);
   const renderLog = (...args) => api.renderLog(...args);
   const renderStartScreen = (...args) => api.renderStartScreen(...args);
+  const repairDoorAccessBlockers = (...args) => api.repairDoorAccessBlockers?.(...args);
   const showConfirm = (...args) => api.showConfirm(...args);
   const showModal = (...args) => api.showModal(...args);
   const showToast = (...args) => api.showToast(...args);
@@ -188,6 +189,10 @@ export function createSaveRuntime(ctx) {
     const raw = localStorage.getItem(saveSlotKey(slotId));
     if (!raw) return false;
     setRuntimeState(JSON.parse(raw));
+    repairDoorAccessBlockers();
+    for (const floorState of Object.values(state.floorStates || {}) as any[]) {
+      if (floorState?.map?.cells) repairDoorAccessBlockers(floorState.map.cells);
+    }
     slots.current = slotId;
     slots.pending = slotId;
     localStorage.setItem(`${SAVE_KEY}-current`, slots.current);

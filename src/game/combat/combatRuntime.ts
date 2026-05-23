@@ -86,6 +86,9 @@ export function createCombatRuntime(ctx) {
     playSound(mode === "skill" ? "spell" : mode === "attack" ? "attack" : "guard");
     const t = totals();
     let result = "";
+    let actionKind = mode === "skill" ? "skill" : mode === "defend" ? "shield" : "hit";
+    let actionTitle = "你发动普通攻击";
+    let actionMeta = mode === "skill" ? "我方技能" : mode === "defend" ? "防御" : "普通攻击";
     resetBattleFx(mode);
     if (mode === "attack") {
       result = basicAttack(enemy, t, "普通攻击");
@@ -107,6 +110,8 @@ export function createCombatRuntime(ctx) {
       }
       state.mp -= skill.mp;
       result = castSkill(enemy, skill, t);
+      actionTitle = `你使用${skill.name}`;
+      actionMeta = `${skill.mp} MP`;
       setSkillCooldown(skill);
     } else if (mode === "defend") {
       const block = 3 + t.def;
@@ -114,8 +119,10 @@ export function createCombatRuntime(ctx) {
       setBattleFx("hero", { type: "guard", text: `-${block}`, label: "防御" });
       setBattleFx("center", { type: "guard", text: "防御姿态" });
       result = `你进入防御姿态，准备抵挡 ${block} 点伤害。`;
+      actionTitle = "你选择防御";
     }
     log(result);
+    setBattleFeed(actionKind, actionTitle, result, actionMeta, "hero");
     if (enemy.hp <= 0) {
       winBattle(enemy);
     } else {
@@ -174,8 +181,19 @@ export function createCombatRuntime(ctx) {
     battle.actor = actor;
   }
 
-  function setBattleFeed(kind, title, detail = "", meta = "") {
+  function setBattleFeed(kind, title, detail = "", meta = "", actor = "enemy") {
     battle.actionFeed = { kind, title, detail, meta };
+    addBattleTimeline(actor, kind, title, detail, meta);
+  }
+
+  function addBattleTimeline(actor, kind, title, detail = "", meta = "") {
+    battle.actionTimeline = Array.isArray(battle.actionTimeline) ? battle.actionTimeline : [];
+    const seq = Number(battle.turnSeq || 0) + 1;
+    battle.turnSeq = seq;
+    battle.actionTimeline.push({ seq, actor, kind, title, detail, meta });
+    if (battle.actionTimeline.length > 28) {
+      battle.actionTimeline = battle.actionTimeline.slice(-28);
+    }
   }
 
   // 战斗中使用药水，喝药后敌人会立刻行动。
@@ -204,6 +222,13 @@ export function createCombatRuntime(ctx) {
     setBattleFx("center", { type: "guard", text: "补给行动" });
     log(
       `战斗中使用${entry.name}，恢复 ${Math.max(0, Math.round(after - before))} 点${isHp ? "生命" : "法力"}。`
+    );
+    setBattleFeed(
+      isHp ? "heal" : "shield",
+      `你使用${entry.name}`,
+      `恢复 ${Math.max(0, Math.round(after - before))} 点${isHp ? "生命" : "法力"}。`,
+      isHp ? "生命药剂" : "法力药剂",
+      "hero"
     );
     finishPlayerAction(enemy, immediateEnemyTurn);
   }
@@ -417,6 +442,7 @@ export function createCombatRuntime(ctx) {
       if (!status || status.turns <= 0 || enemy.hp <= 0) delete enemy.statuses[type];
     }
     log(`${enemy.name}受到${entries.join("，")}。`);
+    addBattleTimeline("enemy", "status", `${enemy.name}持续受创`, entries.join("，"), "持续效果");
     return enemy.hp > 0;
   }
 
@@ -455,7 +481,7 @@ export function createCombatRuntime(ctx) {
       if (state.hp <= 0) death();
       return;
     }
-    let damage = Math.max(1, Math.round(enemy.atk * 1.08 - t.def * 0.36 - t.res * 0.08));
+    let damage = normalEnemyAttackDamage(enemy, t);
     const guarded = !!state._guard;
     if (state._guard) {
       const guard = enemy.affix?.id === "shatter" ? Math.ceil(state._guard * 0.45) : state._guard;
@@ -477,6 +503,25 @@ export function createCombatRuntime(ctx) {
     setBattleFeed("hit", `${enemy.name}反击`, `造成 ${damage} 点伤害。`, guarded ? "格挡后" : "普通攻击");
     log(`${enemy.name}反击，造成 ${damage} 点伤害。`);
     if (state.hp <= 0) death();
+  }
+
+  function normalEnemyAttackDamage(enemy, t) {
+    const raw = enemy.atk * 1.08 - t.def * 0.36 - t.res * 0.08;
+    const minimum = enemyDamageFloor(enemy);
+    return Math.max(minimum, Math.round(raw));
+  }
+
+  function enemyDamageFloor(enemy) {
+    const floor = Number(state.floor || 1);
+    if (floor > 3) return 1;
+    const heroMaxHp = Math.max(1, Number(effectiveMaxHp() || state.maxHp || state.hp || 1));
+    if (enemy.type === "boss") return Math.ceil(heroMaxHp * 0.22);
+    if (enemy.type === "elite" || enemy.roomBoss) {
+      const ratio = floor <= 1 ? 0.18 : floor === 2 ? 0.16 : 0.14;
+      return Math.ceil(heroMaxHp * ratio);
+    }
+    const ratio = floor <= 1 ? 0.12 : floor === 2 ? 0.1 : 0.08;
+    return Math.ceil(heroMaxHp * ratio);
   }
 
   function currentWeaponElement() {
@@ -944,6 +989,7 @@ export function createCombatRuntime(ctx) {
       const def = QUEST_DEFS[quest.id];
       if (!def) continue;
       if (def.type === "rescueRoom" && enemy.roomId !== quest.roomId) continue;
+      if (!matchesQuestTargetKind(def, enemy)) continue;
       if (
         def.type !== "rescueRoom" &&
         quest.targetRoomName &&
@@ -970,6 +1016,14 @@ export function createCombatRuntime(ctx) {
         rewards.push(`${def.title} ${quest.kills}/${quest.target}`);
       }
     }
+  }
+
+  function matchesQuestTargetKind(def, enemy) {
+    if (!def.targetKind) return true;
+    if (def.targetKind === "elite") return enemy.type === "elite" || enemy.roomBoss || enemy.rare;
+    if (def.targetKind === "runic") return !!enemy.affix || !!enemy.element || enemy.type === "elite";
+    if (def.targetKind === "monster") return enemy.type === "monster";
+    return true;
   }
 
   // 抽取战斗后的钥匙、材料、技能尘、装备、符文和额外金币。
@@ -1297,10 +1351,7 @@ export function createCombatRuntime(ctx) {
       if (simEnemy.hp <= 0) break;
       if (heroHp <= heroMaxHp * 0.3) guard = Math.max(3, Math.round(3 + (t.def || 0)));
       const resistMultiplier = incomingElementMultiplier(simEnemy.element);
-      let incoming = Math.max(
-        1,
-        Math.round(simEnemy.atk * 1.02 - (t.def || 0) * 0.28 - (t.res || 0) * 0.14)
-      );
+      let incoming = normalEnemyAttackDamage(enemy, t);
       incoming = Math.max(1, Math.round(incoming * resistMultiplier));
       if (guard > 0) {
         incoming = Math.max(0, incoming - guard);
