@@ -14,6 +14,11 @@ export interface Enemy {
   resistances?: string[];
   skills?: EnemySkill[];
   _guard?: number;
+  _lastSkillId?: string;
+  _phaseFlags?: string[];
+  _phaseScriptIds?: string[];
+  _bossMechanicFlags?: string[];
+  _bossNextIntent?: EnemySkill["type"] | "";
   statuses?: Partial<Record<DamageStatusType, DamageStatus>>;
   defeated?: boolean;
   roomId?: string;

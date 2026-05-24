@@ -10,6 +10,8 @@ export interface Item {
   weaponType?: string;
   element?: string;
   elementResistances?: string[];
+  setId?: string;
+  setName?: string;
   stats?: Stats;
   runeSlots?: number;
   runes?: string[];

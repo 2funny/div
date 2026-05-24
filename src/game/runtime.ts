@@ -3,6 +3,10 @@ import {
   CLASSES,
   LEGEND_ITEMS,
   FLOOR_EFFECTS,
+  INITIAL_BUILD_PRESETS,
+  INITIAL_SKILL_DUST,
+  INITIAL_SKILL_POINTS,
+  INITIAL_STAT_POINTS,
   MAP_SIZE,
   MAP_VIEW_SIZE,
   DEFAULT_CLASS_ID,
@@ -23,6 +27,7 @@ import {
   weaponTypeName
 } from "./equipment/equipmentRules";
 import { randomEquipmentForState } from "./equipment/equipmentDrops";
+import { equipmentSetBonuses } from "./equipment/equipmentSets";
 import { QUEST_DEFS } from "./quest/quests";
 import { xpForNextLevel } from "./progression";
 import { random } from "./random";
@@ -35,7 +40,13 @@ import {
   writeSaveIndex
 } from "./save/save";
 import { clearBattleFx, getBattleFx, resetBattleFx, setBattleFx } from "./combat/combatFx";
-import { discoverLorePage, ensureLoreState, ensureNarrativeState, unlockLoreChaptersForFloor } from "./quest";
+import {
+  determineEnding as determineEndingForState,
+  discoverLorePage,
+  ensureLoreState,
+  ensureNarrativeState,
+  unlockLoreChaptersForFloor
+} from "./quest";
 import {
   emptyEquipment,
   item,
@@ -166,7 +177,7 @@ const { closeModal, modalAction, showConfirm, showEvent, showModal, showToast } 
   });
 
 // 初始化 Web Audio 上下文，并在浏览器允许播放后启动地牢氛围声。
-function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot-1") {
+function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot-1", buildId = "") {
   currentSaveSlot = slotId;
   pendingSaveSlot = slotId;
   localStorage.setItem(`${SAVE_KEY}-current`, currentSaveSlot);
@@ -183,9 +194,9 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     mp: cls.mp,
     maxMp: cls.mp,
     stats: { ...cls.stats },
-    statPoints: 0,
-    skillPoints: 0,
-    skillDust: 0,
+    statPoints: INITIAL_STAT_POINTS,
+    skillPoints: INITIAL_SKILL_POINTS,
+    skillDust: INITIAL_SKILL_DUST,
     keys: 0,
     universalKeys: 0,
     doorKeys: {},
@@ -198,7 +209,8 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
       eventChoices: {},
       rescuedNpcIds: [],
       merchantTrust: 0,
-      factionLeanings: {}
+      factionLeanings: {},
+      milestones: []
     },
     skillLevels: Object.fromEntries(cls.skills.map((skill) => [skill.id, 0])),
     skillBranches: {},
@@ -217,16 +229,50 @@ function startGame(classId, slotId = pendingSaveSlot || currentSaveSlot || "slot
     tutorial: createTutorialState(),
     log: []
   };
+  const build = applyInitialBuildPreset(classId, buildId);
   state.hp = effectiveMaxHp();
   state.mp = effectiveMaxMp();
   generateFloor();
   repairDoorAccessBlockers();
   log(`你作为${cls.name}踏入了符文地牢。`);
+  log(classOpeningLine(classId));
+  log(`开局获得 ${INITIAL_STAT_POINTS} 点属性点、${INITIAL_SKILL_POINTS} 点技能点和 ${INITIAL_SKILL_DUST} 点技能尘。`);
+  if (build) log(`采用${build.name}开局：${build.desc}。`);
   saveGame(false);
   render();
 }
 
+function applyInitialBuildPreset(classId, buildId = "") {
+  const build = (INITIAL_BUILD_PRESETS[classId] || []).find((entry) => entry.id === buildId);
+  if (!build) return null;
+  let spent = 0;
+  for (const [key, value] of Object.entries(build.stats || {})) {
+    const amount = Math.max(0, Number(value || 0));
+    if (!amount) continue;
+    state.stats[key] = (state.stats[key] || 0) + amount;
+    if (key === "def") state.maxHp += amount * 2;
+    if (key === "res") state.maxMp += amount * 2;
+    spent += amount;
+  }
+  state.statPoints = Math.max(0, (state.statPoints || 0) - spent);
+  state.initialBuildId = build.id;
+  return build;
+}
+
+function classOpeningLine(classId) {
+  const lines = {
+    warrior: "你把盾沿抵在第一道石缝上，听见深处有什么东西也摆出了架势。",
+    mage: "第一枚火星在指尖亮起时，墙上的符文短暂地改写了自己的纹路。",
+    ranger: "你在入口处留下半枚箭羽，确认退路，然后把第二支箭搭上弦。"
+  };
+  return lines[classId] || "你在入口处停了一息，记住空气里那股旧铁和潮尘的味道。";
+}
+
 // 楼层、房间和怪物生成逻辑拆在独立模块，主 runtime 保留交互编排。
+function determineEnding(nextState = state) {
+  return determineEndingForState(nextState);
+}
+
 const floorRuntime = createFloorRuntime({
   getState: () => state,
   updateVisibility: (...args) => updateVisibility(...args),
@@ -426,6 +472,9 @@ function totals() {
     for (const [key, value] of Object.entries(eq.stats))
       total[key] = (total[key] || 0) + value + eq.level;
     for (const rune of eq.runes) applyRune(total, rune);
+  }
+  for (const [key, value] of Object.entries(equipmentSetBonuses(state.equipment || {}))) {
+    total[key] = (total[key] || 0) + value;
   }
   return total;
 }
@@ -829,6 +878,7 @@ const {
   isBlockingInteraction,
   knownTeleportTargets,
   landingNear,
+  merchantPurchasePreview,
   merchantSellRows,
   merchantSalvageRows,
   openForge,
@@ -1012,6 +1062,7 @@ Object.assign(renderApi, {
   knownTeleportTargets,
   loadGame,
   markAutosaveDirty,
+  merchantPurchasePreview,
   move,
   questLocationText,
   questRewardGold,
@@ -1247,6 +1298,7 @@ const runtimeApi = {
   craftRune,
   dealDamage,
   deleteSaveSlot,
+  determineEnding,
   discoverLorePage,
   disassembleEquipment,
   distance,
@@ -1262,6 +1314,8 @@ const runtimeApi = {
   enemyAffixText,
   enemyTurn,
   equipmentCompareText,
+  equipmentSalvageValue,
+  equipmentSellValue,
   equippedStateBadge,
   equipItem,
   exposeRuntime,
@@ -1287,6 +1341,7 @@ const runtimeApi = {
   makeEnemy,
   makeEnemyWithVariant,
   maybeDrop,
+  merchantPurchasePreview,
   merchantSellRows,
   modalAction,
   move,
@@ -1438,6 +1493,7 @@ export {
   craftRune,
   dealDamage,
   deleteSaveSlot,
+  determineEnding,
   discoverLorePage,
   disassembleEquipment,
   distance,
@@ -1453,6 +1509,8 @@ export {
   enemyAffixText,
   enemyTurn,
   equipmentCompareText,
+  equipmentSalvageValue,
+  equipmentSellValue,
   equippedStateBadge,
   equipItem,
   floorEffectReward,
@@ -1473,6 +1531,7 @@ export {
   makeEnemy,
   makeEnemyWithVariant,
   maybeDrop,
+  merchantPurchasePreview,
   merchantSellRows,
   mapViewBounds,
   modalAction,

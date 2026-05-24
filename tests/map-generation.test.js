@@ -178,6 +178,20 @@ vm.runInContext(
   assert(keyGuardian, "locked chest room should have a key guardian nearby");
   assert.strictEqual(keyGuardian.object.roomBoss, true, "key guardian should be marked as a room boss");
 
+  state = { floor: 29 };
+  const originalRandomForElementSkill = Math.random;
+  try {
+    resetRandomSource();
+    Math.random = () => 0;
+    const emberElite = makeEnemyWithVariant(true);
+    assert(
+      emberElite.skills.some((skill) => skill.id === "scorch-mark"),
+      "ember elites should be able to roll a distinct fire-themed skill"
+    );
+  } finally {
+    Math.random = originalRandomForElementSkill;
+  }
+
   state = {
     floor: MAX_FLOOR,
     facing: "down",

@@ -1,4 +1,5 @@
 import type { Item } from "../types";
+import { equipmentQualityConfig } from "../constants/balance";
 
 const STAT_SCORE_WEIGHTS: Record<string, number> = {
   atk: 11,
@@ -9,14 +10,6 @@ const STAT_SCORE_WEIGHTS: Record<string, number> = {
   luk: 7,
   hp: 1.2,
   mp: 1.1
-};
-
-const QUALITY_SCORE: Record<string, number> = {
-  普通: 0,
-  优秀: 8,
-  稀有: 18,
-  史诗: 32,
-  传说: 50
 };
 
 export function effectiveItemStat(item: Item | null | undefined, key: string): number {
@@ -33,11 +26,12 @@ export function itemScore(item: Item | null | undefined): number {
   const statScore = Object.entries(item.stats || {}).reduce((sum, [key, value]) => {
     return sum + (STAT_SCORE_WEIGHTS[key] || 5) * (value + (item.level || 0));
   }, 0);
-  const qualityScore = QUALITY_SCORE[item.quality || ""] || 0;
+  const qualityScore = equipmentQualityConfig(item.quality).score;
   const slotScore =
     (item.runeSlots || 0) * 6 +
     (item.runes?.length || 0) * 4 +
     (item.element ? 10 : 0) +
-    (item.elementResistances?.length || 0) * 8;
+    (item.elementResistances?.length || 0) * 8 +
+    (item.setId ? 12 : 0);
   return Math.round(statScore + qualityScore + slotScore);
 }

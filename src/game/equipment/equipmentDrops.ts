@@ -1,9 +1,11 @@
 import { ELEMENT_IDS, elementName } from "../combat/elements";
 import { SLOTS } from "../constants";
+import { equipmentQualityConfig, equipmentRuneSlotsForQuality } from "../constants/balance";
 import { choice, random } from "../random";
 import type { GameState, SlotKey } from "../types";
 import { equipmentName } from "./equipmentNames";
 import { randomWeaponTypeForClass, weaponPrimaryStats } from "./equipmentRules";
+import { applyEquipmentSetTheme, chooseEquipmentSetTheme } from "./equipmentSets";
 import { item } from "./inventory";
 
 // Equipment drop generation owns quality, stat budgets, and elemental/resistance extras.
@@ -18,7 +20,7 @@ export function randomEquipmentForState(state: GameState) {
     slot,
     quality,
     stats,
-    quality === "普通" ? 0 : quality === "优秀" ? 1 : 2
+    equipmentRuneSlotsForQuality(quality)
   );
   if (weaponType) equipment.weaponType = weaponType;
   if (
@@ -34,6 +36,12 @@ export function randomEquipmentForState(state: GameState) {
     equipment.elementResistances = [resistance];
     equipment.name = `${elementName(resistance)}抗${equipment.name}`;
   }
+  applyEquipmentSetTheme(
+    equipment,
+    chooseEquipmentSetTheme(state.classId || "warrior", state.floor || 1, quality, random(), random()),
+    state.floor || 1,
+    random()
+  );
   return equipment;
 }
 
@@ -71,13 +79,13 @@ function equipmentStatsForDrop(slot: SlotKey, bonus: number, weaponType = "", fl
 }
 
 function weaponElementChance(quality: string) {
-  return { 普通: 0.08, 优秀: 0.18, 稀有: 0.32, 史诗: 0.48, 传说: 0.7 }[quality] || 0.18;
+  return equipmentQualityConfig(quality).weaponElementChance;
 }
 
 function elementResistanceChance(quality: string) {
-  return { 普通: 0.08, 优秀: 0.16, 稀有: 0.28, 史诗: 0.42, 传说: 0.58 }[quality] || 0.16;
+  return equipmentQualityConfig(quality).elementResistanceChance;
 }
 
 function qualityBonus(quality: string) {
-  return { 普通: 1, 优秀: 2, 稀有: 3, 史诗: 4, 传说: 6 }[quality] || 1;
+  return equipmentQualityConfig(quality).dropBonus;
 }

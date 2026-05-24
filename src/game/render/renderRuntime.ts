@@ -1,36 +1,96 @@
+import { CLASSES, RUNES, SLOT_NAMES, isValidMapSize } from "../constants";
 import {
-  ASSETS,
-  CLASSES,
-  LEGEND_ITEMS,
-  MAP_VIEW_SIZE,
-  RUNES,
-  SLOT_NAMES,
-  SLOTS,
-  STAT_NAMES,
-  isValidMapSize
-} from "../constants";
-import { getBattleFx } from "../combat/combatFx";
-import { elementName, elementResistText, elementTags } from "../combat/elements";
+  elementMatchLabel,
+  elementMultiplier
+} from "../combat/elements";
 import {
   equipmentRestrictionText,
-  isWeaponUsableByClass,
-  weaponTypeName
+  isWeaponUsableByClass
 } from "../equipment/equipmentRules";
 import { effectiveItemStat, itemScore } from "../equipment/equipmentScoring";
+import { ensureLoreState } from "../quest/lore";
 import {
-  LORE_CHAPTERS,
-  LORE_PAGES,
-  ensureLoreState,
-  loreChapterById,
-  lorePageById
-} from "../quest/lore";
-import { cellsWithin, distance } from "../floor/mapGeometry";
-import { QUEST_DEFS } from "../quest/quests";
+  assetForClass as assetForClassMarkup,
+  badgeForObject as badgeForObjectMarkup,
+  iconClassForType as iconClassForTypeMarkup,
+  iconSprite as iconSpriteMarkup,
+  imageTag as imageTagMarkup,
+  mapViewBounds as mapViewBoundsForState,
+  minimapMarker as minimapMarkerMarkup,
+  minimapObjectIcon as minimapObjectIconMarkup,
+  minimapOverviewBounds as minimapOverviewBoundsForState,
+  minimapRoomMarkers as minimapRoomMarkersForState,
+  objectSprite as objectSpriteMarkup,
+  renderLegendMarkup,
+  renderMapMarkup,
+  renderMinimapMarkup,
+  roomDoorLabel as roomDoorLabelForCell,
+  shouldShowMapObject as shouldShowMapObjectForCell,
+  sprite as spriteMarkup,
+  tileLabel as tileLabelForCell
+} from "./mapPanel";
+import {
+  battlePotionGroups as battlePotionGroupsForState,
+  currentBattleTurnState as currentBattleTurnStateForPanel,
+  renderBattleCommandPanelMarkup,
+  renderBattlePotionButtonsMarkup,
+  renderSkillActionButtonsMarkup
+} from "./battleCommandPanel";
+import {
+  battleFxClass as battleFxClassMarkup,
+  centerFxMarkup as centerBattleFxMarkup,
+  combatantFxMarkup as combatantBattleFxMarkup,
+  elementBurstMarkup as elementBurstBattleMarkup,
+  renderBattleViewMarkup
+} from "./battleView";
+import {
+  battleContextMarkup,
+  explorationContextMarkup,
+  objectContextMarkup
+} from "./contextPanel";
+import { enemyDetailMarkup, isEnemyObject } from "./enemyDetail";
+import {
+  enhanceText as equipmentEnhanceText,
+  equipmentDetailMarkup as equipmentDetailMarkupForItem,
+  equipmentCompareTextMarkup,
+  inventoryEquipmentCompareMarkup,
+  equipmentScoreBadgeMarkup as equipmentScoreBadgeMarkupForDelta,
+  equipmentSummary as equipmentSummaryMarkup,
+  equippedStateBadge as equippedStateBadgeMarkup,
+  renderCraftPanelMarkup,
+  renderEquipmentPanelMarkup,
+  statsText as equipmentStatsText
+} from "./equipmentMarkup";
+import { heroStatsGridMarkup, renderPaperdollMarkup } from "./heroPanel";
+import {
+  equipmentFilterControl as inventoryEquipmentFilterControl,
+  equipmentFilterRows as inventoryEquipmentFilterRows,
+  equipmentInventoryRow as inventoryEquipmentInventoryRow,
+  materialRows as inventoryMaterialRows,
+  potionRow as inventoryPotionRow,
+  renderInventoryGroupMarkup,
+  runeRows as inventoryRuneRows
+} from "./inventoryPanel";
+import {
+  openLoreArchive as openLoreArchivePanel,
+  renderLoreShortcut as renderLoreShortcutMarkup,
+  renderQuestList as renderQuestListMarkup,
+  renderTutorialCard as renderTutorialCardMarkup,
+  unlockedLoreEntries as unlockedLoreEntriesForState
+} from "./questPanel";
+import {
+  renderClassSelectMarkup,
+  renderContinueSlotsMarkup,
+  renderStartScreenMarkup,
+  saveSlotCardMarkup
+} from "./startPanel";
+import {
+  renderSkillsMarkup,
+  skillLoadoutMarkup as skillLoadoutPanelMarkup,
+  skillLoadoutModalMarkup
+} from "./skillPanel";
 import { syncWeatherCanvas } from "./weatherCanvas";
 import { escapeHtml } from "./html";
-import type { StatKey } from "../types";
-
-const LORE_TOTAL = LORE_CHAPTERS.length + LORE_PAGES.length;
 
 // 渲染运行时集中生成 DOM 字符串和面板状态，不承担战斗、掉落等规则计算。
 export function createRenderRuntime(ctx) {
@@ -64,6 +124,7 @@ export function createRenderRuntime(ctx) {
   const equipItem = (...args) => api.equipItem(...args);
   const equipmentSellValue = (...args) => api.equipmentSellValue(...args);
   const equipmentSalvageValue = (...args) => api.equipmentSalvageValue(...args);
+  const merchantPurchasePreview = (...args) => api.merchantPurchasePreview(...args);
   const enemyAffixText = (...args) => api.enemyAffixText(...args);
   const ensureQuestList = (...args) => api.ensureQuestList(...args);
   const generateFloor = (...args) => api.generateFloor(...args);
@@ -98,47 +159,25 @@ export function createRenderRuntime(ctx) {
   const updateVisibility = (...args) => api.updateVisibility(...args);
   const upgradedSkill = (...args) => api.upgradedSkill(...args);
 
+  function startPanelContext() {
+    return {
+      currentSaveSlot: ui.currentSaveSlot,
+      formatSaveTime,
+      saveSlotCard
+    };
+  }
+
   // 渲染开始页，根据存档槽状态决定展示继续入口或新游戏入口。
   function renderStartScreen() {
     const slots = saveSlots();
-    const occupied = slots.filter((slot) => slot.meta);
     $("homeBtn").disabled = true;
-    $("classSelect").innerHTML = `
-    <article class="start-hub">
-      <header class="start-hero">
-        <div>
-          <span>冒险入口</span>
-          <h2>符文地牢</h2>
-          <p>选择职业开启新的地牢探索，或从已有存档继续。</p>
-        </div>
-      </header>
-      <div class="start-actions">
-        <button type="button" onclick="startNewGame()">新游戏</button>
-        <button type="button" ${occupied.length ? "" : "disabled"} onclick="renderContinueSlots()">继续</button>
-      </div>
-      ${occupied.length ? `<p class="start-note">继续会打开存档列表；新游戏会自动使用一个空存档。</p>` : `<p class="start-note">暂无存档，开始新游戏后先选择职业。</p>`}
-    </article>
-  `;
+    $("classSelect").innerHTML = renderStartScreenMarkup(slots);
   }
 
   function renderContinueSlots() {
     const slots = saveSlots().filter((slot) => slot.meta);
     $("homeBtn").disabled = false;
-    $("classSelect").innerHTML = `
-    <article class="start-hub">
-      <header class="start-hero">
-        <div>
-          <span>继续冒险</span>
-          <h2>选择存档</h2>
-          <p>选择一个已有存档继续，也可以删除不再需要的记录。</p>
-        </div>
-        <button type="button" onclick="renderStartScreen()">返回</button>
-      </header>
-      <div class="save-slot-grid">
-        ${slots.length ? slots.map(saveSlotCard).join("") : `<p class="start-note">暂无可继续的存档。</p>`}
-      </div>
-    </article>
-  `;
+    $("classSelect").innerHTML = renderContinueSlotsMarkup(slots, startPanelContext());
   }
 
   function continueSavedGame(slotId = ui.currentSaveSlot) {
@@ -148,33 +187,7 @@ export function createRenderRuntime(ctx) {
   }
 
   function saveSlotCard(slot) {
-    const meta = slot.meta;
-    const className = escapeHtml(meta?.className || "冒险者");
-    if (!meta) {
-      return `
-      <article class="save-slot empty">
-        <div class="save-slot-main">
-          <span>${slot.label}</span>
-          <b>空存档</b>
-          <small>创建一个新的地牢角色。</small>
-        </div>
-        <button type="button" onclick="newGameInSlot('${slot.id}')">开始</button>
-      </article>
-    `;
-    }
-    return `
-    <article class="save-slot ${slot.id === ui.currentSaveSlot ? "active" : ""}">
-      <div class="save-slot-main">
-        <span>${slot.label} · ${formatSaveTime(meta.updatedAt)}${slot.id === ui.currentSaveSlot ? " · 当前" : ""}</span>
-        <b>${className} Lv.${meta.level || 1}</b>
-        <small>第 ${meta.floor || 1} 层 · 金币 ${meta.gold || 0} · HP ${meta.hp || 0}/${meta.maxHp || 0}</small>
-      </div>
-      <div class="save-slot-actions">
-        <button type="button" onclick="continueSavedGame('${slot.id}')">继续</button>
-        <button type="button" onclick="confirmDeleteSaveSlot('${slot.id}')">删除</button>
-      </div>
-    </article>
-  `;
+    return saveSlotCardMarkup(slot, startPanelContext());
   }
 
   function nextNewGameSlot() {
@@ -236,32 +249,9 @@ export function createRenderRuntime(ctx) {
   // 渲染职业选择卡片，玩家选择后会创建新角色状态。
   function renderClassSelect(slotId = ui.pendingSaveSlot || ui.currentSaveSlot || "slot-1") {
     ui.pendingSaveSlot = slotId;
-    const slotLabel = saveSlotLabel(slotId);
+    saveSlotLabel(slotId);
     $("homeBtn").disabled = false;
-    $("classSelect").innerHTML =
-      Object.entries(CLASSES)
-        .map(
-          ([id, cls]) => `
-    <article class="class-card">
-      <h2>${cls.name}</h2>
-      <small>${cls.role || "职业"} · 主属性 ${cls.primary || "均衡"}</small>
-      <p>${cls.desc}</p>
-      ${
-        cls.passives?.length
-          ? `<div class="class-passives">${cls.passives
-              .map(
-                (passive) =>
-                  `<span title="${passive.desc}">${passive.name}${passive.tags?.length ? ` · ${passive.tags.join("/")}` : ""}</span>`
-              )
-              .join("")}</div>`
-          : ""
-      }
-      <button type="button" onclick="startGame('${id}', '${slotId}')">开始</button>
-    </article>
-  `
-        )
-        .join("") +
-      `<article class="class-card class-back-card"><h2>选择职业</h2><p>新角色会保存在一个空存档中。</p><button type="button" onclick="renderStartScreen()">返回</button></article>`;
+    $("classSelect").innerHTML = renderClassSelectMarkup(slotId);
   }
 
   // 根据当前状态渲染完整 UI，并把快照持久化到 localStorage。
@@ -329,40 +319,12 @@ export function createRenderRuntime(ctx) {
     $("skillPointsText").textContent = state.skillPoints || 0;
     $("skillDustText").textContent = state.skillDust || 0;
     $("goldText").textContent = state.gold;
-    $("statsGrid").innerHTML = Object.entries(STAT_NAMES)
-      .map(
-        ([key, name]) => `
-    <div class="stat">
-      <span>${name} ${t[key]}</span>
-      <button type="button" ${state.statPoints ? "" : "disabled"} onclick="confirmAddStat('${key}')">+</button>
-    </div>
-  `
-      )
-      .join("");
+    $("statsGrid").innerHTML = heroStatsGridMarkup(state, t);
     renderPaperdoll();
   }
 
   function renderPaperdoll() {
-    const slots = [
-      ["weapon", "weapon"],
-      ["armor", "armor"],
-      ["boots", "boots"],
-      ["ring", "ring"],
-      ["amulet", "amulet"]
-    ];
-    $("paperdoll").innerHTML = `
-    <div class="paperdoll-figure">${imageTag(assetForClass(state.classId), CLASSES[state.classId].name)}</div>
-    ${slots
-      .map(([slot, cls]) => {
-        const eq = state.equipment[slot];
-        return `<button class="gear-slot gear-${cls} ${eq ? "equipped" : ""}" type="button" onclick="showEquipmentSlot('${slot}')" title="${eq ? eq.name : SLOT_NAMES[slot]}">
-        <span>${SLOT_NAMES[slot]}</span>
-        <b>${eq ? escapeHtml(eq.name) : "未装备"}</b>
-        <small>${eq ? `+${eq.level}` : "空"}</small>
-      </button>`;
-      })
-      .join("")}
-  `;
+    $("paperdoll").innerHTML = renderPaperdollMarkup(state, imageTag, assetForClass);
   }
 
   // 打开纸娃娃指定装备槽位详情。
@@ -401,56 +363,17 @@ export function createRenderRuntime(ctx) {
     map.className = `map ${theme.colorClass}`;
     const view = mapViewBounds();
     map.style.setProperty("--size", view.size);
-    const cells = [];
-    for (let y = view.y; y < view.y + view.size; y++) {
-      for (let x = view.x; x < view.x + view.size; x++) {
-        const cell = state.map.cells[y][x];
-        if (!cell.seen) {
-          cells.push(`<button class="tile unseen" type="button" aria-label="未知"></button>`);
-          continue;
-        }
-        const terrain = ["wall", "door", "fence", "lava"].includes(cell.terrain)
-          ? cell.terrain
-          : "floor";
-        const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
-        const isSelected = ui.selectedTile?.x === cell.x && ui.selectedTile?.y === cell.y;
-        const showObject = shouldShowMapObject(cell);
-        const isInspectable = showObject && isEnemyObject(cell.object);
-        const tileSprite = isPlayer
-          ? sprite(
-              `player facing-${state.facing || "down"}`,
-              assetForClass(state.classId),
-              CLASSES[state.classId].name
-            )
-          : showObject
-            ? objectSprite(cell.object)
-            : "";
-        const objectBadge = showObject ? badgeForObject(cell.object.type) : "";
-        const roomLabel = roomDoorLabel(cell);
-        const roomBadge = roomLabel ? `<span class="room-label">${roomLabel}</span>` : "";
-        const label = tileLabel(cell, isPlayer);
-        const isPassiveRoomEntrance = cell.object?.type === "roomEntrance";
-        const showHint =
-          isPlayer ||
-          (showObject && !isPassiveRoomEntrance) ||
-          ["wall", "door", "fence", "lava"].includes(cell.terrain) ||
-          (roomLabel && !isPassiveRoomEntrance);
-        const hint = showHint ? `<span class="tile-hint">${label}</span>` : "";
-        const title = "";
-        const flags = [
-          terrain,
-          isPlayer ? " current" : "",
-          "",
-          isSelected ? " selected" : "",
-          cell.object ? ` object object-${cell.object.type}` : "",
-          isInspectable ? " inspectable" : ""
-        ].join("");
-        cells.push(
-          `<button class="tile ${flags}" type="button"${title} aria-label="${label}" onclick="clickTile(${cell.x},${cell.y})">${tileSprite}${objectBadge}${roomBadge}${hint}</button>`
-        );
-      }
-    }
-    map.innerHTML = cells.join("");
+    map.innerHTML = renderMapMarkup(mapPanelContext(), view);
+  }
+
+  function mapPanelContext() {
+    return {
+      enemyAffixText,
+      isEnemyObject,
+      roomName,
+      selectedTile: ui.selectedTile,
+      state
+    };
   }
 
   function applyFloorEffectClass(effect) {
@@ -467,26 +390,15 @@ export function createRenderRuntime(ctx) {
 
   // 门格只显示紧凑房间编号，避免长文本压在地图上。
   function roomDoorLabel(cell) {
-    if (cell.terrain !== "door" || !cell.roomId) return "";
-    const number = roomName(cell.roomId).match(/\d+/)?.[0];
-    if (!number) return "";
-    return `${number}`;
+    return roomDoorLabelForCell(cell, roomName);
   }
 
   function shouldShowMapObject(cell) {
-    return !!cell.object && cell.seen && cell.object.type !== "trap";
+    return shouldShowMapObjectForCell(cell);
   }
 
   function mapViewBounds() {
-    const preferred = typeof MAP_VIEW_SIZE === "number" ? MAP_VIEW_SIZE : state.map.size;
-    const size = Math.min(preferred, state.map.size);
-    const half = Math.floor(size / 2);
-    const max = state.map.size - size;
-    return {
-      x: Math.max(0, Math.min(max, state.player.x - half)),
-      y: Math.max(0, Math.min(max, state.player.y - half)),
-      size
-    };
+    return mapViewBoundsForState(state);
   }
 
   // 渲染右上角小地图概览和当前视野框。
@@ -498,124 +410,23 @@ export function createRenderRuntime(ctx) {
     minimap.style.setProperty("--view-x", `${overview.viewX}%`);
     minimap.style.setProperty("--view-y", `${overview.viewY}%`);
     minimap.style.setProperty("--view-size", `${overview.viewSize}%`);
-    const cells = [];
-    const roomMarkers = minimapRoomMarkers();
-    for (let y = 0; y < state.map.size; y++) {
-      for (let x = 0; x < state.map.size; x++) {
-        const cell = state.map.cells[y][x];
-        const isPlayer = cell.x === state.player.x && cell.y === state.player.y;
-        const marker = minimapMarker(cell, isPlayer, roomMarkers.get(`${cell.x},${cell.y}`));
-        const inView =
-          cell.x >= view.x &&
-          cell.x < view.x + view.size &&
-          cell.y >= view.y &&
-          cell.y < view.y + view.size;
-        const classes = [
-          "mini-cell",
-          cell.seen ? "seen" : "unknown",
-          cell.terrain === "lava"
-            ? "mini-lava"
-            : ["wall", "fence"].includes(cell.terrain)
-              ? "mini-wall"
-              : "mini-floor",
-          cell.seen && cell.object ? `obj-${cell.object.type}` : "",
-          inView ? "in-view" : "",
-          isPlayer ? "mini-player" : ""
-        ].join(" ");
-        const title = cell.object?.type === "roomEntrance" ? "" : ` title="${tileLabel(cell, isPlayer)}"`;
-        cells.push(
-          `<button class="${classes}" type="button"${title} onclick="selectMinimapTile(${cell.x},${cell.y})">${marker}</button>`
-        );
-      }
-    }
-    minimap.innerHTML = `<div class="mini-grid">${cells.join("")}<span class="mini-view-frame"></span></div>`;
+    minimap.innerHTML = renderMinimapMarkup(mapPanelContext(), view);
   }
 
   function minimapOverviewBounds(view) {
-    const size = state.map.size;
-    return {
-      size,
-      viewX: (view.x / size) * 100,
-      viewY: (view.y / size) * 100,
-      viewSize: (view.size / size) * 100
-    };
+    return minimapOverviewBoundsForState(state, view);
   }
 
   function minimapMarker(cell, isPlayer, roomNumber = "") {
-    if (isPlayer) {
-      return `<span class="mini-dot mini-player-dot" aria-label="${CLASSES[state.classId].name}"></span>`;
-    }
-    if (!cell.seen) return "";
-    if (cell.object) {
-      if (cell.object.type === "trap") return "";
-      const icon = minimapObjectIcon(cell.object);
-      return `<span class="mini-dot mini-${icon.cls}" aria-label="${icon.alt}"></span>`;
-    }
-    if (cell.terrain === "door")
-      return `<span class="mini-dot mini-door" aria-label="房门"></span>`;
-    if (roomNumber)
-      return `<span class="mini-room-label" aria-label="${roomNumber}号房">${roomNumber}</span>`;
-    return "";
+    return minimapMarkerMarkup(cell, isPlayer, roomNumber, state.classId);
   }
 
   function minimapRoomMarkers() {
-    const markers = new Map();
-    for (const room of state.map.rooms || []) {
-      const number = room.name.match(/\d+/)?.[0];
-      if (!number) continue;
-      const cells = state.map.cells
-        .flat()
-        .filter(
-          (cell) => cell.roomId === room.id && cell.seen && cell.terrain === "floor" && !cell.object
-        );
-      if (!cells.length) continue;
-      const center = roomCenter(cells);
-      const best = cells.sort((a, b) => distance(a, center) - distance(b, center))[0];
-      if (best) markers.set(`${best.x},${best.y}`, number);
-    }
-    return markers;
-  }
-
-  function roomCenter(cells) {
-    const total = cells.reduce((sum, cell) => ({ x: sum.x + cell.x, y: sum.y + cell.y }), {
-      x: 0,
-      y: 0
-    });
-    return { x: total.x / cells.length, y: total.y / cells.length };
+    return minimapRoomMarkersForState(state);
   }
 
   function minimapObjectIcon(obj) {
-    if (["monster", "elite", "boss"].includes(obj.type)) {
-      const variants = {
-        slime: ["monster", ASSETS.monster, "怪物"],
-        rat: ["monster", ASSETS.monsterRat, "洞穴鼠"],
-        bat: ["monster", ASSETS.monsterBat, "矿洞蝙蝠"],
-        wolf: ["monster", ASSETS.monsterWolf, "冰霜狼"],
-        elite: ["elite", ASSETS.elite, "精英怪"],
-        boss: ["boss", ASSETS.boss, "Boss"]
-      };
-      const fallback = obj.type === "boss" ? "boss" : obj.type === "elite" ? "elite" : "slime";
-      const [cls, src, alt] = variants[obj.variant || fallback] || variants[fallback];
-      return { cls, src, alt };
-    }
-    const icons = {
-      chest: { cls: "chest", src: ASSETS.chest, alt: "宝箱" },
-      lockedChest: { cls: "locked-chest", src: ASSETS.chest, alt: "上锁宝箱" },
-      altar: { cls: "altar", src: ASSETS.altar, alt: "祭坛" },
-      forge: { cls: "forge", src: ASSETS.forge, alt: "合成台" },
-      shop: { cls: "merchant", src: ASSETS.shop, alt: "商人" },
-      guideNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "引路人" },
-      questNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "委托人" },
-      rescueNpc: { cls: "quest-npc", src: ASSETS.questNpc, alt: "被困者" },
-      lockedDoor: { cls: "locked-door", src: ASSETS.lockedDoor, alt: "上锁房门" },
-      roomEntrance: { cls: "door", src: ASSETS.door, alt: "房门" },
-      fenceGate: { cls: "fence-gate", src: ASSETS.fenceGate, alt: "门栅" },
-      trap: { cls: "trap", src: ASSETS.trap, alt: "陷阱" },
-      portal: { cls: "portal", src: ASSETS.portal, alt: "传送门" },
-      stairsDown: { cls: "stairs-down", src: null, alt: "下行楼梯" },
-      stairsUp: { cls: "stairs-up", src: null, alt: "上行楼梯" }
-    };
-    return icons[obj.type] || { cls: "unknown", src: null, alt: "未知" };
+    return minimapObjectIconMarkup(obj);
   }
 
   function selectMinimapTile(x, y) {
@@ -625,21 +436,7 @@ export function createRenderRuntime(ctx) {
 
   // 渲染地图下方始终可见的图例说明。
   function renderLegend() {
-    const legendItems = LEGEND_ITEMS.filter(([type]) => type !== "portal").concat([
-      ["stairsDown", "下层", "进入下一层"],
-      ["stairsUp", "上层", "返回上一层"]
-    ]);
-    $("legend").innerHTML = legendItems
-      .map(([type, label, desc]) => {
-        const src = type === "player" ? assetForClass(state.classId) : ASSETS[type];
-        return `
-      <div class="legend-item" title="${desc}">
-        ${src ? `<img src="${src}" alt="${label}" draggable="false">` : iconSprite(iconClassForType(type), label)}
-        <span>${label}</span>
-      </div>
-    `;
-      })
-      .join("");
+    $("legend").innerHTML = renderLegendMarkup(state.classId);
   }
 
   // 有当前敌人时，把中间地图区域切换成战斗面板。
@@ -676,100 +473,43 @@ export function createRenderRuntime(ctx) {
     const mpPct = Math.max(0, Math.min(100, Math.round((state.mp / mpMax) * 100)));
     const enemyPct = Math.max(0, Math.min(100, Math.round((enemy.hp / enemy.maxHp) * 100)));
     $("themeText").textContent = "战斗中";
-    battleStage.innerHTML = `
-    <div class="battle-board">
-      <div class="combatant hero-combatant ${battleFxClass("hero")}">
-        <div class="battle-sprite">${sprite("player", assetForClass(state.classId), cls.name)}</div>
-        ${combatantFxMarkup("hero")}
-        <h2>${cls.name}</h2>
-        <div class="battle-meter"><span style="width:${hpPct}%"></span><b>${Math.ceil(state.hp)}/${hpMax} HP</b></div>
-        <div class="battle-meter mp"><span style="width:${mpPct}%"></span><b>${Math.ceil(state.mp)}/${mpMax} MP</b></div>
-      </div>
-      <div class="battle-center">
-        <strong>VS</strong>
-        ${centerFxMarkup()}
-      </div>
-      <div class="combatant enemy-combatant ${battleFxClass("enemy")}">
-        <button class="battle-sprite enemy-detail-sprite" type="button" onclick="showCurrentEnemyDetail()" title="查看怪物信息">${objectSprite(enemy)}</button>
-        ${combatantFxMarkup("enemy")}
-        <button class="enemy-detail-button" type="button" onclick="showCurrentEnemyDetail()">详情</button>
-        <h2>${enemy.name}</h2>
-        ${enemy.affix ? `<small class="enemy-affix">${enemyAffixText(enemy)}</small>` : ""}
-        ${elementTags(enemy) ? `<small class="enemy-element">${elementTags(enemy)}</small>` : ""}
-        <div class="battle-meter enemy"><span style="width:${enemyPct}%"></span><b>${Math.max(0, Math.round(enemy.hp))}/${enemy.maxHp} HP</b></div>
-        <p>攻击 ${enemy.atk} · 防御 ${enemy.def}${enemy.skills?.length ? ` · 技能 ${enemy.skills.map((skill) => skill.name).join("/")}` : ""}</p>
-      </div>
-    </div>
-    ${renderBattleCommandPanel(mpMax)}
-  `;
+    battleStage.innerHTML = renderBattleViewMarkup({
+      assetForClass,
+      cls,
+      enemy,
+      enemyAffixText,
+      enemyPct,
+      hpMax,
+      hpPct,
+      mpMax,
+      mpPct,
+      objectSprite,
+      renderBattleCommandPanel,
+      sprite,
+      state
+    });
   }
 
   // 渲染战斗命令面板：普通行动、技能、补给和一键战斗。
+  function battleCommandPanelContext() {
+    return {
+      autoBattlePolicy,
+      battle,
+      battleSkillElementMatchText,
+      battleSkills,
+      currentBattleTurnState,
+      effectiveMaxHp,
+      effectiveMaxMp,
+      percentScore,
+      skillPreviewText,
+      state,
+      upgradedSkill
+    };
+  }
   function renderBattleCommandPanel(mpMax = effectiveMaxMp()) {
-    const policy = state.currentEnemy ? autoBattlePolicy(state.currentEnemy) : null;
-    const winRate = policy ? percentScore(policy.score) : null;
-    const turn = currentBattleTurnState();
-    const locked = turn.locked;
-    const lockAttrs = locked ? `disabled title="${turn.disabledTitle}"` : "";
-    const autoDisabled = locked || !policy?.allowed ? "disabled" : "";
-    if (locked) scheduleBattleUnlockRender();
-    return `
-    <div class="battle-command-panel">
-      ${battleTimelineMarkup(turn)}
-      <div class="battle-command-layout">
-        <div class="battle-basic-actions battle-command-section">
-          <div class="battle-panel-title">
-            <span>行动</span>
-            <small>${turn.actionLabel}</small>
-          </div>
-          <div class="battle-action-grid">
-            <button class="battle-action battle-action-attack" type="button" ${lockAttrs} onclick="attackEnemy('attack')">
-              <span class="battle-action-mark" aria-hidden="true">攻</span>
-              <span class="battle-action-copy"><b>普通攻击</b><small>稳定造成武器伤害</small></span>
-            </button>
-            <button class="battle-action battle-action-guard" type="button" ${lockAttrs} onclick="attackEnemy('defend')">
-              <span class="battle-action-mark" aria-hidden="true">守</span>
-              <span class="battle-action-copy"><b>防御</b><small>本回合减少伤害</small></span>
-            </button>
-          </div>
-        </div>
-        <div class="battle-skill-panel battle-command-section">
-          <div class="battle-panel-title">
-            <span>技能</span>
-            <small>MP ${Math.ceil(state.mp)}/${mpMax}</small>
-          </div>
-          <div class="battle-skill-grid">
-            ${renderSkillActionButtons("battle")}
-          </div>
-        </div>
-        <div class="battle-command-side">
-          <div class="battle-consumable-panel battle-command-section">
-            <div class="battle-panel-title">
-              <b>补给</b>
-              <small>消耗行动</small>
-            </div>
-            <div class="battle-consumable-grid">
-              ${renderBattlePotionButtons()}
-            </div>
-          </div>
-          <div class="battle-auto-panel battle-command-section">
-            <div class="battle-panel-title">
-              <span>战术</span>
-              ${policy ? `<small>${policy.label}</small>` : "<small>评估</small>"}
-            </div>
-            <button class="battle-action enemy-detail-action" type="button" onclick="showCurrentEnemyDetail()">
-              <span class="battle-action-mark" aria-hidden="true">情</span>
-              <span class="battle-action-copy"><b>怪物详情</b><small>查看当前敌人的属性与抗性</small></span>
-            </button>
-            <button class="battle-action auto" type="button" ${autoDisabled} ${locked ? `title="${turn.disabledTitle}"` : ""} onclick="autoBattle()">
-              <span class="battle-action-head"><b>一键战斗</b>${policy ? `<i class="battle-win-rate">胜率 ${winRate}%</i>` : ""}</span>
-              <small>${locked ? turn.shortHint : policy?.allowed ? "低风险普通怪可自动结算 3 回合" : policy?.reason || "需要评估"}</small>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+    const result = renderBattleCommandPanelMarkup(battleCommandPanelContext(), mpMax);
+    if (result.locked) scheduleBattleUnlockRender();
+    return result.markup;
   }
 
   function battleStatusPill(label, value, pct, kind, detail = "") {
@@ -785,93 +525,7 @@ export function createRenderRuntime(ctx) {
   }
 
   function currentBattleTurnState() {
-    const locked = isBattleInputLocked();
-    const phase = locked ? battle.phase || "waiting" : "player-turn";
-    if (!locked) {
-      return {
-        locked,
-        phase,
-        className: "ready",
-        icon: "令",
-        kicker: "行动权",
-        title: "轮到你行动",
-        detail: "选择攻击、技能或补给，下一次操作会推进回合。",
-        actionLabel: "可行动",
-        disabledTitle: "",
-        shortHint: ""
-      };
-    }
-    if (phase === "enemy-windup") {
-      return {
-        locked,
-        phase,
-        className: "windup enemy",
-        icon: "警",
-        kicker: "敌方锁定",
-        title: battle.message || "敌人正在逼近",
-        detail: "你的行动已生效，观察伤害与状态，准备承受反击。",
-        actionLabel: "反击将至",
-        disabledTitle: "敌人即将反击",
-        shortHint: "敌人即将反击"
-      };
-    }
-    if (phase === "enemy-action" || phase === "enemy-turn") {
-      return {
-        locked,
-        phase,
-        className: "impact enemy",
-        icon: "击",
-        kicker: "敌方行动",
-        title: battle.message || "敌人发动攻击",
-        detail: "敌人的伤害、闪避和护盾结算中，随后会回到你的回合。",
-        actionLabel: "结算中",
-        disabledTitle: "敌方行动结算中",
-        shortHint: "敌方行动结算中"
-      };
-    }
-    return {
-      locked,
-      phase,
-      className: "ready",
-      icon: "令",
-      kicker: "行动权",
-      title: "轮到你行动",
-      detail: "选择攻击、技能或补给，下一次操作会推进回合。",
-      actionLabel: "可行动",
-      disabledTitle: "",
-      shortHint: ""
-    };
-  }
-
-  function battleActionFeedMarkup() {
-    const feed = battle.actionFeed;
-    if (!feed) {
-      return `
-      <div class="battle-action-feed idle">
-        <i>战</i>
-        <div><b>等待交锋</b><span>敌人的关键行动会显示在这里。</span></div>
-      </div>
-    `;
-    }
-    const meta = feed.meta ? `<em>${escapeHtml(feed.meta)}</em>` : "";
-    return `
-      <div class="battle-action-feed ${escapeHtml(feed.kind || "info")}">
-        <i>${battleFeedIcon(feed.kind)}</i>
-        <div><b>${escapeHtml(feed.title || "战斗播报")}</b><span>${escapeHtml(feed.detail || "")}</span></div>
-        ${meta}
-      </div>
-    `;
-  }
-
-  function battleFeedIcon(kind) {
-    const icons = {
-      hit: "伤",
-      skill: "技",
-      shield: "盾",
-      heal: "愈",
-      evade: "闪"
-    };
-    return icons[kind] || "战";
+    return currentBattleTurnStateForPanel(state, battle);
   }
 
   function scheduleBattleUnlockRender() {
@@ -884,294 +538,59 @@ export function createRenderRuntime(ctx) {
     }, delay);
   }
 
-  function battleTimelineMarkup(turn) {
-    const history = Array.isArray(battle.actionTimeline) ? battle.actionTimeline : [];
-    const current = currentBattleTimelineNode(turn);
-    const entries = current ? [...history, current] : history;
-    const nodes = entries.length
-      ? entries
-          .map((entry, index) => battleTimelineNodeMarkup(entry, index, entry === current))
-          .join("")
-      : battleTimelineNodeMarkup(
-          {
-            seq: 0,
-            actor: "hero",
-            kind: "idle",
-            title: "战斗开始",
-            detail: "等待第一轮交锋。",
-            meta: "准备"
-          },
-          0,
-          true
-        );
-    return `<div class="battle-timeline" aria-label="战斗回合时间线"><div class="battle-timeline-rail">${nodes}</div></div>`;
-  }
-
-  function currentBattleTimelineNode(turn) {
-    if (!state.currentEnemy) return null;
-    if (turn.phase === "enemy-windup") {
-      return {
-        seq: "now",
-        actor: "enemy",
-        kind: "windup",
-        title: battle.message || `${state.currentEnemy.name}准备反击`,
-        detail: "敌方行动即将结算。",
-        meta: "预备"
-      };
-    }
-    if (turn.phase === "enemy-action" || turn.phase === "enemy-turn") {
-      return {
-        seq: "now",
-        actor: "enemy",
-        kind: "hit",
-        title: battle.message || `${state.currentEnemy.name}行动中`,
-        detail: "伤害与状态正在结算。",
-        meta: "结算"
-      };
-    }
-    return {
-      seq: "now",
-      actor: "hero",
-      kind: "ready",
-      title: "轮到你行动",
-      detail: "选择攻击、技能或补给。",
-      meta: "当前"
-    };
-  }
-
-  function battleTimelineNodeMarkup(entry, index, active = false) {
-    const actor = entry.actor === "enemy" ? "enemy" : "hero";
-    const side = index % 2 === 0 ? "top" : "bottom";
-    const actorText = actor === "hero" ? "你" : "敌";
-    const meta = entry.meta ? `<em>${escapeHtml(entry.meta)}</em>` : "";
-    return `
-      <article class="battle-timeline-node ${actor} ${side} ${escapeHtml(entry.kind || "info")} ${active ? "active" : ""}">
-        <div class="battle-timeline-card">
-          <b>${escapeHtml(entry.title || "战斗事件")}</b>
-          <span>${escapeHtml(entry.detail || "")}</span>
-          ${meta}
-        </div>
-        <i>${actorText}</i>
-      </article>
-    `;
-  }
-
   function battlePotionGroups() {
-    const groups = new Map();
-    for (const entry of state.inventory || []) {
-      if (entry.kind !== "potion") continue;
-      const key = `${entry.name}|${entry.effect}|${entry.amount}`;
-      const group = groups.get(key) || { ...entry, count: 0 };
-      group.count += 1;
-      groups.set(key, group);
-    }
-    return [...groups.values()];
+    return battlePotionGroupsForState(state);
   }
 
-  // 把背包药水按名称和效果分组，生成战斗中可用的补给按钮。
   function renderBattlePotionButtons() {
-    const potions = battlePotionGroups();
-    if (!potions.length) return `<p class="battle-empty-supplies">暂无药剂</p>`;
-    const turn = currentBattleTurnState();
-    const locked = turn.locked;
-    return potions
-      .slice(0, 4)
-      .map((entry) => {
-        const isHp = entry.effect === "hp";
-        const cap = isHp ? effectiveMaxHp() : effectiveMaxMp();
-        const current = isHp ? state.hp : state.mp;
-        const disabled = locked || current >= cap ? "disabled" : "";
-        const effectText = `${isHp ? "HP" : "MP"} +${entry.amount}`;
-        const note = locked ? turn.actionLabel : disabled ? "已满" : "立即恢复";
-        return `<button class="battle-consumable" type="button" ${disabled} ${locked ? `title="${turn.disabledTitle}"` : ""} onclick="useBattlePotion('${entry.id}')"><span class="battle-card-head"><b>${entry.name}</b><i>x${entry.count}</i></span><span class="battle-effect-text">${effectText}</span><small>${note}</small></button>`;
-      })
-      .join("");
+    return renderBattlePotionButtonsMarkup(battleCommandPanelContext());
   }
 
-  // 根据当前模式生成技能按钮，战斗模式会展示更完整的资源信息。
+  function battleSkillElementMatchText(skill) {
+    if (!state.currentEnemy || !skill.element) return "";
+    const multiplier = elementMultiplier(skill.element, state.currentEnemy, state.classId, {
+      pierceResist: !!skill.pierceResist || !!skill.branch?.pierceResist
+    });
+    const label = elementMatchLabel(multiplier);
+    if (!label && multiplier === 1) return "";
+    return `${label ? `${label} ` : ""}${Math.round(multiplier * 100)}%`;
+  }
   function renderSkillActionButtons(mode = "compact") {
-    const turn = currentBattleTurnState();
-    const locked = turn.locked;
-    const skills = battleSkills();
-    if (!skills.length) {
-      return mode === "battle"
-        ? `<p class="battle-empty-supplies">未携带技能</p>`
-        : `<p>未携带技能。</p>`;
-    }
-    return skills
-      .map((skill) => {
-        const upgraded = upgradedSkill(skill);
-        const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
-        const hasMp = state.mp >= upgraded.mp;
-        const cooldown = Math.max(0, Number(state.skillCooldowns?.[skill.id] || 0));
-        const displayCooldown = cooldown;
-        const ready = cooldown <= 0;
-        const disabled = locked || !hasMp || !ready ? "disabled" : "";
-        const title = locked
-          ? `title="${turn.disabledTitle}"`
-          : !ready
-            ? `title="冷却中，还需 ${displayCooldown} 回合"`
-            : !hasMp
-              ? `title="法力不足"`
-              : "";
-        if (mode === "battle") {
-          const baseCooldownText = `冷却 ${upgraded.cooldown || 0} 回合`;
-          const mpText = hasMp || locked ? `${upgraded.mp} MP` : `${upgraded.mp} MP不足`;
-          const cooldownMeta = `<span>${baseCooldownText}</span>${!ready ? `<span class="danger">剩余 ${displayCooldown}</span>` : ""}`;
-          const elementText = elementName(upgraded.element);
-          const branchText = upgraded.branch ? `${upgraded.branch.name} · ` : "";
-          const note = locked
-            ? turn.shortHint
-            : !ready
-              ? `冷却中，还需 ${displayCooldown} 回合`
-              : `${branchText}${elementText ? `${elementText}属性 · ` : ""}${skill.desc}`;
-          return `<button class="battle-skill-card" type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')"><span class="battle-card-head"><b>${skill.name}${level}</b><i>${mpText}</i></span><span class="skill-preview">${skillPreviewText(upgraded)}</span><span class="battle-skill-meta">${cooldownMeta}</span><small>${note}</small></button>`;
-        }
-        return `<button type="button" ${disabled} ${title} onclick="attackEnemy('skill', '${skill.id}')">${skill.name}${level} · ${skillPreviewText(upgraded)} · ${upgraded.mp} MP · 冷却 ${upgraded.cooldown || 0} 回合${!ready ? ` · 剩余 ${displayCooldown}` : ""}</button>`;
-      })
-      .join("");
+    return renderSkillActionButtonsMarkup(battleCommandPanelContext(), mode);
   }
 
   function battleFxClass(target) {
-    const fx = getBattleFx()?.[target];
-    if (!fx) return "";
-    return [`fx-${fx.type}`, fx.element ? `fx-element-${fx.element}` : ""]
-      .filter(Boolean)
-      .join(" ");
+    return battleFxClassMarkup(target);
   }
 
   function combatantFxMarkup(target) {
-    const fx = getBattleFx()?.[target];
-    if (!fx) return "";
-    const classes = [
-      `combat-fx`,
-      `combat-fx-${fx.type}`,
-      fx.element ? `combat-fx-element-${fx.element}` : ""
-    ]
-      .filter(Boolean)
-      .join(" ");
-    return `<span class="${classes}" style="--fx-key:${fx.seq}">${elementBurstMarkup(fx.element)}<b>${fx.text}</b><small>${fx.label}</small></span>`;
+    return combatantBattleFxMarkup(target);
   }
 
   function elementBurstMarkup(element) {
-    if (!element) return "";
-    return `<i class="element-burst" aria-hidden="true">${Array.from({ length: 8 }, () => "<i></i>").join("")}</i>`;
+    return elementBurstBattleMarkup(element);
   }
 
   function centerFxMarkup() {
-    const fx = getBattleFx()?.center;
-    if (!fx) return "";
-    return `<span class="center-fx center-fx-${fx.type}">${fx.text}</span>`;
+    return centerBattleFxMarkup();
   }
 
-  // 将地图物件转换成对应的精灵 HTML。
+
   function objectSprite(obj) {
-    if (["monster", "elite", "boss"].includes(obj.type)) return enemySprite(obj);
-    const map = {
-      monster: ["monster", ASSETS.monster, "怪物"],
-      elite: ["elite", ASSETS.elite, "精英怪"],
-      boss: ["boss", ASSETS.boss, "Boss"],
-      chest: ["chest", ASSETS.chest, "宝箱"],
-      lockedChest: ["locked-chest", ASSETS.chest, "上锁宝箱"],
-      altar: ["altar", ASSETS.altar, "祭坛"],
-      forge: ["forge", ASSETS.forge, "合成台"],
-      shop: ["merchant", ASSETS.shop, "商人"],
-      roomEvent: ["room-event", null, "探索事件"],
-      guideNpc: ["quest-npc", ASSETS.questNpc, "引路人"],
-      questNpc: ["quest-npc", ASSETS.questNpc, "委托人"],
-      rescueNpc: ["quest-npc", ASSETS.questNpc, "被困者"],
-      lockedDoor: ["locked-door", ASSETS.lockedDoor, "上锁房门"],
-      roomEntrance: ["room-entrance", ASSETS.door, "房门"],
-      fenceGate: ["fence-gate", ASSETS.fenceGate, "门栅"],
-      trap: ["trap", ASSETS.trap, "陷阱"],
-      portal: ["portal", ASSETS.portal, "传送门"],
-      stairsDown: ["stairs-down", null, "下行楼梯"],
-      stairsUp: ["stairs-up", null, "上行楼梯"]
-    };
-    const [cls, src, alt] = map[obj.type] || ["monster", ASSETS.monster, "怪物"];
-    return src ? sprite(cls, src, alt) : iconSprite(cls, alt);
+    return objectSpriteMarkup(obj);
   }
 
   function enemySprite(enemy) {
-    const variants = {
-      slime: ["monster", ASSETS.monster, "史莱姆"],
-      rat: ["monster rat", ASSETS.monsterRat, "洞窟鼠"],
-      bat: ["monster bat", ASSETS.monsterBat, "矿洞蝙蝠"],
-      wolf: ["monster wolf", ASSETS.monsterWolf, "冰霜狼"],
-      elite: ["elite", ASSETS.elite, "精英怪"],
-      boss: ["boss", ASSETS.boss, "Boss"]
-    };
-    const fallback = enemy.type === "boss" ? "boss" : enemy.type === "elite" ? "elite" : "slime";
-    const [cls, src, alt] = variants[enemy.variant || fallback] || variants[fallback];
-    return sprite(cls, src, alt);
+    return objectSpriteMarkup(enemy);
   }
 
-  // 为地图物件添加短标签，帮助小尺寸格子快速识别对象。
   function badgeForObject(type) {
-    const labels = {
-      monster: "怪",
-      elite: "精",
-      boss: "王",
-      chest: "箱",
-      lockedChest: "锁",
-      altar: "坛",
-      forge: "锻",
-      shop: "商",
-      roomEvent: "事",
-      guideNpc: "引",
-      questNpc: "托",
-      rescueNpc: "救",
-      lockedDoor: "锁",
-      fenceGate: "栅",
-      trap: "陷",
-      portal: "门",
-      stairsDown: "下",
-      stairsUp: "上"
-    };
-    return labels[type] ? `<span class="tile-badge badge-${type}">${labels[type]}</span>` : "";
+    return badgeForObjectMarkup(type);
   }
 
-  // 生成地图格子的可读描述，用于 aria-label 和选中格提示。
   function tileLabel(cell, isPlayer = false, reveal = false) {
-    if (!reveal && !cell.seen) return "未知区域";
-    if (isPlayer) return `你的位置：${CLASSES[state.classId].name}`;
-    if (cell.terrain === "wall") return "墙壁：无法通行";
-    if (cell.terrain === "fence") return "铁栅栏：围住宝箱，寻找门栅入口";
-    if (cell.terrain === "lava") return "岩浆：无法通行";
-    if (cell.object?.type === "lockedDoor")
-      return `${cell.object.roomName || "上锁房门"}：需要${cell.object.keyName || "指定钥匙"}，或消耗 1 把万能钥匙`;
-    if (cell.terrain === "door") return "房间门：进入封闭房间";
-    if (!cell.object) return "地面：可通行";
-    if (cell.object.type === "trap") return "地面：可通行";
-    const labels = {
-      monster: "普通怪物：接触后进入战斗",
-      elite: `精英怪：更危险，掉落更好${cell.object.affix ? `；${enemyAffixText(cell.object)}` : ""}`,
-      boss: "Boss：本层首领",
-      chest: "宝箱：可能获得装备、符文或金币",
-      lockedChest: "上锁宝箱：需要符文钥匙。钥匙可以从附近钥匙守卫、Boss或中立委托人处获得",
-      altar: "符文祭坛：恢复生命和法力",
-      forge: "合成台：强化装备或合成符文",
-      shop: "商人：购买药水和补给",
-      roomEvent: cell.object.name ? `${cell.object.name}：可互动事件` : "可互动事件",
-      guideNpc: `${cell.object.npcName || "引路人"}：说明地牢背景，并交给你第一张残页`,
-      questNpc: cell.object.npcName
-        ? `${cell.object.npcName}：提供${cell.object.roomName || roomName(cell.object.roomId)}相关委托`
-        : "中立委托人：完成任务获得钥匙和金币",
-      rescueNpc: `${cell.object.npcName || "被困者"}：清理${roomName(cell.object.roomId)}后确认救援`,
-      lockedDoor: `${cell.object.roomName || "上锁房门"}：需要${cell.object.keyName || "指定钥匙"}或万能钥匙`,
-      roomEntrance: `${cell.object.roomName || roomName(cell.object.roomId) || "房间"}：未上锁入口，可直接通过`,
-      fenceGate: "符文门栅：有钥匙后可打开围栏入口",
-      trap: "陷阱：触发后受到伤害",
-      portal: "传送门：进入下一层",
-      stairsDown: cell.object.locked
-        ? `封印楼梯：击败${cell.object.seal?.targetName || "封印守卫"}后才能进入下一层`
-        : "下行楼梯：进入下一层",
-      stairsUp: "上行楼梯：返回上一层"
-    };
-    return labels[cell.object.type] || "未知物体";
+    return tileLabelForCell(cell, { state, roomName, enemyAffixText }, isPlayer, reveal);
   }
-
-  // 返回最近选中地图格子的描述文本。
   function selectedTileText() {
     if (!ui.selectedTile || !state?.map) return "";
     const cell = state.map.cells[ui.selectedTile.y]?.[ui.selectedTile.x];
@@ -1184,31 +603,25 @@ export function createRenderRuntime(ctx) {
 
   // 根据职业选择玩家精灵资源。
   function assetForClass(classId) {
-    if (classId === "mage") return ASSETS.mage;
-    if (classId === "ranger") return ASSETS.ranger;
-    return ASSETS.warrior;
+    return assetForClassMarkup(classId);
   }
 
   // 生成地图和面板共用的图片 HTML。
   function imageTag(src, alt) {
-    return `<img src="${src}" alt="${alt}" draggable="false">`;
+    return imageTagMarkup(src, alt);
   }
 
   // 用对象专属 class 包装图片，方便 CSS 统一控制尺寸和动画。
   function sprite(cls, src, alt) {
-    return `<span class="sprite ${cls}">${imageTag(src, alt)}</span>`;
+    return spriteMarkup(cls, src, alt);
   }
 
   function iconSprite(cls, alt) {
-    return `<span class="sprite icon-sprite ${cls}" aria-label="${alt}"></span>`;
+    return iconSpriteMarkup(cls, alt);
   }
 
   function iconClassForType(type) {
-    if (type === "stairsDown") return "stairs-down";
-    if (type === "stairsUp") return "stairs-up";
-    if (type === "lockedDoor") return "locked-door";
-    if (type === "roomEntrance") return "room-entrance";
-    return type;
+    return iconClassForTypeMarkup(type);
   }
 
   // 选中地图格子；如果格子相邻，则直接尝试移动。
@@ -1253,102 +666,19 @@ export function createRenderRuntime(ctx) {
         }
       });
     }
-    showModal(`${enemy.name} 情报`, enemyDetailMarkup(enemy, mode), actions);
-  }
-
-  function enemyDetailMarkup(enemy, mode = "map") {
-    if (mode === "map" && !canScoutEnemy(enemy)) {
-      return `
-        <div class="enemy-detail">
-          <div class="enemy-detail-head">
-            ${objectSprite(enemy)}
-            <div>
-              <span>${enemyKindLabel(enemy)}</span>
-              <b>${escapeHtml(enemy.name)}</b>
-              <small>符文干扰过强，无法在战斗前读取完整属性。</small>
-            </div>
-          </div>
-          <p class="enemy-scout-note">Boss、钥匙守卫、房间首领和特殊目标需要进入战斗后再确认信息。</p>
-        </div>
-      `;
-    }
-    const scout = mode === "map";
-    const risk = state.currentEnemy === enemy ? autoBattlePolicy(enemy) : battleRisk(enemy);
-    const skills = enemy.skills?.length
-      ? enemy.skills.map((skill) => escapeHtml(skill.name)).join(" / ")
-      : "无";
-    const weaknesses = elementList(enemy.weaknesses) || "无";
-    const resistances = elementList(enemy.resistances) || "无";
-    return `
-      <div class="enemy-detail">
-        <div class="enemy-detail-head">
-          ${objectSprite(enemy)}
-          <div>
-            <span>${enemyKindLabel(enemy)}${enemy.affix ? ` · ${escapeHtml(enemyAffixText(enemy))}` : ""}</span>
-            <b>${escapeHtml(enemy.name)}</b>
-            <small>${risk ? `${risk.label} · 胜率估算 ${Math.round(risk.score * 100)}%` : "暂无评估"}</small>
-          </div>
-        </div>
-        <div class="enemy-stat-grid">
-          ${enemyStatCell("生命", Math.max(0, Math.round(enemy.hp)), Math.round(enemy.maxHp || enemy.hp || 0), effectiveMaxHp(), scout)}
-          ${enemyStatCell("攻击", enemy.atk, null, enemyAtkBenchmark(), scout)}
-          ${enemyStatCell("防御", enemy.def, null, Math.max(totals().atk || 0, totals().mag || 0), scout)}
-          ${enemyStatCell("速度", enemy.spd, null, totals().spd || 0, scout)}
-        </div>
-        <div class="equipment-detail enemy-detail-rows">
-          <div class="detail-row"><b>元素</b><span>${elementTags(enemy) || "无"}</span></div>
-          <div class="detail-row"><b>弱点</b><span>${weaknesses}</span></div>
-          <div class="detail-row"><b>抗性</b><span>${resistances}</span></div>
-          <div class="detail-row"><b>技能</b><span>${skills}</span></div>
-        </div>
-        ${scout ? `<p class="enemy-scout-note">“?” 表示该项超出当前角色的战前判断范围，进入战斗后可查看完整数值。</p>` : ""}
-      </div>
-    `;
-  }
-
-  function enemyStatCell(label, value, maxValue, benchmark, scout) {
-    const masked = scout && shouldMaskEnemyStat(value, benchmark);
-    const display = masked ? "?" : maxValue == null ? Math.round(value || 0) : `${Math.round(value || 0)}/${maxValue}`;
-    return `<div class="enemy-stat-cell ${masked ? "masked" : ""}"><span>${label}</span><b>${display}</b></div>`;
-  }
-
-  function shouldMaskEnemyStat(value, benchmark) {
-    const safeValue = Number(value || 0);
-    const safeBenchmark = Math.max(1, Number(benchmark || 0));
-    return safeValue >= Math.max(safeBenchmark * 1.45, safeBenchmark + 14);
-  }
-
-  function enemyAtkBenchmark() {
-    const t = totals();
-    return Math.max(1, Number(t.def || 0) * 1.15 + Number(t.res || 0) * 0.3 + 8);
-  }
-
-  function elementList(ids = []) {
-    return ids.map((id) => elementName(id) || id).filter(Boolean).join(" / ");
-  }
-
-  function isEnemyObject(obj) {
-    return !!obj && ["monster", "elite", "boss"].includes(obj.type);
-  }
-
-  function canScoutEnemy(enemy) {
-    return (
-      isEnemyObject(enemy) &&
-      enemy.type !== "boss" &&
-      !enemy.roomBoss &&
-      !enemy.dropsKey &&
-      !enemy.rare &&
-      !enemy.sealId &&
-      !enemy.bossProfile
+    showModal(
+      `${enemy.name} 情报`,
+      enemyDetailMarkup(enemy, mode, {
+        autoBattlePolicy,
+        battleRisk,
+        currentEnemy: state.currentEnemy,
+        effectiveMaxHp,
+        enemyAffixText,
+        objectSprite,
+        totals
+      }),
+      actions
     );
-  }
-
-  function enemyKindLabel(enemy) {
-    if (enemy.type === "boss") return "Boss";
-    if (enemy.roomBoss) return "房间首领";
-    if (enemy.dropsKey) return "钥匙守卫";
-    if (enemy.type === "elite") return "精英";
-    return "普通怪物";
   }
 
   function isAdjacentToPlayer(cell) {
@@ -1359,56 +689,31 @@ export function createRenderRuntime(ctx) {
   function renderContext() {
     const enemy = state.currentEnemy;
     if (enemy) {
-      const risk = battleRisk(enemy);
-      const turn = currentBattleTurnState();
-      const locked = turn.locked;
-      const disabled = locked ? `disabled title="${turn.disabledTitle}"` : "";
-      $("contextTitle").textContent =
-        `${enemy.name} ${Math.max(0, Math.round(enemy.hp))}/${enemy.maxHp}`;
-      $("contextBody").innerHTML = `
-      <div class="item-row"><div>一键战斗评估<small>${locked ? turn.title : `${risk.label}，胜率估算 ${Math.round(risk.score * 100)}%`}</small></div><button type="button" ${disabled} onclick="autoBattle()">一键战斗</button></div>
-      <button type="button" ${disabled} onclick="attackEnemy('attack')">普通攻击</button>
-      ${renderSkillActionButtons()}
-      <button type="button" ${disabled} onclick="attackEnemy('defend')">防御</button>
-      ${renderLoreShortcut()}
-    `;
+      const panel = battleContextMarkup({
+        enemy,
+        risk: battleRisk(enemy),
+        turn: currentBattleTurnState(),
+        renderSkillActionButtons,
+        renderLoreShortcut
+      });
+      $("contextTitle").textContent = panel.title;
+      $("contextBody").innerHTML = panel.body;
       return;
     }
+    const tutorial = renderTutorialCard();
+    const loreShortcut = renderLoreShortcut();
     const cell = state.map.cells[state.player.y][state.player.x];
-    if (cell.object?.type === "shop") {
-      $("contextTitle").textContent = "商人";
-      $("contextBody").innerHTML = `
-      <div class="tile-info">商人会打开交易弹窗，可购买补给、售出装备；装备分解也在商人交易窗口里。</div>
-      <button type="button" onclick="openMerchant()">和商人交谈</button>
-      ${renderLoreShortcut()}
-    `;
-    } else if (cell.object?.type === "forge") {
-      $("contextTitle").textContent = "合成台";
-      $("contextBody").innerHTML = `
-      <div class="tile-info">合成台用于强化已装备的装备。消耗金币和强化石，不在商人或祭坛处强化。</div>
-      <button type="button" onclick="openForge()">打开合成台</button>
-      ${renderLoreShortcut()}
-    `;
-    } else {
-      $("contextTitle").textContent = "行动";
-      const selected = selectedTileText();
-      $("contextBody").innerHTML = `
-      ${selected ? `<div class="tile-info">${selected}</div>` : ""}
-      <p>点击相邻格或使用方向键移动。探索宝箱、祭坛、商人和传送门。</p>
-      ${renderLoreShortcut()}
-    `;
-    }
+    const objectPanel = objectContextMarkup(cell.object?.type || "", tutorial, loreShortcut);
+    const panel = objectPanel || explorationContextMarkup(tutorial, selectedTileText(), loreShortcut);
+    $("contextTitle").textContent = panel.title;
+    $("contextBody").innerHTML = panel.body;
+  }
+  function renderTutorialCard() {
+    return renderTutorialCardMarkup(state);
   }
 
   function renderLoreShortcut() {
-    const count = unlockedLoreEntries().length;
-    if (!count) return "";
-    return `
-      <button class="lore-shortcut" type="button" onclick="openLoreArchive()">
-        <span>地牢残页</span>
-        <small>${count}/${LORE_TOTAL}</small>
-      </button>
-    `;
+    return renderLoreShortcutMarkup(state);
   }
 
   // 渲染当前侧边栏标签页。
@@ -1419,147 +724,27 @@ export function createRenderRuntime(ctx) {
   }
 
   function renderQuestList() {
-    const quests = ensureQuestList();
-    const main = renderMainQuestRow();
-    if (!quests.length) {
-      return `<section class="quest-list">${main}<p>暂无委托。和商人或委托人交谈后，可以在这里追踪目标。</p></section>`;
-    }
-    const rows = quests
-      .map((quest) => {
-        const base = QUEST_DEFS[quest.id] || {
-          title: "未知任务",
-          giverName: "未知",
-          desc: "",
-          rewardGold: 0
-        };
-        const def =
-          quest.id === "rescueRoom"
-            ? {
-                ...base,
-                title: `${quest.roomName || "房间"}救援`,
-                desc: `清理${quest.roomName || "目标房间"}并确认${quest.rescueName || "被困者"}安全。`
-              }
-            : base;
-        const location = questLocationText(quest);
-        const stateText = quest.claimed
-          ? "已领取"
-          : quest.completed
-            ? "可领取"
-            : quest.roomCleared
-              ? "待救援"
-              : "进行中";
-        const rewardGold = questRewardGold(def, quest.floor);
-        const rewards = [
-          def.rewardKeys ? `钥匙 +${def.rewardKeys}` : "",
-          rewardGold ? `金币 +${rewardGold}` : "",
-          def.rewardSkillPoints ? `技能点 +${def.rewardSkillPoints}` : "",
-          def.rewardSkillDust ? `技能尘 +${def.rewardSkillDust}` : "",
-          def.rewardRune ? "随机符文" : "",
-          def.rewardBeacon ? "商路信标" : "",
-          def.rewardPotion ? (def.rewardPotion === "mp" ? "法力药水 +1" : "生命药水 +1") : ""
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        const targetKind = questTargetKindText(def);
-        return `
-      <article class="quest-row inventory-card ${quest.completed && !quest.claimed ? "ready" : ""}">
-        <div class="item-main">
-          <span class="item-kicker">${def.giverName}</span>
-          <b>${def.title}</b>
-          <small>${def.desc}</small>
-          <span class="item-tags"><i>目标${location}</i>${targetKind ? `<i>${targetKind}</i>` : ""}<i>${quest.kills}/${quest.target}</i>${rewards ? `<i>${rewards}</i>` : ""}</span>
-        </div>
-        <span class="quest-state">${stateText}</span>
-      </article>
-    `;
-      })
-      .join("");
-    return `<section class="quest-list">${main}${rows}</section>`;
-  }
-
-  function questTargetKindText(def) {
-    if (def.targetKind === "elite") return "精英目标";
-    if (def.targetKind === "runic") return "符文回声";
-    if (def.targetKind === "monster") return "普通怪物";
-    return "";
-  }
-
-  function renderMainQuestRow() {
-    const lore = ensureLoreState(state);
-    const hasOpening = lore.chapters.includes("threshold");
-    const nextChapter = LORE_CHAPTERS.find((chapter) => !lore.chapters.includes(chapter.id));
-    const title = hasOpening ? "追查符文地牢" : "寻找入口引路人";
-    const desc = hasOpening
-      ? "收集地牢残页，弄清入口为什么会移动，以及符文正在记录什么。"
-      : "入口附近有人在等你。先听完他的说明，再带着第一张残页进入地牢。";
-    const stateText = hasOpening ? "进行中" : "待接触";
-    const target = hasOpening
-      ? nextChapter
-        ? `深入第 ${nextChapter.floor} 层`
-        : "抵达王座深处"
-      : "和旧灯引路人交谈";
-    return `
-      <article class="quest-row inventory-card main-quest-row">
-        <div class="item-main">
-          <span class="item-kicker">主线</span>
-          <b>${title}</b>
-          <small>${desc}</small>
-          <span class="item-tags"><i>${target}</i><i>残页 ${unlockedLoreEntries().length}/${LORE_TOTAL}</i></span>
-        </div>
-        <span class="quest-state">${stateText}</span>
-      </article>
-    `;
+    return renderQuestListMarkup(questPanelContext());
   }
 
   function unlockedLoreEntries() {
-    const lore = ensureLoreState(state);
-    return [
-      ...lore.chapters.map(loreChapterById).filter(Boolean).map((entry) => ({
-        type: "主线",
-        floorText: `第 ${entry.floor} 层`,
-        title: entry.title,
-        text: entry.text
-      })),
-      ...lore.pages.map(lorePageById).filter(Boolean).map((entry) => ({
-        type: "残页",
-        floorText: `第 ${entry.minFloor} 层后`,
-        title: entry.title,
-        text: entry.text
-      }))
-    ];
+    return unlockedLoreEntriesForState(state);
   }
 
   function openLoreArchive(index = 0) {
-    const entries = unlockedLoreEntries();
-    if (!entries.length) {
-      showEvent("地牢残页", "<p>还没有发现可翻阅的残页。</p>", "知道了");
-      return;
-    }
-    const safeIndex = Math.max(0, Math.min(entries.length - 1, Number(index) || 0));
-    const entry = entries[safeIndex];
-    showModal(
-      "地牢残页",
-      `
-      <article class="lore-page">
-        <span class="item-kicker">${entry.type} · ${entry.floorText} · ${safeIndex + 1}/${entries.length}</span>
-        <b>${escapeHtml(entry.title)}</b>
-        <p>${escapeHtml(entry.text)}</p>
-      </article>
-    `,
-      [
-        {
-          text: "上一页",
-          action: () => openLoreArchive(safeIndex - 1),
-          disabled: safeIndex === 0
-        },
-        {
-          text: "下一页",
-          action: () => openLoreArchive(safeIndex + 1),
-          disabled: safeIndex >= entries.length - 1
-        },
-        { text: "关闭", action: closeModal }
-      ]
-    );
+    openLoreArchivePanel(index, questPanelContext());
+  }
+
+  function questPanelContext() {
+    return {
+      closeModal,
+      ensureQuestList,
+      questLocationText,
+      questRewardGold,
+      showEvent,
+      showModal,
+      state
+    };
   }
 
   // 渲染背包列表和物品操作按钮。
@@ -1568,53 +753,27 @@ export function createRenderRuntime(ctx) {
   }
 
   function inventoryGroupMarkup() {
-    const potions = inventoryConsumableGroups();
-    const allEquipment = state.inventory
-      .filter((entry) => entry.kind === "equip")
-      .sort((a, b) => itemScore(b) - itemScore(a));
-    const equipment = equipmentFilterRows(allEquipment);
-    const groups = {
-      potions: inventoryGroup(
-        "potions",
-        "药剂",
-        potions.length ? potions.map(potionRow).join("") : `<p>暂无药剂。</p>`
-      ),
-      equipment: inventoryGroup(
-        "equipment",
-        "装备",
-        `${equipmentFilterControl()}${equipment.length ? equipment.map(equipmentInventoryRow).join("") : `<p>暂无符合筛选的装备。</p>`}`
-      ),
-      materials: inventoryGroup("materials", "材料", materialRows()),
-      runes: inventoryGroup("runes", "符文", runeRows())
+    return renderInventoryGroupMarkup(inventoryPanelContext());
+  }
+
+  function inventoryPanelContext() {
+    return {
+      activeEquipmentFilter: ui.activeEquipmentFilter,
+      activeInventoryTab: ui.activeInventoryTab,
+      equipmentScoreBadge,
+      equipmentSummary,
+      isBetterThanEquipped,
+      runeEffectText,
+      state
     };
-    return `${inventorySubtabs()}${groups[ui.activeInventoryTab] || groups.equipment}`;
   }
 
   function equipmentFilterRows(equipment) {
-    if (ui.activeEquipmentFilter === "all") return equipment;
-    return equipment.filter((entry) => entry.slot === ui.activeEquipmentFilter);
+    return inventoryEquipmentFilterRows(inventoryPanelContext(), equipment);
   }
 
   function equipmentFilterControl() {
-    const options = [["all", "全部"], ...SLOTS.map((slot) => [slot, SLOT_NAMES[slot]])];
-    return `
-    <label class="inventory-filter">
-      <span>类型</span>
-      <select onchange="selectEquipmentFilter(this.value)">
-        ${options.map(([value, label]) => `<option value="${value}" ${ui.activeEquipmentFilter === value ? "selected" : ""}>${label}</option>`).join("")}
-      </select>
-    </label>
-  `;
-  }
-
-  function inventorySubtabs() {
-    const tabs = [
-      ["potions", "药剂"],
-      ["equipment", "装备"],
-      ["materials", "材料"],
-      ["runes", "符文"]
-    ];
-    return `<div class="inventory-subtabs">${tabs.map(([id, label]) => `<button type="button" data-inventory-tab="${id}" class="${ui.activeInventoryTab === id ? "active" : ""}" onclick="selectInventoryTab('${id}')">${label}</button>`).join("")}</div>`;
+    return inventoryEquipmentFilterControl(inventoryPanelContext());
   }
 
   function selectInventoryTab(tab) {
@@ -1627,49 +786,12 @@ export function createRenderRuntime(ctx) {
     renderInventory();
   }
 
-  function inventoryGroup(type, title, body) {
-    return `<section class="inventory-group inventory-group-${type}"><h3>${title}</h3>${body}</section>`;
-  }
-
-  function inventoryConsumableGroups() {
-    const groups = new Map();
-    for (const entry of state.inventory || []) {
-      if (!["potion", "teleport"].includes(entry.kind)) continue;
-      const key =
-        entry.kind === "potion"
-          ? `${entry.kind}|${entry.name}|${entry.effect}|${entry.amount}`
-          : `${entry.kind}|${entry.name}`;
-      const group = groups.get(key) || { ...entry, count: 0 };
-      group.count += 1;
-      groups.set(key, group);
-    }
-    return [...groups.values()].sort((a, b) => itemScore(b) - itemScore(a));
-  }
-
   function potionRow(entry) {
-    const count = entry.count || 1;
-    if (entry.kind === "teleport") {
-      return `<div class="item-row consumable-row inventory-card"><div class="item-main"><span class="item-kicker">传送</span><b>${entry.name}</b><small>传送到已探索楼层的商人、委托人或合成台附近</small></div><div class="item-side"><span class="item-quantity">x${count}</span><div class="item-actions"><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div></div></div>`;
-    }
-    return `<div class="item-row consumable-row inventory-card"><div class="item-main"><span class="item-kicker">${entry.effect === "hp" ? "生命药剂" : "法力药剂"}</span><b>${entry.name}</b><span class="item-tags"><i>恢复 ${entry.amount} ${entry.effect === "hp" ? "生命" : "法力"}</i><i>评分 ${itemScore(entry)}</i></span></div><div class="item-side"><span class="item-quantity">x${count}</span><div class="item-actions"><button type="button" onclick="confirmUseItem('${entry.id}')">使用</button></div></div></div>`;
+    return inventoryPotionRow(entry);
   }
 
   function equipmentInventoryRow(entry) {
-    const better = isBetterThanEquipped(entry);
-    const hasCurrent = !!state.equipment?.[entry.slot];
-    const compare = hasCurrent ? equipmentScoreBadge(entry, "inline-equipment-compare") : "";
-    const restriction = equipmentRestrictionText(entry, state.classId);
-    const equipDisabled = restriction ? `disabled title="${restriction}"` : "";
-    return `<div class="item-row equip-row equipment-card inventory-card ${better ? "better-equipment" : ""}">
-    <div class="item-main"><span class="item-kicker">${SLOT_NAMES[entry.slot]} · ${entry.quality}${restriction ? " · 职业不可用" : ""}</span><b>${entry.name}</b>${equipmentSummary(entry, restriction)}</div>
-    <div class="item-side">
-      ${compare ? `<div class="equipment-compare-corner">${compare}</div>` : ""}
-      <div class="equipment-actions inventory-equipment-actions">
-        <button type="button" onclick="showInventoryEquipmentDetail('${entry.id}')">详情</button>
-        <button type="button" ${equipDisabled} onclick="confirmEquipItem('${entry.id}')">装备</button>
-      </div>
-    </div>
-  </div>`;
+    return inventoryEquipmentInventoryRow(inventoryPanelContext(), entry);
   }
 
   function showInventoryEquipmentCompare(id) {
@@ -1692,13 +814,7 @@ export function createRenderRuntime(ctx) {
     }
     showModal(
       `${entry.name} 对比`,
-      `
-    <div class="equipment-detail">
-      <div class="detail-row"><b>候选装备</b><span>${entry.name} · 评分 ${itemScore(entry)}</span></div>
-      <div class="detail-row"><b>当前装备</b><span>${current.name} · 评分 ${itemScore(current)}</span></div>
-      <div class="detail-row"><b>差值</b><span>${equipmentCompareText(entry)}</span></div>
-    </div>
-  `,
+      inventoryEquipmentCompareMarkup(entry, current, itemScore, equipmentCompareText),
       actions
     );
   }
@@ -1734,72 +850,37 @@ export function createRenderRuntime(ctx) {
   }
 
   function materialRows() {
-    const materials = (Object.entries(state.materials || {}) as Array<[string, number]>).filter(
-      ([, count]) => count > 0
-    );
-    if ((state.keys || 0) > 0) materials.unshift(["符文钥匙", state.keys]);
-    if ((state.universalKeys || 0) > 0) materials.unshift(["万能钥匙", state.universalKeys]);
-    for (const [keyId, count] of Object.entries(state.doorKeys || {}) as Array<
-      [string, number]
-    >) {
-      if (count > 0) materials.unshift([state.doorKeyNames?.[keyId] || "房门钥匙", count]);
-    }
-    return materials.length
-      ? materials
-          .map(
-            ([name, count]) =>
-              `<div class="item-row inventory-card"><div class="item-main"><span class="item-kicker">材料</span><b>${name}</b></div><div class="item-side"><span class="item-quantity">x${count}</span></div></div>`
-          )
-          .join("")
-      : `<p>暂无材料。</p>`;
+    return inventoryMaterialRows(state);
   }
 
   function runeRows() {
-    const runes = runeEntries().filter(([, count]) => count > 0);
-    return runes.length
-      ? runes
-          .map(
-            ([name, count]) =>
-              `<div class="item-row rune-row inventory-card"><div class="item-main"><span class="item-kicker">符文</span><b>${name}符文</b><small>${runeEffectText(name)}</small></div><div class="item-side"><span class="item-quantity">x${count}</span><div class="item-actions"><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button></div></div></div>`
-          )
-          .join("")
-      : `<p>暂无符文。</p>`;
+    return inventoryRuneRows(inventoryPanelContext());
   }
 
   // 渲染已装备物品和强化控制。
   function renderEquipment() {
-    $("tabBody").innerHTML = SLOTS.map((slot) => {
-      const eq = state.equipment[slot];
-      const disabledReason = enhanceDisabledReason(slot);
-      const actions = eq
-        ? `<button type="button" ${disabledReason ? "disabled" : ""} title="${disabledReason || "强化"}" onclick="confirmEnhance('${slot}')">强化</button><button type="button" onclick="confirmUnequip('${slot}')">拆下</button>`
-        : `<button type="button" disabled>空位</button>`;
-      return `<div class="item-row equipment-card equipped-row inventory-card"><div class="item-main"><span class="item-kicker">${SLOT_NAMES[slot]}${eq ? equippedStateBadge() : ""}</span>${eq ? `<b class="equipment-name">${eq.name}</b>${equipmentSummary(eq, disabledReason ? "不可强化" : "")}` : `<b>空位</b><small>未装备</small>`}</div><div class="item-side equipment-actions">${actions}</div></div>`;
-    }).join("");
+    $("tabBody").innerHTML = renderEquipmentPanelMarkup(equipmentPanelContext());
   }
 
   // 渲染材料、符文库存和符文合成控制。
   function renderCraft() {
-    const runes = runeEntries().filter(([, count]) => count > 0);
-    $("tabBody").innerHTML = `
-    <div class="item-row"><div>材料<small>强化石 ${state.materials["强化石"] || 0}，魔尘 ${state.materials["魔尘"] || 0}</small></div></div>
-    ${runes.length ? runes.map(([name, count]) => `<div class="item-row"><div>${name}符文<small>${runeEffectText(name)}</small></div><button type="button" ${count >= 3 ? "" : "disabled"} onclick="confirmCraftRune('${name}')">合成</button><span class="item-quantity">x${count}</span></div>`).join("") : "<p>暂无符文。</p>"}
-  `;
+    $("tabBody").innerHTML = renderCraftPanelMarkup(equipmentPanelContext());
+  }
+
+  function equipmentPanelContext() {
+    return {
+      enhanceDisabledReason,
+      equippedStateBadge,
+      equipmentSummary,
+      runeEffectText,
+      runeEntries,
+      state
+    };
   }
 
   // 渲染职业技能列表和技能升级按钮。
   function skillLoadoutMarkup(equipped = battleSkills(), interactive = true) {
-    const slots = Array.from({ length: battleSkillLimit }, (_, index) => {
-      const skill = equipped[index];
-      const action = interactive ? ` onclick="openSkillLoadout()"` : "";
-      if (!skill) {
-        return `<button class="skill-slot empty" type="button"${action}><span>空位</span><small>点击装备技能</small></button>`;
-      }
-      const upgraded = upgradedSkill(skill);
-      const level = upgraded.level ? ` Lv.${upgraded.level}` : "";
-      return `<button class="skill-slot equipped" type="button"${action}><span>${skill.name}${level}</span><small>${skillPreviewText(upgraded)} · ${upgraded.mp} MP</small></button>`;
-    }).join("");
-    return `<section class="skill-loadout"><div class="skill-loadout-head"><div><span>已装备技能</span><b>${equipped.length}/${battleSkillLimit}</b></div>${interactive ? `<button type="button" onclick="openSkillLoadout()">调整</button>` : ""}</div><div class="skill-loadout-slots">${slots}</div></section>`;
+    return skillLoadoutPanelMarkup(skillPanelContext(), equipped, interactive);
   }
 
   function changeBattleSkillFromModal(skillId) {
@@ -1853,22 +934,9 @@ export function createRenderRuntime(ctx) {
     syncState();
     const learned = classSkills().filter((skill) => isSkillLearned(skill.id));
     const equipped = battleSkills();
-    const options = learned
-      .map((skill) => {
-        const upgraded = upgradedSkill(skill);
-        return `<option value="${skill.id}">${skill.name} Lv.${upgraded.level} · ${skillPreviewText(upgraded)}</option>`;
-      })
-      .join("");
-    const picker = learned.length
-      ? Array.from({ length: battleSkillLimit }, (_, index) => {
-          const skill = equipped[index];
-          const upgraded = skill ? upgradedSkill(skill) : null;
-          return `<div class="skill-picker-row ${skill ? "equipped" : ""}"><div class="item-main"><span class="item-kicker">技能槽 ${index + 1}</span><b>${skill ? `${skill.name} Lv.${upgraded.level}` : "空位"}</b>${skill ? `<small>${upgraded.branch?.desc || skill.desc}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i></span>` : `<small>选择一个已学会技能装备到这里。</small>`}</div><select onchange="setBattleSkillSlot(${index}, this.value)"><option value="" ${skill ? "" : "selected"}>空位</option>${options.replace(`value="${skill?.id}"`, `value="${skill?.id}" selected`)}</select></div>`;
-        }).join("")
-      : `<p>还没有已学会的技能。</p>`;
     showModal(
       "调整已装备技能",
-      `<div class="skill-loadout-modal"><div class="skill-picker-list">${picker}</div></div>`,
+      skillLoadoutModalMarkup(skillPanelContext(), learned, equipped),
       [
         {
           text: "完成",
@@ -1882,48 +950,29 @@ export function createRenderRuntime(ctx) {
   }
 
   function renderSkills() {
-    const skills = classSkills();
-    const learnedCount = skills.filter((skill) => isSkillLearned(skill.id)).length;
-    const equippedCount = battleSkills().length;
-    $("tabBody").innerHTML = `
-    <div class="item-row"><div>技能资源<small>技能点 ${state.skillPoints || 0}，技能尘 ${state.skillDust || 0} · 已学 ${learnedCount}/${skills.length} · 携带 ${equippedCount}/${battleSkillLimit}</small></div></div>
-    ${skillLoadoutMarkup()}
-    ${skills
-      .map((skill) => {
-        const learned = isSkillLearned(skill.id);
-        const equipped = isSkillEquipped(skill.id);
-        const learnable = canLearnSkill(skill.id);
-        const upgraded = upgradedSkill(skill);
-        const cost = skillUpgradeCost(skill.id);
-        const upgradeDisabled = learned && canUpgradeSkill(skill.id) ? "" : "disabled";
-        const equipDisabled = learned ? "" : "disabled";
-        const learnState = learned ? (equipped ? "已携带" : "已学会") : learnable ? "可学习" : "未满足前置";
-        const requirement = skillRequirementText(skill);
-        const lockClass = learned ? "" : learnable ? "learnable" : "locked unmet";
-        const stateClass = !learned && !learnable ? " danger" : "";
-        const requirementClass = !learned && !learnable ? " class=\"skill-requirement unmet\"" : "";
-        return `<div class="item-row skill-row inventory-card ${lockClass}"><div class="item-main"><span class="item-kicker${stateClass}">${learnState}${upgraded.branch ? ` · ${upgraded.branch.name}` : ""}</span><b>${skill.name}${learned ? ` Lv.${upgraded.level}` : ""}</b><small${requirementClass}>${learned ? upgraded.branch?.desc || skill.desc : requirement}</small><span class="item-tags"><i>${skillPreviewText(upgraded)}</i><i>${upgraded.mp} MP</i><i>冷却 ${upgraded.cooldown || 0} 回合</i>${learned ? `<i>升级 ${cost.points} 点 / ${cost.dust} 尘</i>` : `<i>${skill.desc}</i>`}</span></div><div class="item-actions"><button type="button" ${upgradeDisabled} onclick="confirmUpgradeSkill('${skill.id}')">升级</button><button type="button" ${equipDisabled} onclick="updateBattleSkillFromList('${skill.id}')">${equipped ? "卸下" : "携带"}</button></div></div>`;
-      })
-      .join("")}
-  `;
+    $("tabBody").innerHTML = renderSkillsMarkup(skillPanelContext());
+  }
+
+  function skillPanelContext() {
+    return {
+      battleSkillLimit,
+      battleSkills,
+      canLearnSkill,
+      canUpgradeSkill,
+      classSkills,
+      isSkillEquipped,
+      isSkillLearned,
+      skillPreviewText,
+      skillRequirementText,
+      skillUpgradeCost,
+      state,
+      upgradedSkill
+    };
   }
 
   // 格式化装备属性摘要。
   function statsText(eq) {
-    const stats = (Object.entries(eq.stats || {}) as Array<[StatKey, number]>)
-      .map(([key, value]) => {
-        const enhance = eq.level ? `(+${eq.level})` : "";
-        return `${STAT_NAMES[key] || key}+${value}${enhance}`;
-      })
-      .join(" ");
-    const elementText = elementName(eq.element);
-    return [
-      elementText ? `${elementText}属性` : "",
-      elementResistText(eq.elementResistances),
-      stats
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return equipmentStatsText(eq);
   }
 
   function runeEntries() {
@@ -1932,53 +981,25 @@ export function createRenderRuntime(ctx) {
 
   // 生成装备列表中复用的评分、部位、品质和属性摘要。
   function equipmentSummary(eq, stateLabel = "") {
-    return `
-    <span class="equipment-meta">
-      <span>评分 ${itemScore(eq)}</span>
-      <span>${SLOT_NAMES[eq.slot]}</span>
-      ${eq.weaponType ? `<span>${weaponTypeName(eq.weaponType)}</span>` : ""}
-      <span class="quality-${eq.quality}">${eq.quality}</span>
-      <span>强化 +${eq.level}</span>
-      ${stateLabel ? `<span class="state-muted">${stateLabel}</span>` : ""}
-    </span>
-    <small class="equipment-stats">${statsText(eq) || "无属性"}</small>
-  `;
+    return equipmentSummaryMarkup(eq, itemScore(eq), stateLabel);
   }
 
   function equippedStateBadge() {
-    return `<span class="equipped-badge">已装备</span>`;
+    return equippedStateBadgeMarkup();
   }
 
   // 生成候选装备与当前装备的详细对比文本。
   function equipmentCompareText(item, extraClass = "") {
-    if (!item || item.kind !== "equip") return "";
-    const current = state.equipment[item.slot];
-    const restriction = equipmentRestrictionText(item, state.classId);
-    const scoreDelta = itemScore(item) - itemScore(current);
-    const direction = scoreDelta >= 0 ? "up" : "down";
-    const arrow = scoreDelta >= 0 ? "↑" : "↓";
-    const statKeys = Array.from(
-      new Set([...Object.keys(current?.stats || {}), ...Object.keys(item.stats || {})])
+    return equipmentCompareTextMarkup(
+      {
+        effectiveItemStat,
+        equipmentRestrictionText,
+        itemScore,
+        state
+      },
+      item,
+      extraClass
     );
-    const statDeltas = statKeys
-      .map((key) => {
-        const delta = effectiveItemStat(item, key) - effectiveItemStat(current, key);
-        if (!delta) return "";
-        const sign = delta > 0 ? "+" : "";
-        return `<span class="${delta > 0 ? "compare-up" : "compare-down"}">${STAT_NAMES[key] || key}差 ${sign}${delta}</span>`;
-      })
-      .filter(Boolean);
-    const scoreClass = scoreDelta >= 0 ? "compare-up" : "compare-down";
-    const scoreSign = scoreDelta > 0 ? "+" : "";
-    return `
-    <small class="equipment-compare ${extraClass}">
-      ${equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta)}
-      <span class="compare-title">装备对比</span>
-      <span class="${scoreClass}">评分差 ${scoreSign}${scoreDelta}</span>
-      ${restriction ? `<span class="compare-down">${restriction}</span>` : ""}
-      ${statDeltas.join("")}
-    </small>
-  `;
   }
 
   function equipmentScoreBadge(item, extraClass = "") {
@@ -1991,36 +1012,15 @@ export function createRenderRuntime(ctx) {
   }
 
   function equipmentScoreBadgeMarkup(direction, arrow, scoreSign, scoreDelta) {
-    return `
-    <span class="compare-badge compare-badge-${direction}" aria-label="${scoreDelta >= 0 ? "更好" : "更坏"}">
-      <span class="compare-arrow">${arrow}</span>
-      <span>${scoreSign}${scoreDelta}</span>
-    </span>
-  `;
+    return equipmentScoreBadgeMarkupForDelta(direction, arrow, scoreSign, scoreDelta);
   }
 
   function enhanceText(eq) {
-    return Object.keys(eq.stats)
-      .map((key) => `${STAT_NAMES[key] || key}+${eq.level}`)
-      .join(" ");
+    return equipmentEnhanceText(eq);
   }
 
   function equipmentDetailMarkup(eq, slotName, runeText, extraRows = "") {
-    return `
-    <div class="equipment-detail">
-      <div class="equipment-meta">
-        <span>评分 ${itemScore(eq)}</span>
-        <span>${slotName}</span>
-        ${eq.weaponType ? `<span>${weaponTypeName(eq.weaponType)}</span>` : ""}
-        <span class="quality-${eq.quality}">${eq.quality}</span>
-        <span>强化 +${eq.level}</span>
-      </div>
-      <div class="detail-row"><b>属性</b><span>${statsText(eq) || "无属性"}</span></div>
-      ${eq.level ? `<div class="detail-row"><b>强化提升</b><span>${enhanceText(eq)}</span></div>` : ""}
-      <div class="detail-row"><b>符文槽</b><span>${runeText}</span></div>
-      ${extraRows}
-    </div>
-  `;
+    return equipmentDetailMarkupForItem(eq, slotName, runeText, itemScore(eq), extraRows);
   }
 
   function isBetterThanEquipped(item) {
@@ -2068,10 +1068,7 @@ export function createRenderRuntime(ctx) {
     iconClassForType,
     iconSprite,
     imageTag,
-    inventoryConsumableGroups: withState(inventoryConsumableGroups),
-    inventoryGroup,
     inventoryGroupMarkup: withState(inventoryGroupMarkup),
-    inventorySubtabs: withState(inventorySubtabs),
     isBetterThanEquipped: withState(isBetterThanEquipped),
     itemScore: withState(itemScore),
     mapViewBounds: withState(mapViewBounds),

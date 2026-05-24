@@ -3,6 +3,12 @@ import {
   adjustFactionLeaning,
   adjustMerchantTrust,
   adjustRelation,
+  endingQuestRewardBonus,
+  narrativeBranchMilestone,
+  questImpactText,
+  questRelationId,
+  questOutcomeKey,
+  recordQuestOutcome,
   recordRescuedNpc,
   relationLabel,
   relationRewardBonus
@@ -152,15 +158,13 @@ export function createQuestRuntime(ctx) {
   function questRewardGold(def, floor = state.floor) {
     const base = typeof def.rewardGold === "function" ? def.rewardGold(floor) : def.rewardGold || 0;
     const multiplier = floor === state.floor ? floorEffectReward() : 1;
-    const relationMultiplier = 1 + relationRewardBonus(state, relationForQuest(def));
+    const relationId = relationForQuest(def);
+    const relationMultiplier = 1 + relationRewardBonus(state, relationId) + endingQuestRewardBonus(state, relationId);
     return Math.max(0, Math.round(base * multiplier * relationMultiplier));
   }
 
   function relationForQuest(def) {
-    if (def.relation) return def.relation;
-    if (def.id === "merchantRoute" || def.giver === "shop") return "merchants";
-    if (def.id === "rescueRoom") return "survivors";
-    return "wardens";
+    return questRelationId(def);
   }
 
   function floorEffectReward() {
@@ -232,6 +236,7 @@ export function createQuestRuntime(ctx) {
     const location = questLocationText(progress);
     const rewardGold = questRewardGold(def, progress.floor);
     const relationText = relationLabel(state, relationForQuest(def));
+    const impactText = questImpactText(state, def);
     const rewardParts = [
       def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
       def.rewardDoorKey ? `${def.doorKeyName || progress.doorKeyName || "房门钥匙"} +1` : "",
@@ -251,6 +256,7 @@ export function createQuestRuntime(ctx) {
       <b>${def.giverName}</b>
       <p>${def.desc}</p>
       <div class="event-tags"><span>${relationText}</span></div>
+      <small class="quest-impact">${impactText}</small>
       <small>目标：${location} · 进度：${progress.kills}/${def.target}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
       <div class="quest-reward">${rewardParts}</div>
     </div>
@@ -306,12 +312,14 @@ export function createQuestRuntime(ctx) {
     if (!def || !quest || !quest.completed || quest.claimed) return;
     const rewardGold = questRewardGold(def, quest.floor);
     quest.claimed = true;
+    recordQuestOutcome(state, questOutcomeKey(quest), "completed");
     const relationId = relationForQuest(def);
     adjustRelation(state, relationId, def.id === "rescueRoom" ? 2 : 1);
     if (relationId === "merchants") adjustMerchantTrust(state, 1);
     if (relationId === "survivors") adjustFactionLeaning(state, "survivors", 1);
     if (relationId === "wardens") adjustFactionLeaning(state, "wardens", 1);
     if (relationId === "runebound") adjustFactionLeaning(state, "runebound", 1);
+    const milestone = narrativeBranchMilestone(state, relationId);
     state.keys = (state.keys || 0) + (def.rewardKeys || 0);
     if (def.rewardDoorKey && quest.doorKeyId) {
       state.doorKeys = state.doorKeys || {};
@@ -326,6 +334,7 @@ export function createQuestRuntime(ctx) {
     const runeReward = grantRuneReward(def);
     const beaconReward = grantBeaconReward(def);
     const universalKeyReward = grantUniversalKeyReward(def);
+    const impactText = questImpactText(state, def);
     if (def.rewardPotion) {
       state.inventory = state.inventory || [];
       state.inventory.push(
@@ -333,6 +342,7 @@ export function createQuestRuntime(ctx) {
       );
     }
     if (def.chainFlag) markQuestChain(def.chainFlag);
+    log(`${impactText}${milestone ? ` ${milestone}` : ""}`);
     log(`完成任务：${def.title}。`);
     showEvent(
       "任务完成",
@@ -351,7 +361,7 @@ export function createQuestRuntime(ctx) {
         def.rewardPotion ? potionRewardText(def.rewardPotion) : ""
       ]
         .filter(Boolean)
-        .join("<br>")}</p><p>${relationLabel(state, relationId)}。</p>`,
+        .join("<br>")}</p><p>${relationLabel(state, relationId)}。</p>${milestone ? `<p class="quest-impact">${milestone}</p>` : ""}`,
       "收下"
     );
     playSound("quest");

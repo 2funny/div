@@ -751,7 +751,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
           )
       )
       .sort((a, b) => lockedRoomScore(b) - lockedRoomScore(a));
-    const target = Math.min(candidates.length, lockedRoomTargetCount());
+    const target = Math.max(1, Math.min(candidates.length, lockedRoomTargetCount()));
     const selected = candidates.slice(0, target);
     const selectedRoomIds = selected.map((room) => room.id);
     let placed = 0;
@@ -1562,7 +1562,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       enemy.roomBoss ||
       (state.floor >= 6 && random() < Math.min(0.18, 0.06 + state.floor * 0.01));
     if (!shouldAffix) return enemy;
-      const affix = choice([...ENEMY_AFFIXES]);
+    const affix = choice([...ENEMY_AFFIXES]);
     enemy.affix = affix;
     enemy.name = `${affix.name}${enemy.name}`;
     if (affix.id === "armored") {
@@ -1573,6 +1573,20 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (affix.id === "shatter") enemy.atk = Math.round(enemy.atk * 1.12 + 2);
     if (affix.id === "drain") enemy.atk = Math.round(enemy.atk * 1.06 + 1);
     if (affix.id === "swift") enemy.def = Math.round(enemy.def * 1.08 + 1);
+    if (affix.id === "warded") {
+      enemy.res = Math.round((enemy.res || 0) + 2 + state.floor * 0.08);
+      enemy.hp = Math.round(enemy.hp * 1.12);
+      enemy.maxHp = enemy.hp;
+      enemy.resistances = [...new Set([...(enemy.resistances || []), enemy.element].filter(Boolean))];
+    }
+    if (affix.id === "volatile") {
+      enemy.atk = Math.round(enemy.atk * 1.18 + 1);
+      enemy.def = Math.max(0, Math.round(enemy.def * 0.82));
+    }
+    if (affix.id === "hunter") {
+      enemy.spd = Math.round((enemy.spd || 0) * 1.2 + 2);
+      enemy.atk = Math.round(enemy.atk * 1.08 + 1);
+    }
     return enemy;
   }
 
@@ -1855,6 +1869,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       { id: "drain-touch", name: "汲取", type: "drain", element: "dark", power: 0.92, chance: 0.2 },
       { id: "hex", name: "虚弱咒", type: "weaken", element: "dark", power: 0.82, chance: 0.18 }
     ];
+    pool.unshift(...elementalEnemySkillExtras(element));
     if (enemy.name.includes("石像") || enemy.name.includes("魔像")) {
       pool.unshift({ id: "stone-skin", name: "石肤", type: "guard", power: 1, chance: 0.34 });
     }
@@ -1879,6 +1894,18 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       });
     }
     return pool;
+  }
+
+  function elementalEnemySkillExtras(element = "dark") {
+    const extras = {
+      fire: [{ id: "scorch-mark", name: "灼印", type: "weaken", element: "fire", power: 0.92, chance: 0.3 }],
+      ice: [{ id: "frost-lock", name: "霜锁", type: "weaken", element: "ice", power: 0.88, chance: 0.3 }],
+      thunder: [{ id: "arc-surge", name: "弧光奔流", type: "damage", element: "thunder", power: 1.2, chance: 0.32 }],
+      poison: [{ id: "toxin-bloom", name: "毒雾绽放", type: "drain", element: "poison", power: 0.9, chance: 0.28 }],
+      holy: [{ id: "star-brand", name: "星痕", type: "damage", element: "holy", power: 1.12, chance: 0.3 }],
+      dark: [{ id: "shadow-tax", name: "影税", type: "drain", element: "dark", power: 0.94, chance: 0.28 }]
+    };
+    return extras[element] ? [...extras[element]] : [];
   }
 
   function applyFloorEffectToEnemy(enemy) {

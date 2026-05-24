@@ -172,6 +172,92 @@ h2 {
   line-height: 1.6;
 }
 
+.class-start-line {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(240, 195, 91, 0.24);
+  border-radius: 6px;
+  background: rgba(240, 195, 91, 0.08);
+  color: #ffe6a8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.class-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.class-stat-grid span,
+.class-growth-line b {
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid rgba(139, 183, 255, 0.18);
+  border-radius: 6px;
+  background: rgba(139, 183, 255, 0.07);
+  font-size: 11px;
+}
+
+.class-stat-grid b {
+  display: block;
+  color: rgba(231, 241, 255, 0.68);
+  font-weight: 700;
+}
+
+.class-stat-grid i {
+  color: #f2f7ff;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.class-growth-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.class-growth-line span {
+  color: #ffe6a8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.class-growth-line b {
+  color: #cfe1ff;
+}
+
+.class-builds {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.class-builds button {
+  display: grid;
+  gap: 2px;
+  min-height: 48px;
+  padding: 7px 8px;
+  border-color: rgba(125, 212, 190, 0.28);
+  background: rgba(125, 212, 190, 0.08);
+  text-align: left;
+}
+
+.class-builds b {
+  color: #d7fff5;
+  font-size: 12px;
+}
+
+.class-builds small {
+  color: rgba(231, 241, 255, 0.68);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
 .class-passives {
   display: flex;
   flex-wrap: wrap;
@@ -310,6 +396,11 @@ h2 {
 
 .save-slot-main small {
   color: var(--muted);
+}
+
+.save-ending {
+  color: #bff4e8 !important;
+  font-weight: 800;
 }
 
 .save-slot-actions {
@@ -4380,6 +4471,26 @@ h2 {
   line-height: 1.45;
 }
 
+.quest-impact {
+  margin-top: 4px;
+  color: #bff4e8 !important;
+  line-height: 1.45;
+}
+
+.ending-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid rgba(125, 212, 190, 0.28);
+  border-radius: 8px;
+  background: rgba(8, 14, 18, 0.62);
+}
+
+.ending-panel p {
+  margin: 0;
+}
+
 .quest-reward {
   padding: 8px;
   border: 1px solid rgba(240, 195, 91, 0.24);
@@ -5072,6 +5183,10 @@ h2 {
 .branch-choice small {
   color: var(--muted);
   line-height: 1.35;
+}
+
+.branch-choice .item-tags {
+  margin-top: 2px;
 }
 
 @media (max-width: 560px) {

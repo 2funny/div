@@ -30,4 +30,11 @@ export interface NarrativeState {
   rescuedNpcIds: string[];
   merchantTrust: number;
   factionLeanings: Record<string, number>;
+  milestones?: string[];
+  endingId?: string;
+  endingScores?: Record<string, number>;
+  endingClassText?: string;
+  endingConsequences?: string[];
+  questOutcomes?: Record<string, "completed" | "failed">;
+  failedQuestIds?: string[];
 }

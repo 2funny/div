@@ -1,4 +1,5 @@
 import type { PlayerClass } from "../types";
+import { classGrowthConfig } from "./balance";
 
 export const CLASSES: Record<string, PlayerClass> = {
   warrior: {
@@ -10,7 +11,7 @@ export const CLASSES: Record<string, PlayerClass> = {
     stats: { atk: 4, mag: 1, def: 4, res: 2, spd: 2, luk: 1 },
     hp: 46,
     mp: 12,
-    growth: { hp: 4, mp: 1, primary: "atk", primaryEvery: 2, secondary: "def", secondaryEvery: 4 },
+    growth: classGrowthConfig("warrior"),
     passives: [
       {
         id: "frontline",
@@ -58,6 +59,7 @@ export const CLASSES: Record<string, PlayerClass> = {
         type: "guard",
         power: 0.45,
         baseDamage: 2,
+        defMultiplier: 0.45,
         starter: true,
         branches: [
           { id: "bulwark", name: "壁垒", desc: "格挡反击更强。", powerBonus: 0.12 },
@@ -170,6 +172,25 @@ export const CLASSES: Record<string, PlayerClass> = {
         ]
       },
       {
+        id: "oathbreaker",
+        name: "断誓斩",
+        mp: 8,
+        cooldown: 3,
+        desc: "以巡夜誓印压制敌人，造成伤害并削弱攻击。",
+        type: "weaken",
+        scale: "atk",
+        power: 1.08,
+        baseDamage: 7,
+        atkMultiplier: 0.9,
+        defMultiplier: 0.45,
+        element: "holy",
+        requires: { level: 12, def: 9, skills: ["guard"] },
+        branches: [
+          { id: "seal-break", name: "破封", desc: "神圣伤害可部分穿透抗性。", pierceResist: true },
+          { id: "short-oath", name: "短誓", desc: "冷却 -1。", cooldownDelta: -1 }
+        ]
+      },
+      {
         id: "earthsplitter",
         name: "裂地斩",
         mp: 12,
@@ -198,7 +219,7 @@ export const CLASSES: Record<string, PlayerClass> = {
     stats: { atk: 1, mag: 6, def: 1, res: 4, spd: 2, luk: 2 },
     hp: 32,
     mp: 30,
-    growth: { hp: 2, mp: 4, primary: "mag", primaryEvery: 2, secondary: "res", secondaryEvery: 4 },
+    growth: classGrowthConfig("mage"),
     passives: [
       {
         id: "elementalist",
@@ -358,6 +379,24 @@ export const CLASSES: Record<string, PlayerClass> = {
         ]
       },
       {
+        id: "runeCascade",
+        name: "符文瀑流",
+        mp: 10,
+        cooldown: 3,
+        desc: "释放连续符文冲击，雷属性伤害适合突破冰与机关敌人。",
+        type: "damage",
+        scale: "mag",
+        power: 1.32,
+        baseDamage: 9,
+        magMultiplier: 1.22,
+        element: "thunder",
+        requires: { level: 12, mag: 12, skills: ["spark"] },
+        branches: [
+          { id: "wide-cascade", name: "漫流", desc: "伤害提高。", powerBonus: 0.12 },
+          { id: "clear-rune", name: "净纹", desc: "耗蓝 -1。", mpDelta: -1 }
+        ]
+      },
+      {
         id: "starPrison",
         name: "星牢",
         mp: 15,
@@ -386,7 +425,7 @@ export const CLASSES: Record<string, PlayerClass> = {
     stats: { atk: 4, mag: 1, def: 2, res: 2, spd: 6, luk: 4 },
     hp: 38,
     mp: 18,
-    growth: { hp: 3, mp: 2, primary: "spd", primaryEvery: 2, secondary: "luk", secondaryEvery: 4 },
+    growth: classGrowthConfig("ranger"),
     passives: [
       {
         id: "ranger_combo",
@@ -552,6 +591,24 @@ export const CLASSES: Record<string, PlayerClass> = {
         branches: [
           { id: "tempest", name: "骤雨", desc: "伤害更高，但耗蓝 +1。", powerBonus: 0.15, mpDelta: 1 },
           { id: "static-string", name: "电弦", desc: "雷属性伤害可部分穿透抗性。", pierceResist: true }
+        ]
+      },
+      {
+        id: "trapline",
+        name: "绊索伏击",
+        mp: 7,
+        cooldown: 3,
+        desc: "布下毒性绊索，造成伤害并削弱敌人攻势。",
+        type: "weaken",
+        scale: "atk",
+        power: 1.02,
+        baseDamage: 6,
+        atkMultiplier: 0.82,
+        element: "poison",
+        requires: { level: 12, spd: 13, skills: ["poison"] },
+        branches: [
+          { id: "barbed-line", name: "倒钩索", desc: "伤害提高。", powerBonus: 0.12 },
+          { id: "quiet-line", name: "无声索", desc: "冷却 -1。", cooldownDelta: -1 }
         ]
       },
       {

@@ -9,6 +9,7 @@ import {
   adjustMerchantTrust,
   adjustRelation,
   markNarrativeFlag,
+  narrativeBranchMilestone,
   recordEventChoice,
   relationLabel
 } from "../quest/narrative";
@@ -447,10 +448,12 @@ export function createInteractionRuntime(ctx) {
     if (choice.flag) markNarrativeFlag(state, choice.flag);
     if (choice.factionLeaning) adjustFactionLeaning(state, choice.factionLeaning.id, choice.factionLeaning.delta);
     if (choice.relation?.id === "merchants") adjustMerchantTrust(state, choice.relation.delta > 0 ? 1 : -1);
-    if (!choice.relation) return "";
+    const relationId = choice.relation?.id || choice.factionLeaning?.id || "";
+    if (!choice.relation) return relationId ? narrativeBranchMilestone(state, relationId) : "";
     const score = adjustRelation(state, choice.relation.id, choice.relation.delta);
+    const milestone = narrativeBranchMilestone(state, choice.relation.id);
     const sign = choice.relation.delta > 0 ? "+" : "";
-    return `${relationLabel(state, choice.relation.id)}（${sign}${choice.relation.delta}，当前 ${score}）。`;
+    return `${relationLabel(state, choice.relation.id)}（${sign}${choice.relation.delta}，当前 ${score}）。${milestone ? ` ${milestone}` : ""}`;
   }
 
   // 使用符文钥匙打开围住宝箱的门栅。

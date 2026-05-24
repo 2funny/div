@@ -15,6 +15,32 @@ vm.runInContext(
   assert(SLOTS.every((slot) => empty[slot] === null), "new heroes should start with empty equipment slots");
   assert.strictEqual(starterInventory("warrior").filter((entry) => entry.kind === "equip").length, 0, "starter gear should not be placed in inventory");
   assert(Object.values(starterEquipment("warrior")).filter(Boolean).length > 0, "starter gear should be provided as equipped items");
+  startGame("warrior", "slot-1");
+  assert.strictEqual(state.statPoints, 3, "new heroes should start with a small pool of allocatable stat points");
+  assert.strictEqual(state.skillPoints, 1, "new heroes should be able to upgrade one starter skill early");
+  assert.strictEqual(state.skillDust, 1, "new heroes should have enough skill dust for the first upgrade");
+  upgradeSkill("heavy");
+  assert.strictEqual(state.skillLevels.heavy, 1, "starter resources should pay for the first skill upgrade");
+  assert.strictEqual(state.skillDust, 0, "the first skill upgrade should spend one skill dust");
+  state.skillPoints = 1;
+  state.skillDust = 2;
+  state.skillLevels.heavy = 2;
+  upgradeSkill("heavy", "cleave");
+  assert.strictEqual(state.skillLevels.heavy, 3, "branch-level upgrades should be affordable with the softened early dust curve");
+  startGame("warrior", "slot-1", "vanguard");
+  assert.strictEqual(state.statPoints, 0, "opening build presets should spend the starter stat points");
+  assert.strictEqual(state.stats.def, CLASSES.warrior.stats.def + 2, "vanguard opening should apply its defense bonus");
+  assert.strictEqual(state.stats.atk, CLASSES.warrior.stats.atk + 1, "vanguard opening should apply its attack bonus");
+  assert.strictEqual(state.initialBuildId, "vanguard", "opening build preset choice should be recorded");
+  const setWeapon = item("誓印铁剑", "weapon", "优秀", { atk: 2 });
+  const setArmor = item("誓印旧甲", "armor", "优秀", { def: 2 });
+  setWeapon.setId = "warden";
+  setWeapon.setName = "巡夜誓印";
+  setArmor.setId = "warden";
+  setArmor.setName = "巡夜誓印";
+  state.equipment = { ...emptyEquipment(), weapon: setWeapon, armor: setArmor };
+  assert(effectiveMaxHp() >= state.maxHp + 10, "equipping two matching set pieces should add the set vitality bonus");
+  assert.strictEqual(setWeapon.setName, "巡夜誓印", "set drops should retain their set identity for equipment UI");
   setRandomSeed("stable-seed");
   const seededRolls = [rand(1, 100), rand(1, 100), rand(1, 100)];
   setRandomSeed("stable-seed");
@@ -121,6 +147,10 @@ vm.runInContext(
   maybeDrop({ type: "elite", roomBoss: true, dropsKey: true, name: "Key Guardian" });
   assert.strictEqual(state.keys, 1, "key guardian drops should add one key");
   assert.strictEqual(state.materials["首领印记"], 1, "room boss drops should add a boss trophy material");
+  assert(
+    (state.materials["强化石"] || 0) + (state.skillDust || 0) > 0,
+    "room boss drops should include at least one upgrade resource"
+  );
   state = {
     hp: 80,
     maxHp: 100,
@@ -489,6 +519,18 @@ vm.runInContext(
   const upgradedHeavy = upgradedSkill(baseHeavy);
   assert(upgradedHeavy.baseDamage > baseHeavy.baseDamage, "skill upgrades should increase base damage");
   assert(upgradedHeavy.atkMultiplier > baseHeavy.atkMultiplier, "skill upgrades should increase stat multiplier");
+  state.currentEnemy = { type: "monster", name: "Guard Dummy", hp: 100, maxHp: 100, atk: 1, def: 0 };
+  state.stats.def = 10;
+  state.skillLevels = { guard: 0 };
+  state.skillBranches = {};
+  state.learnedSkillIds = ["guard"];
+  state.equippedSkillIds = ["guard"];
+  const baseGuardPreview = renderSkillActionButtons("battle");
+  state.skillLevels = { guard: 3 };
+  state.skillBranches = { guard: "bulwark" };
+  const branchedGuardPreview = renderSkillActionButtons("battle");
+  assert(baseGuardPreview.includes("格挡 21"), "guard skills should scale mitigation from defense and skill power");
+  assert(branchedGuardPreview.includes("格挡 23"), "guard branches should visibly improve mitigation preview");
 
   state = {
     classId: "warrior",
@@ -509,7 +551,7 @@ vm.runInContext(
     log: []
   };
   ensureSkillState();
-  assert.strictEqual(classSkills().length, 9, "each class should expose a broad skill pool");
+  assert(classSkills().length >= 10, "each class should expose a broad skill pool");
   assert.strictEqual(canLearnSkill("execution"), false, "late skills should stay locked behind level and stat requirements");
   assert(skillRequirementText(skillById("execution")).includes("等级 14"), "locked skills should explain their level requirement");
   renderSkills();
@@ -648,6 +690,29 @@ vm.runInContext(
   renderBattleView();
   assert(getElement("battleStage").innerHTML.includes("fx-element-fire"), "elemental damage should render a matching battle effect class");
   assert(getElement("battleStage").innerHTML.includes("combat-fx-element-fire"), "elemental damage float text should carry a matching effect class");
+  assert(renderBattleCommandPanel().includes("150%"), "battle skill cards should surface elemental matchup strength against the current enemy");
+  state.currentEnemy = { type: "boss", name: "Phase Dummy", hp: 70, maxHp: 100, atk: 4, def: 0 };
+  const phaseShiftText = dealDamage(state.currentEnemy, 10, "Phase Probe");
+  assert(phaseShiftText.includes("转阶段"), "boss damage should announce the mid-health phase transition");
+  assert(state.currentEnemy.skills.some((skill) => skill.id.includes("phase-pressure")), "boss phase shift should inject a pressure script skill");
+  const crisisText = dealDamage(state.currentEnemy, 30, "Phase Probe");
+  assert(crisisText.includes("濒危阶段"), "boss damage should announce the low-health phase transition");
+  assert(state.currentEnemy.skills.some((skill) => skill.id.includes("last-rite")), "boss crisis phase should inject a crisis script skill");
+  state.currentEnemy = { type: "boss", bossProfile: "ember", name: "Ember Script Dummy", hp: 70, maxHp: 100, atk: 4, def: 0, element: "fire" };
+  dealDamage(state.currentEnemy, 10, "Phase Probe");
+  assert(state.currentEnemy.skills.some((skill) => skill.id === "ember-shift-script" && skill.type === "damage"), "theme bosses should use profile-specific phase scripts");
+  assert.strictEqual(state.currentEnemy._bossNextIntent, "damage", "theme boss phase shifts should prime a profile-specific next action intent");
+  state.hp = 100;
+  state.currentEnemy._lastSkillId = "";
+  Math.random = () => 0.99;
+  enemyTurn(state.currentEnemy);
+  assert.strictEqual(state.currentEnemy._lastSkillId, "ember-shift-script", "primed ember bosses should spend their next turn on the scripted burst");
+  assert.strictEqual(state.currentEnemy._bossNextIntent, "", "boss next-action intent should be consumed after one turn");
+  state.currentEnemy = { type: "boss", bossProfile: "mine", name: "Mine Script Dummy", hp: 70, maxHp: 100, atk: 4, def: 3, element: "lightning" };
+  dealDamage(state.currentEnemy, 10, "Phase Probe");
+  enemyTurn(state.currentEnemy);
+  assert.strictEqual(state.currentEnemy._lastSkillId, "mine-shift-script", "primed mine bosses should answer phase shifts with their shield script");
+  assert(state.currentEnemy._guard > 0, "mine boss shield script should create a guard value");
   Math.random = randomBeforeElementTest;
 
   Math.random = () => 0.1;
@@ -656,6 +721,96 @@ vm.runInContext(
   assert(skilledEnemy.element, "generated enemies should carry an elemental identity");
   assert(Array.isArray(skilledEnemy.weaknesses) && skilledEnemy.weaknesses.length > 0, "enemy elements should expose weaknesses");
   assert(skilledEnemy.skills?.length > 0, "mid-floor elite enemies should have monster skills");
+  state = {
+    floor: 12,
+    classId: "warrior",
+    hp: 120,
+    maxHp: 120,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 15, mag: 1, def: 8, res: 4, spd: 2, luk: 1 },
+    equipment: emptyEquipment(),
+    currentEnemy: {
+      type: "elite",
+      name: "Skill Reader",
+      hp: 20,
+      maxHp: 80,
+      atk: 8,
+      def: 5,
+      spd: 4,
+      roomBoss: true,
+      skills: [
+        { id: "reader-guard", name: "Reader Guard", type: "guard", power: 1, chance: 0.36 },
+        { id: "reader-drain", name: "Reader Drain", type: "drain", power: 1, chance: 0.28 }
+      ]
+    },
+    log: []
+  };
+  showCurrentEnemyDetail();
+  assert(modalState().body.includes("防御") && modalState().body.includes("汲取"), "enemy detail should describe monster skill intent");
+  assert(modalState().body.includes("濒危"), "boss-like enemy detail should surface the current phase hint");
+  assert(modalState().body.includes("保留爆发"), "enemy detail should surface tactical counters for recovery-heavy kits");
+  state = {
+    floor: 12,
+    classId: "warrior",
+    hp: 120,
+    maxHp: 120,
+    mp: 20,
+    maxMp: 20,
+    stats: { atk: 15, mag: 1, def: 8, res: 4, spd: 2, luk: 1 },
+    equipment: emptyEquipment(),
+    currentEnemy: {
+      type: "elite",
+      name: "Guard Tactician",
+      hp: 80,
+      maxHp: 80,
+      atk: 8,
+      def: 5,
+      skills: [
+        { id: "tactical-guard", name: "Tactical Guard", type: "guard", power: 1, chance: 0.01 },
+        { id: "tactical-hit", name: "Tactical Hit", type: "damage", power: 1, chance: 0.01 }
+      ]
+    },
+    log: []
+  };
+  Math.random = () => 0.99;
+  enemyTurn(state.currentEnemy);
+  assert(state.currentEnemy._guard > 0, "elite enemies should prioritize an opening guard when their kit supports it");
+  state.currentEnemy._guard = 0;
+  enemyTurn(state.currentEnemy);
+  assert.strictEqual(state.currentEnemy._lastSkillId, "", "elite enemies should not repeat the same priority guard every turn");
+
+  state.currentEnemy = {
+    type: "boss",
+    name: "Wounded Boss",
+    hp: 20,
+    maxHp: 100,
+    atk: 8,
+    def: 3,
+    skills: [
+      { id: "boss-heal", name: "Boss Heal", type: "heal", power: 0.2, chance: 0.01 },
+      { id: "boss-hit", name: "Boss Hit", type: "damage", power: 1, chance: 0.01 }
+    ]
+  };
+  enemyTurn(state.currentEnemy);
+  assert(state.currentEnemy.hp > 20, "boss enemies should prioritize recovery when badly wounded");
+
+  state.currentEnemy = {
+    type: "boss",
+    name: "Phase Boss",
+    hp: 60,
+    maxHp: 100,
+    atk: 8,
+    def: 3,
+    skills: [
+      { id: "phase-curse", name: "Phase Curse", type: "weaken", power: 1, chance: 0.01 },
+      { id: "phase-hit", name: "Phase Hit", type: "damage", power: 1, chance: 0.01 }
+    ]
+  };
+  state.hp = 120;
+  Math.random = () => 0.99;
+  enemyTurn(state.currentEnemy);
+  assert.strictEqual(state.currentEnemy._lastSkillId, "phase-curse", "mid-health bosses should prioritize pressure skills during phase shift");
   state = { floor: 20 };
   const fungalEnemy = makeEnemy(false);
   assert(
@@ -802,7 +957,7 @@ vm.runInContext(
   render = () => {};
   move(-1, 0);
   assert(modalState().title.includes("商队"), "moving into a merchant should open the merchant interaction");
-  state.gold = 58;
+  state.gold = merchantPurchasePreview("universalKey").price;
   state.universalKeys = 0;
   state.map.cells[1][1].object = { type: "shop", sellsUniversalKey: true };
   buy("universalKey");
@@ -898,7 +1053,10 @@ vm.runInContext(
   assert(!loreList.includes("openLoreArchive"), "task tab should keep lore archive controls out of quest tracking");
   assert(!loreList.includes("入口刻痕"), "discovered lore pages should open from the archive instead of rendering inline");
   state.map.cells[0][0].object = null;
+  state.tutorial = { step: "move", completed: [] };
   renderContext();
+  assert(document.getElementById("contextBody").innerHTML.includes("当前目标"), "action panel should surface the current tutorial objective");
+  assert(document.getElementById("contextBody").innerHTML.includes("迈出第一步"), "tutorial objective should show readable step copy");
   assert(document.getElementById("contextBody").innerHTML.includes("地牢残页"), "action panel should expose the lore archive shortcut");
   openLoreArchive();
   assert(modalState().body.includes("第一章：入口不会记人"), "lore archive should open the first discovered entry");
@@ -1071,6 +1229,13 @@ vm.runInContext(
   assert.strictEqual(state.narrative.flags.altar_salvaged, true, "room event choices should set persistent narrative flags");
   assert.strictEqual(state.narrative.eventChoices.cracked_altar, "salvage_altar_dust", "room event choices should be recorded for later consequences");
   assert.strictEqual(state.narrative.factionLeanings.wardens, 1, "room event choices should update long-term faction leaning");
+  state.narrative.relations.wardens = 7;
+  state.narrative.factionLeanings.wardens = 3;
+  const wardenSealCell = { object: { type: "roomEvent", eventId: "warden_seal", name: "warden seal" } };
+  state.materials["榄斿皹"] = 1;
+  resolveCell(wardenSealCell);
+  modalState().actions[0].action();
+  assert(state.narrative.milestones.includes("wardens:locked"), "room event choices should immediately record branch milestones after relationship changes");
   assert(roomEventsForFloor(8).length >= 7, "room event pools should have enough varied mid-run events");
   assert(roomEventsForFloor(12).length >= 9, "room event pools should expand with mid-run relationship events");
 
@@ -1123,6 +1288,10 @@ vm.runInContext(
   assert.strictEqual(merchantLedgerCell.object, null, "merchant ledger event should be consumed");
   assert.strictEqual(state.universalKeys, 1, "merchant ledger credit should grant one universal key");
   assert.strictEqual(state.narrative.factionLeanings.merchants, 1, "merchant ledger credit should update merchant faction leaning");
+  state.narrative.factionLeanings.merchants = 4;
+  state.lore = { chapters: ["threshold"], pages: [] };
+  state.quests = [];
+  assert(renderQuestList().includes("剧情倾向：流动商队路线升温"), "main quest row should surface mid-run narrative branch direction");
 
   state = {
     floor: 4,
@@ -1140,14 +1309,113 @@ vm.runInContext(
       completed: true,
       claimed: false
     }],
-    narrative: { relations: { wardens: 6 }, flags: {}, eventChoices: {} },
+    narrative: { relations: { wardens: 6 }, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: { wardens: 3 } },
     log: []
   };
   claimQuestReward("wardenErrand");
   assert.strictEqual(state.gold, 31, "trusted quest givers should pay a relationship bonus");
   assert.strictEqual(state.narrative.relations.wardens, 7, "claiming a quest should strengthen the related long-term relationship");
-  assert.strictEqual(state.narrative.factionLeanings.wardens, 1, "claiming a warden quest should improve the related faction leaning");
+  assert.strictEqual(state.narrative.factionLeanings.wardens, 4, "claiming a warden quest should improve the related faction leaning");
+  assert(state.narrative.milestones.includes("wardens:leaning"), "mid-run quest branches should record newly visible route milestones");
   assert(modalState().body.includes("巡夜人信赖"), "quest reward modal should surface relationship consequences");
+  assert(modalState().body.includes("巡夜人路线开始显现"), "quest reward modal should explain mid-run branch consequences");
+  assert(state.log.some((entry) => entry.includes("影响：") && entry.includes("奖励 +18%")), "quest completion log should explain long-term relationship impact");
+
+  state = {
+    narrative: {
+      relations: { wardens: 8, merchants: 1, survivors: 0, runebound: 0 },
+      flags: {},
+      eventChoices: { warden_seal: "reinforce_warden_seal", cracked_altar: "salvage_altar_dust" },
+      rescuedNpcIds: [],
+      merchantTrust: 0,
+      factionLeanings: { wardens: 3 }
+    }
+  };
+  const wardenEnding = determineEnding();
+  assert.strictEqual(wardenEnding.id, "seal_kept", "warden-heavy long-term choices should produce the sealed ending");
+  assert.strictEqual(state.narrative.endingId, "seal_kept", "ending resolution should be recorded in narrative state");
+  assert.strictEqual(state.narrative.endingScores.wardens, wardenEnding.score.wardens, "ending scores should be stored for save summaries and review");
+  state.floor = 4;
+  state.gold = 0;
+  state.keys = 0;
+  state.inventory = [];
+  state.quests = [{
+    id: "wardenErrand",
+    giver: "questNpc",
+    floor: 4,
+    targetFloor: 4,
+    kills: 2,
+    target: 2,
+    accepted: true,
+    completed: true,
+    claimed: false
+  }];
+  claimQuestReward("wardenErrand");
+  assert.strictEqual(state.gold, 34, "sealed ending should stack with relationship bonuses for matching warden quest payouts");
+
+  state = {
+    narrative: {
+      relations: { wardens: 5, merchants: 6, survivors: 4, runebound: 5 },
+      flags: {},
+      eventChoices: { merchant_ledger: "redeem_ledger_credit", survivor_mark: "claim_survivor_cache" },
+      rescuedNpcIds: ["1:room-a:矿工", "2:room-b:斥候"],
+      merchantTrust: 4,
+      factionLeanings: { wardens: 2, merchants: 2, survivors: 2, runebound: 2 }
+    }
+  };
+  const compactEnding = determineEnding();
+  assert.strictEqual(compactEnding.id, "shared_compact", "balanced faction support should unlock the shared compact ending");
+  assert(compactEnding.highlights.some((entry) => entry.includes("救援 2 人")), "ending highlights should include rescued survivors");
+
+  state = {
+    classId: "mage",
+    quests: [{
+      id: "rescueRoom",
+      giver: "questNpc",
+      floor: 7,
+      targetFloor: 7,
+      kills: 0,
+      target: 2,
+      roomId: "room-7-1",
+      accepted: true,
+      completed: false,
+      claimed: false
+    }],
+    narrative: { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} }
+  };
+  const failedEnding = determineEnding();
+  assert(state.narrative.failedQuestIds.includes("rescueRoom:7:room-7-1"), "unfinished accepted quests should be recorded as ending failures");
+  assert(failedEnding.highlights.some((entry) => entry.includes("未竟委托 1 件")), "ending highlights should surface failed quest consequences");
+  assert(state.narrative.endingClassText.includes("法师后果"), "ending resolution should record class-specific consequence text");
+
+  state.floor = MAX_FLOOR;
+  state.narrative = {
+    relations: { wardens: 5, merchants: 6, survivors: 4, runebound: 5 },
+    flags: {},
+    eventChoices: { merchant_ledger: "redeem_ledger_credit", survivor_mark: "claim_survivor_cache" },
+    rescuedNpcIds: ["1:room-a:矿工", "2:room-b:斥候"],
+    merchantTrust: 4,
+    factionLeanings: { wardens: 2, merchants: 2, survivors: 2, runebound: 2 }
+  };
+  state.quests = [];
+  state.classId = "warrior";
+  state.stats = { atk: 200, mag: 0, def: 0, res: 0, spd: 0, luk: 0 };
+  state.equipment = emptyEquipment();
+  state.skillCooldowns = {};
+  state.currentEnemy = { type: "boss", name: "Ending Boss", hp: 1, maxHp: 100, atk: 1, def: 0, xp: 1, gold: 1 };
+  state.xp = 0;
+  state.xpNext = 999;
+  state.gold = 0;
+  state.keys = 0;
+  state.inventory = [];
+  state.materials = {};
+  state.runes = {};
+  state.map = { cells: [[{ x: 0, y: 0, terrain: "floor", object: state.currentEnemy }]] };
+  document.querySelector = () => null;
+  attackEnemy("attack");
+  assert.strictEqual(state.narrative.endingId, "shared_compact", "final boss victory should resolve and record the ending");
+  assert.strictEqual(modalState().title, "结局：共管誓约", "final boss victory should show the resolved ending title");
+  assert(modalState().body.includes("ending-panel"), "final boss victory should show ending consequences");
 
   state = {
     floor: 4,

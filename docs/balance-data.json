@@ -1,0 +1,154 @@
+{
+  "startingResources": {
+    "statPoints": 3,
+    "skillPoints": 1,
+    "skillDust": 1
+  },
+  "skillDustCostByTargetLevel": {
+    "1": 1,
+    "2": 1,
+    "3": 2,
+    "4+": "targetLevel"
+  },
+  "bossPhaseThresholds": {
+    "shift": 0.65,
+    "crisis": 0.35
+  },
+  "openingBuildPresets": {
+    "warrior": ["vanguard", "duelist"],
+    "mage": ["ember", "ward"],
+    "ranger": ["skirmish", "marksman"]
+  },
+  "classGrowth": {
+    "warrior": {
+      "hp": 4,
+      "mp": 1,
+      "primary": "atk",
+      "primaryEvery": 2,
+      "secondary": "def",
+      "secondaryEvery": 4
+    },
+    "mage": {
+      "hp": 2,
+      "mp": 4,
+      "primary": "mag",
+      "primaryEvery": 2,
+      "secondary": "res",
+      "secondaryEvery": 4
+    },
+    "ranger": {
+      "hp": 3,
+      "mp": 2,
+      "primary": "spd",
+      "primaryEvery": 2,
+      "secondary": "luk",
+      "secondaryEvery": 4
+    }
+  },
+  "equipmentQuality": {
+    "普通": {
+      "dropBonus": 1,
+      "score": 0,
+      "runeSlots": 0,
+      "weaponElementChance": 0.08,
+      "elementResistanceChance": 0.08,
+      "merchantPriceBonus": 0
+    },
+    "优秀": {
+      "dropBonus": 2,
+      "score": 8,
+      "runeSlots": 1,
+      "weaponElementChance": 0.18,
+      "elementResistanceChance": 0.16,
+      "merchantPriceBonus": 8
+    },
+    "稀有": {
+      "dropBonus": 3,
+      "score": 18,
+      "runeSlots": 2,
+      "weaponElementChance": 0.32,
+      "elementResistanceChance": 0.28,
+      "merchantPriceBonus": 22
+    },
+    "史诗": {
+      "dropBonus": 4,
+      "score": 32,
+      "runeSlots": 2,
+      "weaponElementChance": 0.48,
+      "elementResistanceChance": 0.42,
+      "merchantPriceBonus": 48
+    },
+    "传说": {
+      "dropBonus": 6,
+      "score": 50,
+      "runeSlots": 2,
+      "weaponElementChance": 0.7,
+      "elementResistanceChance": 0.58,
+      "merchantPriceBonus": 90
+    }
+  },
+  "enhanceCostFormula": {
+    "gold": "20 + 12 * nextLevel + 8 * qualityTier",
+    "stones": "1 + floor((nextLevel + 1) / 3)",
+    "qualityTier": {
+      "普通": 0,
+      "优秀": 1,
+      "稀有": 2,
+      "史诗": 3,
+      "传说": 4
+    }
+  },
+  "equipmentSell": {
+    "minGold": 6,
+    "scoreMultiplier": 0.55,
+    "goldPerLevel": 8
+  },
+  "equipmentSalvage": {
+    "dustByQuality": {
+      "普通": 1,
+      "优秀": 1,
+      "稀有": 2,
+      "史诗": 3,
+      "传说": 4
+    },
+    "levelDustDivisor": 2,
+    "stoneQualities": ["史诗", "传说"]
+  },
+  "shopGoods": {
+    "hp": {
+      "name": "小型生命药水",
+      "effect": "hp",
+      "amount": 18,
+      "price": 12,
+      "desc": "恢复 18 HP"
+    },
+    "mp": {
+      "name": "小型法力药水",
+      "effect": "mp",
+      "amount": 12,
+      "price": 12,
+      "desc": "恢复 12 MP"
+    },
+    "beacon": {
+      "name": "商路信标",
+      "effect": "teleport",
+      "amount": 0,
+      "price": 45,
+      "desc": "传送到已探索设施"
+    },
+    "universalKey": {
+      "name": "万能钥匙",
+      "effect": "key",
+      "amount": 1,
+      "basePrice": 58,
+      "minPrice": 42,
+      "desc": "打开任意上锁房门"
+    }
+  },
+  "merchantUniversalKeyChance": {
+    "base": 0.08,
+    "perFloor": 0.006,
+    "perTrust": 0.012,
+    "max": 0.28
+  }
+}

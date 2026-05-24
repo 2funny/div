@@ -8,6 +8,7 @@ import {
   writeSaveIndex
 } from "./save";
 import { escapeHtml } from "../render/html";
+import { endingTitle } from "../quest/narrative";
 import type { GameState } from "../types";
 
 const MAX_SAVED_FLOOR_STATES = 12;
@@ -19,6 +20,8 @@ type SaveSlotMeta = {
   hp?: number;
   maxHp?: number;
   gold?: number;
+  endingId?: string;
+  endingTitle?: string;
   updatedAt?: string;
 };
 
@@ -64,6 +67,8 @@ export function createSaveRuntime(ctx) {
       hp: Math.max(0, Math.ceil(snapshot?.hp || 0)),
       maxHp: Math.max(0, Math.ceil(snapshot?.maxHp || cls.hp || 0)),
       gold: snapshot?.gold || 0,
+      endingId: snapshot?.narrative?.endingId || "",
+      endingTitle: endingTitle(snapshot?.narrative?.endingId || ""),
       updatedAt: new Date().toISOString()
     };
   }

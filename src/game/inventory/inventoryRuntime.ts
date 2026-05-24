@@ -1,9 +1,19 @@
 import { ASSETS, RUNES, SLOT_NAMES, SLOTS, STAT_NAMES } from "../constants";
+import {
+  enhanceCostForEquipment,
+  equipmentQualityConfig,
+  equipmentSalvageValueForEquipment,
+  equipmentSellValueFromScore,
+  merchantUniversalKeyChance,
+  merchantUniversalKeyPrice,
+  shopGoodConfig
+} from "../constants/balance";
 import { equipmentRestrictionText, isWeaponUsableByClass } from "../equipment/equipmentRules";
 import { itemScore } from "../equipment/equipmentScoring";
 import { cardinalNeighbors, cellsWithin, distance } from "../floor/mapGeometry";
 import { merchantPriceFactor, merchantTrust, relationLabel } from "../quest/narrative";
 import { random } from "../random";
+import { branchEffectTags } from "../render/skillBranchText";
 import { advanceTutorial } from "../tutorial/tutorial";
 import type { GameMap, GameState, StatKey } from "../types";
 
@@ -196,14 +206,12 @@ export function createInventoryRuntime(ctx) {
 
   // 计算装备出售价格，评分和强化等级越高价格越高。
   function equipmentSellValue(entry) {
-    return Math.max(6, Math.round(itemScore(entry) * 0.55 + (entry.level || 0) * 8));
+    return equipmentSellValueFromScore(itemScore(entry), entry?.level || 0);
   }
 
   // 计算装备分解收益，用于产出魔尘和少量强化石。
   function equipmentSalvageValue(entry) {
-    const qualityDust = { 普通: 1, 优秀: 1, 稀有: 2, 史诗: 3, 传说: 4 }[entry.quality] || 1;
-    const stones = entry.level > 0 || ["史诗", "传说"].includes(entry.quality) ? 1 : 0;
-    return { dust: qualityDust + Math.floor((entry.level || 0) / 2), stones };
+    return equipmentSalvageValueForEquipment(entry);
   }
 
   // 判断玩家是否位于商人身边，出售装备必须满足该条件。
@@ -547,12 +555,7 @@ export function createInventoryRuntime(ctx) {
   }
 
   function enhanceCost(eq) {
-    const qualityTier = { 普通: 0, 优秀: 1, 稀有: 2, 史诗: 3, 传说: 4 }[eq?.quality] || 0;
-    const nextLevel = Number(eq?.level || 0);
-    return {
-      gold: 20 + 12 * nextLevel + 8 * qualityTier,
-      stones: 1 + Math.floor((nextLevel + 1) / 3)
-    };
+    return enhanceCostForEquipment(eq);
   }
 
   // 消耗技能点和技能尘提升指定技能等级。
@@ -599,7 +602,7 @@ export function createInventoryRuntime(ctx) {
         `<p>将 ${skill.name} 升到 Lv.${nextLevel} 时，需要选择一个长期分支。</p><div class="branch-choice-list">${skill.branches
           .map(
             (branch) =>
-              `<button type="button" class="branch-choice" onclick="upgradeSkill('${skillId}', '${branch.id}')"><b>${branch.name}</b><small>${branch.desc}</small></button>`
+              `<button type="button" class="branch-choice" onclick="upgradeSkill('${skillId}', '${branch.id}')"><b>${branch.name}</b><small>${branch.desc}</small><span class="item-tags">${branchEffectTags(branch, "稳定分支")}</span></button>`
           )
           .join("")}</div><p>消耗 ${cost.points} 点技能点和 ${cost.dust} 点技能尘。</p>`,
         [{ text: "取消", action: closeModal }]
@@ -617,22 +620,23 @@ export function createInventoryRuntime(ctx) {
   // 在商人处购买基础消耗品。
   function buy(kind) {
     let bought = false;
-    if (kind === "hp" && state.gold >= 12) {
-      state.gold -= 12;
-      state.inventory.push(potion("小型生命药水", "hp", 18));
-      log("购买小型生命药水。");
+    const goods = merchantPurchasePreview(kind);
+    if (kind === "hp" && state.gold >= goods.price) {
+      state.gold -= goods.price;
+      state.inventory.push(potion(goods.name, "hp", goods.amount));
+      log(`购买${goods.name}。`);
       bought = true;
     }
-    if (kind === "mp" && state.gold >= 12) {
-      state.gold -= 12;
-      state.inventory.push(potion("小型法力药水", "mp", 12));
-      log("购买小型法力药水。");
+    if (kind === "mp" && state.gold >= goods.price) {
+      state.gold -= goods.price;
+      state.inventory.push(potion(goods.name, "mp", goods.amount));
+      log(`购买${goods.name}。`);
       bought = true;
     }
-    if (kind === "beacon" && state.gold >= 45) {
-      state.gold -= 45;
+    if (kind === "beacon" && state.gold >= goods.price) {
+      state.gold -= goods.price;
       state.inventory.push(teleportBeacon());
-      log("购买商路信标。");
+      log(`购买${goods.name}。`);
       bought = true;
     }
     if (kind === "universalKey") {
@@ -690,8 +694,11 @@ export function createInventoryRuntime(ctx) {
     const equipmentRows = merchantEquipmentRows(merchant);
     const sellsUniversalKey = merchantSellsUniversalKey(merchant);
     const universalKeyRow = sellsUniversalKey
-      ? `<button type="button" ${merchant.universalKeySold ? "disabled" : ""} onclick="confirmBuy('universalKey')"><span>万能钥匙</span><small>${merchant.universalKeySold ? "已售出" : `打开任意上锁房门 · ${universalKeyPrice()} 金币`}</small></button>`
+      ? `<button type="button" ${merchant.universalKeySold ? "disabled" : ""} onclick="confirmBuy('universalKey')"><span>${merchantPurchasePreview("universalKey").name}</span><small>${merchant.universalKeySold ? "已售出" : `${merchantPurchasePreview("universalKey").desc} · ${merchantPurchasePreview("universalKey").price} 金币`}</small></button>`
       : "";
+    const hpGoods = merchantPurchasePreview("hp");
+    const mpGoods = merchantPurchasePreview("mp");
+    const beaconGoods = merchantPurchasePreview("beacon");
     showModal(
       "流动商队",
       `
@@ -704,9 +711,9 @@ export function createInventoryRuntime(ctx) {
         </div>
       </div>
       <div class="merchant-goods">
-        <button type="button" onclick="confirmBuy('hp')"><span>小型生命药水</span><small>恢复 18 HP · 12 金币</small></button>
-        <button type="button" onclick="confirmBuy('mp')"><span>小型法力药水</span><small>恢复 12 MP · 12 金币</small></button>
-        <button type="button" onclick="confirmBuy('beacon')"><span>商路信标</span><small>传送到已探索设施 · 45 金币</small></button>
+        <button type="button" onclick="confirmBuy('hp')"><span>${hpGoods.name}</span><small>${hpGoods.desc} · ${hpGoods.price} 金币</small></button>
+        <button type="button" onclick="confirmBuy('mp')"><span>${mpGoods.name}</span><small>${mpGoods.desc} · ${mpGoods.price} 金币</small></button>
+        <button type="button" onclick="confirmBuy('beacon')"><span>${beaconGoods.name}</span><small>${beaconGoods.desc} · ${beaconGoods.price} 金币</small></button>
         ${universalKeyRow}
         ${equipmentRows}
       </div>
@@ -765,13 +772,25 @@ export function createInventoryRuntime(ctx) {
     if (!merchant) return false;
     if (merchant.sellsUniversalKey === undefined) {
       merchant.sellsUniversalKey =
-        random() < Math.min(0.28, 0.08 + state.floor * 0.006 + Math.max(0, merchantTrust(state)) * 0.012);
+        random() < merchantUniversalKeyChance(state.floor, merchantTrust(state));
     }
     return !!merchant.sellsUniversalKey;
   }
 
   function universalKeyPrice() {
-    return Math.max(42, Math.round(58 * merchantPriceFactor(state)));
+    return merchantUniversalKeyPrice(merchantPriceFactor(state));
+  }
+
+  function merchantPurchasePreview(kind) {
+    const goods = shopGoodConfig(kind);
+    const fixedPrice = "price" in goods ? goods.price : 0;
+    return {
+      kind,
+      name: goods.name,
+      desc: goods.desc,
+      amount: goods.amount,
+      price: kind === "universalKey" ? universalKeyPrice() : fixedPrice
+    };
   }
 
   function ensureMerchantStock(merchant = currentMerchant()) {
@@ -804,7 +823,7 @@ export function createInventoryRuntime(ctx) {
   }
 
   function merchantEquipmentPrice(entry) {
-    const qualityBonus = { 普通: 0, 优秀: 8, 稀有: 22, 史诗: 48, 传说: 90 }[entry.quality] || 0;
+    const qualityBonus = equipmentQualityConfig(entry.quality).merchantPriceBonus;
     return Math.max(
       24,
       Math.round((itemScore(entry) * 1.45 + state.floor * 5 + qualityBonus) * merchantPriceFactor(state))
@@ -980,6 +999,7 @@ export function createInventoryRuntime(ctx) {
     isBlockingInteraction,
     knownTeleportTargets: withState(knownTeleportTargets),
     landingNear,
+    merchantPurchasePreview: withState(merchantPurchasePreview),
     merchantSellRows: withState(merchantSellRows),
     merchantSalvageRows: withState(merchantSalvageRows),
     openForge: withState(openForge),

@@ -32,12 +32,33 @@ vm.runInContext(
   assert.strictEqual(audioEnabled, false, "audio should be muted by default on first open");
   assert.strictEqual(saveSlots().length, 8, "start screen should expose multiple save slots");
   assert(saveSlotCard({ id: "slot-2", label: "存档 2", meta: null }).includes("空存档"), "empty save slots should invite new games");
+  assert.strictEqual(BALANCE_CONFIG.equipmentQuality["传说"].score, 50, "balance config should own legendary item scoring");
+  assert.strictEqual(enhanceCostForEquipment({ quality: "传说", level: 2 }).gold, 76, "balance config should own enhance gold scaling");
+  assert.deepStrictEqual(CLASSES.warrior.growth, BALANCE_CONFIG.classGrowth.warrior, "balance config should own class growth values");
+  assert.strictEqual(merchantPurchasePreview("hp").price, BALANCE_CONFIG.shopGoods.hp.price, "balance config should own basic shop prices");
+  assert.strictEqual(
+    equipmentSellValueFromScore(10, 1),
+    Math.max(
+      BALANCE_CONFIG.equipmentSell.minGold,
+      Math.round(10 * BALANCE_CONFIG.equipmentSell.scoreMultiplier + BALANCE_CONFIG.equipmentSell.goldPerLevel)
+    ),
+    "balance config should own equipment sell value scaling"
+  );
+  assert.deepStrictEqual(
+    equipmentSalvageValue({ kind: "equip", slot: "weapon", quality: "传说", level: 2, stats: {}, runeSlots: 0, runes: [] }),
+    { dust: 5, stones: 1 },
+    "balance config should own equipment salvage returns"
+  );
   assert(CLASSES.warrior.hp < 60 && CLASSES.mage.hp < 40, "classes should start from a low-value baseline");
   assert(CLASSES.warrior.role && CLASSES.mage.primary && CLASSES.ranger.growth?.primary, "classes should expose clear role, primary stat, and growth identity");
   assert(CLASSES.ranger.passives.some((passive) => passive.id === "ranger_combo"), "ranger combo should be declared as a data-driven passive");
   renderClassSelect("slot-1");
   assert(getElement("classSelect").innerHTML.includes("游击连击"), "class selection should show passive names");
   assert(getElement("classSelect").innerHTML.includes("连击/速度"), "class selection should show passive tags");
+  assert(getElement("classSelect").innerHTML.includes("class-stat-grid"), "class selection should summarize starting stats");
+  assert(getElement("classSelect").innerHTML.includes("生命") && getElement("classSelect").innerHTML.includes("成长"), "class selection should expose baseline and growth data");
+  assert(getElement("classSelect").innerHTML.includes("3 属性点"), "class selection should disclose starter customization resources");
+  assert(getElement("classSelect").innerHTML.includes("class-builds"), "class selection should offer quick opening build presets");
   assert.deepStrictEqual(weaponPrimaryStats("dagger"), ["atk", "spd"], "ranger daggers should drop attack plus speed");
   assert.deepStrictEqual(weaponPrimaryStats("staff"), ["mag", "mp"], "mage staffs should drop magic plus mp");
   assert.deepStrictEqual(weaponPrimaryStats("sword"), ["atk", "def"], "warrior swords should drop attack plus defense");
@@ -77,9 +98,12 @@ vm.runInContext(
     log: []
   };
   currentSaveSlot = "slot-2";
+  state.narrative.endingId = "trade_route";
   saveGame(false);
   assert(localStorage.getItem(saveSlotKey("slot-2")), "saving should write the active slot instead of only a single global save");
   assert(saveSlots().find((slot) => slot.id === "slot-2").meta, "saving should update the slot list metadata");
+  assert.strictEqual(saveSlots().find((slot) => slot.id === "slot-2").meta.endingTitle, "结局：商路重开", "save metadata should surface completed endings");
+  assert(saveSlotCard(saveSlots().find((slot) => slot.id === "slot-2")).includes("结局：商路重开"), "save slot cards should display ending titles");
   state.floor = 10;
   state.floorStates = Object.fromEntries(
     Array.from({ length: 20 }, (_, index) => [
@@ -159,6 +183,7 @@ vm.runInContext(
     const matchedWeapon = randomEquipment();
     assert.strictEqual(matchedWeapon.weaponType, "dagger", "70 percent equipment path should prefer class weapon pools");
     assert(matchedWeapon.stats.atk > 0 && matchedWeapon.stats.spd > 0, "dagger drops should carry both atk and spd");
+    assert.strictEqual(matchedWeapon.runeSlots, BALANCE_CONFIG.equipmentQuality[matchedWeapon.quality].runeSlots, "dropped equipment rune slots should come from balance quality config");
     const offClassRolls = [0.8, 0.99, 0.05, 0.99, 0.99];
     Math.random = () => offClassRolls.shift() ?? 0.99;
     const offClassWeapon = randomEquipment();
@@ -188,6 +213,16 @@ vm.runInContext(
   assert(compare.includes("评分差"), "score delta should be labeled as a delta instead of item score");
   assert(compare.includes("评分差 +"), "inventory equipment should show positive score delta");
   assert(compare.includes("攻击差 +3"), "inventory equipment should compare changed stats");
+  state.equipment.weapon = { id: "quality-base", kind: "equip", name: "普通剑", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 };
+  const qualityScoreSamples = ["普通", "优秀", "稀有", "史诗", "传说"].map((quality) => {
+    const markup = equipmentCompareText({ id: "quality-" + quality, kind: "equip", name: quality + "剑", slot: "weapon", quality, stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 });
+    return Number(markup.match(/compare-arrow[^>]*>[^<]*<\\/span>\\s*<span>([+-]?\\d+)<\\/span>/)?.[1] || 0);
+  });
+  assert(
+    qualityScoreSamples.every((score, index) => index === 0 || score > qualityScoreSamples[index - 1]),
+    "equipment score should increase monotonically across Chinese quality tiers"
+  );
+  state.equipment.weapon = { id: "old", kind: "equip", name: "Old Sword", slot: "weapon", quality: "普通", stats: { atk: 5 }, runeSlots: 0, runes: [], level: 0 };
   assert(equippedStateBadge(), "equipment rows should have an equipped badge");
   assert.strictEqual(canUnequipSlot("weapon"), true, "equipped slot can be unequipped");
   const mageWeapon = { id: "staff", kind: "equip", name: "Wrong Staff", slot: "weapon", weaponType: "staff", quality: "优秀", stats: { mag: 8 }, runeSlots: 0, runes: [], level: 0 };
@@ -343,6 +378,18 @@ vm.runInContext(
   const branchedSkills = renderSkillActionButtons("battle");
   assert(branchedSkills.includes("余烬"), "branched skills should show the selected branch in battle");
   assert(branchedSkills.includes("火属性"), "elemental skills should show their element");
+  state.skillLevels = { fireball: 2 };
+  state.skillBranches = {};
+  state.skillPoints = 1;
+  state.skillDust = 3;
+  state.learnedSkillIds = ["fireball", "frost", "shield"];
+  confirmUpgradeSkill("fireball");
+  assert(modalState().body.includes("伤害 +18%"), "branch choice modal should summarize power tradeoffs");
+  assert(modalState().body.includes("持续 +3"), "branch choice modal should summarize status tradeoffs");
+  state.skillLevels = { fireball: 3 };
+  state.skillBranches = { fireball: "ember" };
+  renderSkills();
+  assert(getElement("tabBody").innerHTML.includes("持续 +3"), "skill list should keep showing selected branch numeric effects");
   state.hp = 120;
   state.stats = { ...CLASSES.warrior.stats };
   state.equipment = {

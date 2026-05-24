@@ -1,4 +1,11 @@
-import { CLASSES, MAX_FLOOR, RUNES, SLOTS } from "../constants";
+import {
+  BALANCE_CONFIG,
+  CLASSES,
+  MAX_FLOOR,
+  RUNES,
+  SLOTS,
+  skillDustCostForTargetLevel
+} from "../constants";
 import {
   PLAYER_ELEMENT_RESIST,
   elementMatchLabel,
@@ -8,6 +15,7 @@ import {
 import { QUEST_DEFS } from "../quest/quests";
 import { clearBattleFx, resetBattleFx, setBattleFx } from "./combatFx";
 import { discoverLorePage } from "../quest/lore";
+import { determineEnding } from "../quest/narrative";
 import { advanceTutorial } from "../tutorial/tutorial";
 import { overlevelXpMultiplier, skillPointGainForLevel, xpForNextLevel } from "../progression";
 import { choice, rand, random, uid } from "../random";
@@ -249,10 +257,12 @@ export function createCombatRuntime(ctx) {
     const multiplier = elementMultiplier(element, enemy, state.classId, options);
     const crit = random() < critChance(totals());
     const damage = Math.max(1, Math.round(amount * multiplier * (crit ? 1.7 : 1)));
+    const previousHp = Number(enemy.hp || 0);
     enemy.hp = Math.max(0, Math.round(enemy.hp - damage));
     if (typeof options.onHit === "function") options.onHit({ damage, multiplier, crit });
     const match = elementMatchLabel(multiplier);
     const elementText = elementName(element);
+    const phaseNotice = enemyPhaseNotice(enemy, previousHp);
     const fxLabel = [label, elementText, match].filter(Boolean).join("·");
     setBattleFx("enemy", {
       type: crit ? "crit" : "hit",
@@ -260,7 +270,253 @@ export function createCombatRuntime(ctx) {
       text: `-${damage}`,
       label: fxLabel
     });
-    return `${label}${elementText ? `（${elementText}）` : ""}${crit ? "暴击" : ""}，造成 ${damage} 点伤害${match ? `（${match}）` : ""}。`;
+    if (phaseNotice) setBattleFx("center", { type: "guard", text: "阶段变化" });
+    return `${label}${elementText ? `（${elementText}）` : ""}${crit ? "暴击" : ""}，造成 ${damage} 点伤害${match ? `（${match}）` : ""}。${phaseNotice ? ` ${phaseNotice}` : ""}`;
+  }
+
+  function enemyPhaseNotice(enemy, previousHp) {
+    if (!(enemy.type === "boss" || enemy.roomBoss) || enemy.hp <= 0) return "";
+    const maxHp = Number(enemy.maxHp || 0);
+    if (maxHp <= 0) return "";
+    const before = Number(previousHp || 0) / maxHp;
+    const after = Number(enemy.hp || 0) / maxHp;
+    enemy._phaseFlags = Array.isArray(enemy._phaseFlags) ? enemy._phaseFlags : [];
+    const notices = [
+      {
+        id: "shift",
+        threshold: BALANCE_CONFIG.bossPhaseThresholds.shift,
+        text: `${enemy.name}进入转阶段，攻防节奏开始收紧。`
+      },
+      {
+        id: "crisis",
+        threshold: BALANCE_CONFIG.bossPhaseThresholds.crisis,
+        text: `${enemy.name}进入濒危阶段，恢复与压制行动会更频繁。`
+      }
+    ];
+    return notices
+      .filter((notice) => before > notice.threshold && after <= notice.threshold)
+      .filter((notice) => {
+        if (enemy._phaseFlags.includes(notice.id)) return false;
+        enemy._phaseFlags.push(notice.id);
+        addBossPhaseScript(enemy, notice.id);
+        applyBossPhaseMechanic(enemy, notice.id);
+        return true;
+      })
+      .map((notice) => notice.text)
+      .join(" ");
+  }
+
+  function addBossPhaseScript(enemy, phaseId) {
+    enemy._phaseScriptIds = Array.isArray(enemy._phaseScriptIds) ? enemy._phaseScriptIds : [];
+    if (enemy._phaseScriptIds.includes(phaseId)) return;
+    const script = bossPhaseSkill(enemy, phaseId);
+    if (!script) return;
+    enemy.skills = enemy.skills || [];
+    if (!enemy.skills.some((skill) => skill.id === script.id)) enemy.skills.unshift(script);
+    enemy._phaseScriptIds.push(phaseId);
+  }
+
+  function bossPhaseSkill(enemy, phaseId) {
+    const profile = enemy.bossProfile || (enemy.roomBoss ? "room-boss" : "boss");
+    const element = enemy.element || "dark";
+    const script = bossPhaseScriptForProfile(profile, phaseId, element);
+    if (script) return script;
+    if (phaseId === "shift") {
+      return {
+        id: `${profile}-phase-pressure`,
+        name: "阶段压制",
+        type: "weaken",
+        element,
+        power: 1.02,
+        chance: 0.72
+      };
+    }
+    if (phaseId === "crisis") {
+      return {
+        id: `${profile}-last-rite`,
+        name: "残响汲取",
+        type: "drain",
+        element,
+        power: 1.08,
+        chance: 0.76
+      };
+    }
+    return null;
+  }
+
+  function bossPhaseScriptForProfile(profile, phaseId, element) {
+    const scripts: Record<string, Record<string, { name: string; type: string; power: number; chance: number }>> = {
+      moss: {
+        shift: { name: "根网收束", type: "weaken", power: 1.04, chance: 0.74 },
+        crisis: { name: "苔石复生", type: "heal", power: 0.2, chance: 0.76 }
+      },
+      mine: {
+        shift: { name: "矿脉硬壳", type: "guard", power: 1.1, chance: 0.76 },
+        crisis: { name: "雷矿崩裂", type: "damage", power: 1.18, chance: 0.78 }
+      },
+      frost: {
+        shift: { name: "霜压锁步", type: "weaken", power: 1, chance: 0.74 },
+        crisis: { name: "白霜回涌", type: "drain", power: 1.08, chance: 0.78 }
+      },
+      ember: {
+        shift: { name: "炉心升温", type: "damage", power: 1.16, chance: 0.76 },
+        crisis: { name: "赤焰汲燃", type: "drain", power: 1.1, chance: 0.78 }
+      },
+      archive: {
+        shift: { name: "墨封改写", type: "weaken", power: 1.06, chance: 0.76 },
+        crisis: { name: "残页回收", type: "drain", power: 1.06, chance: 0.78 }
+      },
+      fungal: {
+        shift: { name: "孢幕缠绕", type: "weaken", power: 1.02, chance: 0.74 },
+        crisis: { name: "菌潮回生", type: "heal", power: 0.22, chance: 0.78 }
+      },
+      cistern: {
+        shift: { name: "沉钟回潮", type: "weaken", power: 1, chance: 0.74 },
+        crisis: { name: "溺响汲流", type: "drain", power: 1.08, chance: 0.78 }
+      },
+      astral: {
+        shift: { name: "星图护幕", type: "guard", power: 1.1, chance: 0.76 },
+        crisis: { name: "镜星裁决", type: "damage", power: 1.16, chance: 0.78 }
+      },
+      shadow: {
+        shift: { name: "黑旗压阵", type: "weaken", power: 1.04, chance: 0.76 },
+        crisis: { name: "影幕汲取", type: "drain", power: 1.12, chance: 0.8 }
+      },
+      void: {
+        shift: { name: "虚空错步", type: "weaken", power: 1.06, chance: 0.76 },
+        crisis: { name: "裂隙吞噬", type: "damage", power: 1.2, chance: 0.8 }
+      },
+      throne: {
+        shift: { name: "王座敕令", type: "weaken", power: 1.08, chance: 0.78 },
+        crisis: { name: "记忆回灌", type: "drain", power: 1.12, chance: 0.8 }
+      }
+    };
+    const data = scripts[profile]?.[phaseId];
+    if (!data) return null;
+    return {
+      id: `${profile}-${phaseId}-script`,
+      name: data.name,
+      type: data.type,
+      element,
+      power: data.power,
+      chance: data.chance
+    };
+  }
+
+  function applyBossPhaseMechanic(enemy, phaseId) {
+    const profile = enemy.bossProfile || (enemy.roomBoss ? "room-boss" : "boss");
+    const key = `${profile}:${phaseId}`;
+    enemy._bossMechanicFlags = Array.isArray(enemy._bossMechanicFlags) ? enemy._bossMechanicFlags : [];
+    if (enemy._bossMechanicFlags.includes(key)) return;
+    enemy._bossMechanicFlags.push(key);
+    primeBossNextIntent(enemy, profile, phaseId);
+    const amount = bossMechanicAmount(enemy, phaseId);
+    const mechanics = {
+      moss: () => bossMechanicGuard(enemy, amount, "根网合拢"),
+      mine: () => bossMechanicGuard(enemy, amount + 2, "矿壳增厚"),
+      frost: () => bossMechanicCooldown(phaseId === "shift" ? 1 : 2, "霜线拖慢了你的技能节奏。"),
+      fungal: () => bossMechanicHeal(enemy, amount, "菌潮修复了首领的伤口。"),
+      cistern: () => bossMechanicMpDrain(amount, "沉钟潮声抽走了法力。"),
+      ember: () => bossMechanicHpChip(amount, "炉心热浪灼伤了你。"),
+      archive: () => bossMechanicCooldown(1, "墨封改写了你的施法顺序。"),
+      astral: () => bossMechanicGuard(enemy, amount, "星图护幕展开"),
+      shadow: () => bossMechanicHpDrain(enemy, amount, "影幕把伤口缝回首领身上。"),
+      void: () => bossMechanicDisrupt(amount, "裂隙吞掉了护盾与法力。"),
+      throne: () => bossMechanicThrone(enemy, amount)
+    };
+    const apply = mechanics[profile];
+    if (apply) apply();
+  }
+
+  function bossMechanicAmount(enemy, phaseId) {
+    const floor = Number(state.floor || 1);
+    const base = Math.max(3, Math.round(floor * 0.35 + Number(enemy.atk || 0) * 0.12));
+    return phaseId === "crisis" ? Math.round(base * 1.35) : base;
+  }
+
+  function bossMechanicGuard(enemy, amount, label) {
+    enemy._guard = Math.max(Number(enemy._guard || 0), amount);
+    log(`${label}，${enemy.name}获得 ${amount} 点阶段护盾。`);
+  }
+
+  function bossMechanicHeal(enemy, amount, text) {
+    const heal = Math.min(Math.max(0, Number(enemy.maxHp || 0) - Number(enemy.hp || 0)), amount);
+    enemy.hp = Math.min(enemy.maxHp, enemy.hp + heal);
+    if (heal > 0) log(`${text}恢复 ${heal} 点生命。`);
+  }
+
+  function bossMechanicMpDrain(amount, text) {
+    const drain = Math.min(Math.max(0, Number(state.mp || 0)), amount);
+    state.mp = Math.max(0, Number(state.mp || 0) - drain);
+    if (drain > 0) log(`${text}法力 -${drain}。`);
+  }
+
+  function bossMechanicHpChip(amount, text) {
+    const damage = Math.min(Math.max(1, Number(state.hp || 1) - 1), amount);
+    state.hp = Math.max(1, Number(state.hp || 1) - damage);
+    log(`${text}生命 -${damage}。`);
+  }
+
+  function bossMechanicHpDrain(enemy, amount, text) {
+    bossMechanicHpChip(amount, text);
+    bossMechanicHeal(enemy, Math.max(1, Math.round(amount * 0.65)), "影幕回流");
+  }
+
+  function bossMechanicCooldown(turns, text) {
+    state.skillCooldowns = state.skillCooldowns || {};
+    for (const id of state.equippedSkillIds || []) {
+      state.skillCooldowns[id] = Math.max(Number(state.skillCooldowns[id] || 0), turns);
+    }
+    log(text);
+  }
+
+  function bossMechanicDisrupt(amount, text) {
+    state._guard = 0;
+    bossMechanicMpDrain(Math.max(1, Math.round(amount * 0.7)), text);
+  }
+
+  function bossMechanicThrone(enemy, amount) {
+    bossMechanicGuard(enemy, amount, "王座护印重组");
+    bossMechanicCooldown(1, "王座敕令压住了你的技能轮转。");
+  }
+
+  function primeBossNextIntent(enemy, profile, phaseId) {
+    const intents = bossIntentProfile(profile);
+    const intent = intents?.[phaseId];
+    if (!intent) return;
+    enemy._bossNextIntent = intent;
+    log(`${enemy.name}的下一步意图变得清晰：${bossIntentLabel(intent)}。`);
+  }
+
+  function bossIntentProfile(profile) {
+    const profiles = {
+      moss: { shift: "weaken", crisis: "heal" },
+      mine: { shift: "guard", crisis: "damage" },
+      frost: { shift: "weaken", crisis: "drain" },
+      ember: { shift: "damage", crisis: "drain" },
+      archive: { shift: "weaken", crisis: "drain" },
+      fungal: { shift: "weaken", crisis: "heal" },
+      cistern: { shift: "weaken", crisis: "drain" },
+      astral: { shift: "guard", crisis: "damage" },
+      shadow: { shift: "weaken", crisis: "drain" },
+      void: { shift: "weaken", crisis: "damage" },
+      throne: { shift: "weaken", crisis: "drain" },
+      boss: { shift: "weaken", crisis: "drain" },
+      "room-boss": { shift: "guard", crisis: "damage" }
+    };
+    return profiles[profile] || null;
+  }
+
+  function bossIntentLabel(intent) {
+    return (
+      {
+        damage: "爆发攻击",
+        guard: "防御护盾",
+        heal: "恢复生命",
+        drain: "汲取反扑",
+        weaken: "压制削弱"
+      }[intent] || "特殊行动"
+    );
   }
 
   function basicAttack(enemy, t, label = "普通攻击") {
@@ -338,7 +594,7 @@ export function createCombatRuntime(ctx) {
   // 执行职业技能效果，例如护盾、中毒、灼烧或连射。
   function castSkill(enemy, skill, t) {
     if (skill.type === "guard") {
-      state._guard = 6 + t.def;
+      state._guard = guardAmount(skill, t);
       setBattleFx("hero", { type: "guard", text: `-${state._guard}`, label: "格挡" });
       return dealDamage(enemy, skillDamageAmount(skill, t, enemy), "格挡反击", currentWeaponElement());
     }
@@ -404,6 +660,10 @@ export function createCombatRuntime(ctx) {
           (state.maxHp || 0) * Number(skill.hpMultiplier || 0)
       )
     );
+  }
+
+  function guardAmount(skill, t) {
+    return Math.max(1, Math.round(6 + (t.def || 0) * (1 + Number(skill.power || 0))));
   }
 
   function applyDamageStatus(enemy, skill, damage) {
@@ -477,10 +737,12 @@ export function createCombatRuntime(ctx) {
     }
     const skill = chooseEnemySkill(enemy);
     if (skill) {
+      enemy._lastSkillId = skill.id;
       enemySkillTurn(enemy, skill, t);
       if (state.hp <= 0) death();
       return;
     }
+    enemy._lastSkillId = "";
     let damage = normalEnemyAttackDamage(enemy, t);
     const guarded = !!state._guard;
     if (state._guard) {
@@ -533,17 +795,50 @@ export function createCombatRuntime(ctx) {
     const hpRatio = enemy.maxHp ? enemy.hp / enemy.maxHp : 1;
     const baseChance =
       enemy.type === "boss" ? 0.54 : enemy.type === "elite" || enemy.roomBoss ? 0.42 : 0.24;
+    const primed = consumeBossPrimedSkill(enemy, enemy.skills);
+    if (primed) return primed;
     const filteredSkills = enemy.skills.filter((skill) => {
       if (skill.type === "heal" && hpRatio > 0.55) return false;
       if (skill.type === "guard" && enemy._guard) return false;
       return true;
     });
+    const priority = tacticalPrioritySkill(enemy, filteredSkills, hpRatio);
+    if (priority) return priority;
     const candidates = filteredSkills.filter((skill) => {
       return random() < (skill.chance || baseChance);
     });
     if (!candidates.length && filteredSkills.length && random() < baseChance * 0.35)
       return choice(filteredSkills);
     return candidates.length ? choice(candidates) : null;
+  }
+
+  function consumeBossPrimedSkill(enemy, skills) {
+    if (!(enemy.type === "boss" || enemy.roomBoss) || !enemy._bossNextIntent) return null;
+    const intent = enemy._bossNextIntent;
+    enemy._bossNextIntent = "";
+    return skills.find((skill) => skill.type === intent && enemy._lastSkillId !== skill.id) || null;
+  }
+
+  function tacticalPrioritySkill(enemy, skills, hpRatio) {
+    if (!(enemy.type === "boss" || enemy.type === "elite" || enemy.roomBoss)) return null;
+    if (hpRatio <= 0.35) {
+      const recovery = skills.find((skill) => skill.type === "heal" || skill.type === "drain");
+      if (recovery && enemy._lastSkillId !== recovery.id) return recovery;
+    }
+    const pressure = skills.find((skill) => skill.type === "weaken" || skill.type === "damage");
+    if (
+      (enemy.type === "boss" || enemy.roomBoss) &&
+      hpRatio <= BALANCE_CONFIG.bossPhaseThresholds.shift &&
+      pressure &&
+      enemy._lastSkillId !== pressure.id
+    ) {
+      return pressure;
+    }
+    const guard = skills.find((skill) => skill.type === "guard");
+    if ((enemy.type === "elite" || enemy.roomBoss) && guard && !enemy._guard && enemy._lastSkillId !== guard.id) {
+      return guard;
+    }
+    return null;
   }
 
   function enemySkillTurn(enemy, skill, t) {
@@ -863,7 +1158,7 @@ export function createCombatRuntime(ctx) {
     const enemy = state.currentEnemy || { def: 0 };
     if (skill.type === "guard") {
       const damage = Math.max(1, Math.round(skillDamageAmount(skill, t, enemy)));
-      return `伤害 ${damage} · 格挡 ${6 + t.def}`;
+      return `伤害 ${damage} · 格挡 ${guardAmount(skill, t)}`;
     }
     if (skill.type === "shield") return `护盾 ${shieldAmount(skill, t)}`;
     if (skill.type === "evade") {
@@ -889,7 +1184,7 @@ export function createCombatRuntime(ctx) {
   function skillUpgradeCost(skillId) {
     const nextLevel = skillLevel(skillId) + 1;
     if (nextLevel > MAX_SKILL_LEVEL) return { points: 0, dust: 0, maxed: true };
-    return { points: 1, dust: nextLevel };
+    return { points: 1, dust: skillDustCostForTargetLevel(nextLevel) };
   }
 
   function canUpgradeSkill(skillId) {
@@ -930,9 +1225,10 @@ export function createCombatRuntime(ctx) {
     while (state.xp >= state.xpNext) levelUp();
     if (state.level > levelBefore) rewards.push(`等级提升到 Lv.${state.level}`);
     if (enemy.type === "boss") {
+      const ending = state.floor >= MAX_FLOOR ? determineEnding(state) : null;
       showModal(
-        "通关",
-        `<p>第 ${MAX_FLOOR} 层的符文守王倒下了，地牢深处的王座重新安静下来。</p>${battleResultList(rewards, "最终战利品")}`,
+        ending?.title || "通关",
+        `${ending ? endingMarkup(ending) : `<p>第 ${MAX_FLOOR} 层的符文守王倒下了，地牢深处的王座重新安静下来。</p>`}${battleResultList(rewards, "最终战利品")}`,
         [{ text: "继续整理装备", action: closeModal }]
       );
     } else {
@@ -942,6 +1238,18 @@ export function createCombatRuntime(ctx) {
         [{ text: "收下", action: closeModal }]
       );
     }
+  }
+
+  function endingMarkup(ending) {
+    const consequences = state.narrative?.endingConsequences || [];
+    return `
+      <section class="ending-panel">
+        <p>${ending.summary}</p>
+        <p>${ending.consequence}</p>
+        ${consequences.length ? `<ul>${consequences.map((entry) => `<li>${entry}</li>`).join("")}</ul>` : ""}
+        <div class="event-tags">${ending.highlights.map((entry) => `<span>${entry}</span>`).join("")}</div>
+      </section>
+    `;
   }
 
   function enemyXpReward(enemy) {
@@ -1044,6 +1352,7 @@ export function createCombatRuntime(ctx) {
     if (enemy.type === "boss") dropEquipment(enemy, drops);
     const rolls = lootRollCount(enemy, reward);
     for (let i = 0; i < rolls; i++) rollLootDrop(enemy, drops, reward);
+    ensureEliteUpgradeResource(enemy, drops, reward);
     if (!drops.length) drops.push("未发现额外掉落");
     return drops;
   }
@@ -1100,6 +1409,16 @@ export function createCombatRuntime(ctx) {
     if (roll < dustWeight) return dropSkillDust(enemy, drops, reward);
     if (roll < materialWeight) return dropMaterial(drops, reward);
     return dropBonusGold(enemy, drops, reward);
+  }
+
+  function ensureEliteUpgradeResource(enemy, drops, reward = 1) {
+    if (!(enemy.type === "elite" || enemy.roomBoss)) return false;
+    const hasUpgradeResource = drops.some(
+      (drop) => drop.startsWith("材料") || drop.startsWith("技能尘")
+    );
+    if (hasUpgradeResource) return false;
+    if (!enemy.roomBoss && random() >= 0.55) return false;
+    return random() < 0.5 ? dropMaterial(drops, reward) : dropSkillDust(enemy, drops, reward);
   }
 
   function dropEquipment(enemy, drops) {
