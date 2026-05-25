@@ -386,7 +386,12 @@ export function createInteractionRuntime(ctx) {
       state.universalKeys--;
       used = "万能钥匙";
     }
-    cell.object = null;
+    cell.terrain = "floor";
+    cell.object = {
+      type: "roomEntrance",
+      roomId: lock.roomId || cell.roomId || "",
+      roomName: lock.roomName || api.roomName?.(lock.roomId || cell.roomId) || "房间"
+    };
     playSound("chest");
     log(`使用${used}打开了${lock.roomName || "上锁房门"}。`);
     showEvent("房门已开", `<p>你使用${used}解开了门上的符文锁。</p>`, "进入房间");

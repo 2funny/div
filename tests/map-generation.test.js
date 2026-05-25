@@ -91,6 +91,19 @@ vm.runInContext(
   assert(state.map.rooms.length <= 10, "generated floor should avoid excessive labelled filler rooms");
   const roomNumbers = state.map.rooms.map((room) => Number(room.name.match(/\\d+/)?.[0]));
   assert.deepStrictEqual(roomNumbers, state.map.rooms.map((_, index) => index + 1), "room names should stay bounded to the generated room count");
+  const roomOrder = state.map.rooms.map((room) => {
+    const roomCells = generatedCells.filter((cell) => cell.roomId === room.id && cell.terrain !== "wall");
+    return {
+      name: room.name,
+      x: Math.min(...roomCells.map((cell) => cell.x)),
+      y: Math.min(...roomCells.map((cell) => cell.y))
+    };
+  });
+  assert.deepStrictEqual(
+    roomOrder,
+    [...roomOrder].sort((a, b) => a.y - b.y || a.x - b.x),
+    "room numbers should run from upper-left rooms toward lower-right rooms"
+  );
   assert(generatedCells.some((cell) => cell.object?.type === "rescueNpc"), "generated floor should include a rescue target NPC");
   const rescueGiver = generatedCells.find((cell) => cell.object?.questId === "rescueRoom" && cell.object?.type === "questNpc");
   assert(rescueGiver?.object.roomName, "rescue quest giver should name the target room");

@@ -1,7 +1,83 @@
 const assert = require("assert");
 const fs = require("fs");
+const zlib = require("zlib");
 const vm = require("vm");
 const { createTestContext } = require("./helpers/test-context");
+
+function readRgbaPng(path) {
+  const buffer = fs.readFileSync(path);
+  assert.strictEqual(buffer.toString("ascii", 1, 4), "PNG", `${path} should be a PNG file`);
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  const idat = [];
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  assert.strictEqual(bitDepth, 8, `${path} should use 8-bit channels`);
+  assert.strictEqual(colorType, 6, `${path} should be stored as RGBA so transparent door edges can be verified`);
+  const bytesPerPixel = 4;
+  const rowSize = width * bytesPerPixel;
+  const inflated = zlib.inflateSync(Buffer.concat(idat));
+  const rgba = Buffer.alloc(width * height * bytesPerPixel);
+  let source = 0;
+  for (let y = 0; y < height; y++) {
+    const filter = inflated[source++];
+    const rowStart = y * rowSize;
+    for (let x = 0; x < rowSize; x++) {
+      const raw = inflated[source++];
+      const left = x >= bytesPerPixel ? rgba[rowStart + x - bytesPerPixel] : 0;
+      const up = y > 0 ? rgba[rowStart + x - rowSize] : 0;
+      const upLeft = y > 0 && x >= bytesPerPixel ? rgba[rowStart + x - rowSize - bytesPerPixel] : 0;
+      let value = raw;
+      if (filter === 1) value = raw + left;
+      if (filter === 2) value = raw + up;
+      if (filter === 3) value = raw + Math.floor((left + up) / 2);
+      if (filter === 4) {
+        const p = left + up - upLeft;
+        const pa = Math.abs(p - left);
+        const pb = Math.abs(p - up);
+        const pc = Math.abs(p - upLeft);
+        value = raw + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft);
+      }
+      rgba[rowStart + x] = value & 255;
+    }
+  }
+  return { width, height, rgba };
+}
+
+function opaqueEdgeRatio(path, edgeWidthRatio = 0.22) {
+  const { width, height, rgba } = readRgbaPng(path);
+  const edgeWidth = Math.max(1, Math.floor(width * edgeWidthRatio));
+  let opaque = 0;
+  let total = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < edgeWidth; x++) {
+      if (rgba[(y * width + x) * 4 + 3] > 8) opaque++;
+      total++;
+    }
+    for (let x = width - edgeWidth; x < width; x++) {
+      if (rgba[(y * width + x) * 4 + 3] > 8) opaque++;
+      total++;
+    }
+  }
+  return opaque / total;
+}
 
 const storage = {};
 const context = createTestContext(assert, storage);
@@ -58,7 +134,14 @@ vm.runInContext(
   assert(getElement("classSelect").innerHTML.includes("class-stat-grid"), "class selection should summarize starting stats");
   assert(getElement("classSelect").innerHTML.includes("生命") && getElement("classSelect").innerHTML.includes("成长"), "class selection should expose baseline and growth data");
   assert(getElement("classSelect").innerHTML.includes("3 属性点"), "class selection should disclose starter customization resources");
-  assert(getElement("classSelect").innerHTML.includes("class-builds"), "class selection should offer quick opening build presets");
+  assert(!getElement("classSelect").innerHTML.includes("startGame('warrior', 'slot-1')"), "class cards should not allow starting before choosing an opening build");
+  assert(getElement("classSelect").innerHTML.includes("chooseClassBuild('warrior'"), "class cards should open a second step for opening build choices");
+  assert(!getElement("classSelect").innerHTML.includes("class-builds"), "class cards should not preview opening build choices before the second step");
+  assert(!getElement("classSelect").innerHTML.includes("先锋"), "class cards should not show opening build names before the second step");
+  assert(getElement("classSelect").innerHTML.includes(">选择</button>"), "class cards should use a neutral choose action label");
+  chooseClassBuild("warrior", "slot-1");
+  assert(modalState().body.includes("class-build-choice"), "opening build choices should move into the second-step modal");
+  assert(modalState().body.includes("closeModal();startGame('warrior', 'slot-1', 'vanguard')"), "choosing an opening build should close the modal before starting");
   assert.deepStrictEqual(weaponPrimaryStats("dagger"), ["atk", "spd"], "ranger daggers should drop attack plus speed");
   assert.deepStrictEqual(weaponPrimaryStats("staff"), ["mag", "mp"], "mage staffs should drop magic plus mp");
   assert.deepStrictEqual(weaponPrimaryStats("sword"), ["atk", "def"], "warrior swords should drop attack plus defense");
@@ -155,7 +238,7 @@ vm.runInContext(
   state = null;
   renderStartScreen();
   startNewGame();
-  assert(getElement("classSelect").innerHTML.includes(">开始</button>"), "new game class cards should start directly without save-slot wording");
+  assert(getElement("classSelect").innerHTML.includes(">选择</button>"), "new game class cards should route through opening build selection");
   assert(!getElement("classSelect").innerHTML.includes("写入"), "new game flow should not expose write-to-save-slot copy");
   assert.strictEqual(currentSaveSlot, "slot-2", "choosing a new game class should not switch saves before the class is selected");
   loadGame("slot-2");
@@ -355,6 +438,23 @@ vm.runInContext(
   state.map.cells[2][3].object = { type: "lockedDoor", keyId: "door-a", keyName: "1号房钥匙", roomName: "1号房" };
   state.player = { x: 0, y: 0 };
   state.classId = "warrior";
+  state.facing = "down";
+  state.player = { x: 1, y: 2 };
+  renderMap();
+  const playerOnDoorMarkup = getElement("map").innerHTML;
+  assert(playerOnDoorMarkup.includes("sprite player"), "standing on a door should still render the player sprite");
+  assert(playerOnDoorMarkup.includes('class="room-label'), "standing on a door should keep the door number visible");
+  assert(playerOnDoorMarkup.includes('class="room-label door-number"'), "main map room numbers should render as prominent door number plates");
+  assert(playerOnDoorMarkup.includes(">1</span>"), "main map door number plates should include the compact room number text");
+  assert(
+    (playerOnDoorMarkup.match(/class="room-label/g) || []).length >= 3,
+    "main map should label normal doors, unlocked room entrances, and locked room doors"
+  );
+  assert(
+    playerOnDoorMarkup.includes("room-label door-number locked-door-room-label"),
+    "locked room door labels should use an offset style so the lock art remains readable"
+  );
+  state.player = { x: 0, y: 0 };
   renderMinimap();
   const miniMarkup = getElement("minimap").innerHTML;
   assert(miniMarkup.includes("mini-room-label"), "minimap should stamp explored rooms with compact room numbers");
@@ -421,6 +521,8 @@ vm.runInContext(
   assert(ASSETS.ranger.includes("ranger") && !ASSETS.ranger.endsWith("player-ranger.png"), "ranger should use a refreshed dungeon character icon");
   assert(ASSETS.floor && ASSETS.wall, "floor and wall should have dedicated dungeon texture assets");
   assert(ASSETS.door && ASSETS.lockedDoor, "room doors should use dedicated dungeon image assets");
+  assert(ASSETS.door.includes("door-stone-open.png"), "unlocked doors should use the reviewed stone doorway sprite asset");
+  assert(ASSETS.lockedDoor.includes("door-stone-locked.png"), "locked doors should use the reviewed stone locked-door sprite asset");
   assert.strictEqual(objectSprite({ type: "questNpc" }).includes(ASSETS.questNpc), true, "quest NPC sprite should render its own asset");
   assert(objectSprite({ type: "roomEntrance" }).includes(ASSETS.door), "unlocked room entrances should render with the normal door image");
   assert(objectSprite({ type: "lockedDoor" }).includes(ASSETS.lockedDoor), "locked room doors should render with the locked door image");
@@ -453,6 +555,79 @@ assert(
   "equipment upgrade markers should not be hover-only"
 );
 assert(css.includes(".door::after"), "door art should include a layered dark dungeon overlay");
+assert(
+  css.includes("--door-panel-color: #171a20"),
+  "door art should use a dark gray-black base color"
+);
+assert(
+  css.includes("--open-door-slit-width: 30%"),
+  "unlocked door art should keep a wider open seam"
+);
+assert(
+  css.includes(".sprite.room-entrance img") && css.includes(".sprite.locked-door img"),
+  "room door sprites should size reviewed PNG images directly"
+);
+assert(
+  css.includes(".modal-card:has(.quest-contract-shell)"),
+  "quest prompt modals should have a dedicated width instead of inheriting the generic small modal"
+);
+assert(
+  css.includes(".quest-contract-board"),
+  "quest prompt should use a single compact contract board style"
+);
+assert(
+  css.includes(".quest-contract-meta"),
+  "quest prompt should style giver and location as a compact meta strip"
+);
+assert(
+  css.includes(".quest-contract-brief"),
+  "quest prompt should style target and reward as a compact summary grid"
+);
+assert(
+  opaqueEdgeRatio("public/assets/dawngeon/door-stone-open.png", 0.12) < 0.04,
+  "open door sprite side wall backing should be transparent so map tiles continue underneath"
+);
+assert(
+  opaqueEdgeRatio("public/assets/dawngeon/door-stone-locked.png", 0.12) < 0.04,
+  "locked door sprite side wall backing should be transparent so map tiles continue underneath"
+);
+assert(
+  css.includes("--room-door-width: 100%"),
+  "main map door assets should fill only their own tile width"
+);
+assert(
+  css.includes("--room-door-height: 100%"),
+  "main map door assets should fill only their own tile height"
+);
+assert(
+  css.includes("--room-door-bottom: 0"),
+  "main map door assets should not sink below the tile bounds"
+);
+assert(
+  css.includes(".tile.object-roomEntrance,\n.tile.object-lockedDoor {\n  overflow: hidden;"),
+  "room door tiles should clip the door asset to the tile instead of spilling into neighboring cells"
+);
+assert(
+  css.includes(".tile.object-roomEntrance .door-number"),
+  "room object numbers should be positioned beside the door art instead of covering the doorway"
+);
+assert(
+  css.includes(".locked-door-room-label"),
+  "locked door room numbers should have a dedicated offset style"
+);
+assert(!css.includes("--door-wall-block"), "door art should come from reviewed PNG assets instead of CSS-painted wall blocks");
+assert(!css.includes("--door-arch-stone"), "door art should come from reviewed PNG assets instead of CSS-painted arches");
+assert(!css.includes("--door-wood"), "locked door wood should come from the reviewed PNG asset");
+assert(!css.includes("--door-opening"), "open doorway depth should come from the reviewed PNG asset");
+assert(
+  css.includes(".door-number"),
+  "main map door numbers should have a dedicated visible badge style"
+);
+assert(
+  !css.includes("door-art-core") &&
+    !fs.readFileSync("src/game/render/mapPanel.ts", "utf8").includes("door-art-core"),
+  "door sprites should not be rebuilt from CSS pseudo-art layers"
+);
 assert(
   css.includes("bottom: 24px"),
   "interaction toasts should be anchored low instead of crowding the top edge"
@@ -549,4 +724,16 @@ assert(
 assert(
   !bindEventsSource.includes('"runeadmin"'),
   "admin code should not be written as a plaintext string"
+);
+assert(
+  bindEventsSource.includes('action.text === "继续"'),
+  "spacebar handling should detect dialogue continue actions before closing a modal"
+);
+assert(
+  bindEventsSource.includes("modalAction(actionIndex)"),
+  "spacebar should advance quest dialogue lines through the modal action handler"
+);
+assert(
+  bindEventsSource.includes('action.text.includes("查看委托")'),
+  "spacebar should open the quest prompt when dialogue reaches the commission action"
 );

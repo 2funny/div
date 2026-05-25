@@ -671,7 +671,7 @@ export function createInventoryRuntime(ctx) {
     if (hasTask) actions.push({ text: "查看任务", action: () => openQuestFromGiver("shop") });
     actions.push({ text: "离开", action: closeModal });
     showModal(
-      "流动商队",
+      "商队管事玛拉",
       `
     <div class="merchant-panel">
       <div class="merchant-hero">
@@ -700,7 +700,7 @@ export function createInventoryRuntime(ctx) {
     const mpGoods = merchantPurchasePreview("mp");
     const beaconGoods = merchantPurchasePreview("beacon");
     showModal(
-      "流动商队",
+      "商队管事玛拉",
       `
     <div class="merchant-panel">
       <div class="merchant-hero">

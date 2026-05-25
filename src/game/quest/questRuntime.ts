@@ -14,8 +14,9 @@ import {
   relationRewardBonus
 } from "./narrative";
 import { choice } from "../random";
-import { RUNES } from "../constants";
+import { ASSETS, CLASSES, RUNES } from "../constants";
 import { QUEST_DEFS } from "./quests";
+import { escapeHtml } from "../render/html";
 
 // 任务运行时维护任务定义到进度状态的转换、领取奖励和救援任务推进。
 export function createQuestRuntime(ctx) {
@@ -46,7 +47,55 @@ export function createQuestRuntime(ctx) {
       openSkillTrainer(source);
       return;
     }
-    openQuestFromGiver("questNpc", source || currentQuestSource("questNpc"));
+    const questSource = source || currentQuestSource("questNpc");
+    const def = questDefFromSource("questNpc", questSource);
+    openQuestDialogue(questSource);
+  }
+
+  function openQuestDialogue(source = null, step = 0) {
+    const def = questDefFromSource("questNpc", source);
+    if (!def) {
+      showEvent("暂无任务", "<p>这里暂时没有新的委托。</p>", "离开");
+      return;
+    }
+    const quest = questState(def.id, state.floor, def.roomId);
+    const name = def.giverName || source?.npcName || "委托人";
+    const dialogue = questDialogueState(def, quest, step);
+    const actions = [];
+    if (!quest) {
+      if (dialogue.hasNext) {
+        actions.push({
+          text: "继续",
+          action: () => openQuestDialogue(source, dialogue.nextStep)
+        });
+      } else {
+        actions.push({
+          text: "查看委托",
+          action: () => openQuestFromGiver("questNpc", source)
+        });
+      }
+    } else if (quest.completed && !quest.claimed) {
+      actions.push({
+        text: "查看报酬",
+        action: () => openQuestFromGiver("questNpc", source)
+      });
+    }
+    actions.push({ text: "离开", action: closeModal });
+    showModal(
+      "对话",
+      `
+      <div class="npc-dialogue-scene">
+        <div class="npc-portrait left muted">${portraitMarkup(heroPortraitSrc(), CLASSES[state.classId || "warrior"]?.name || "你")}</div>
+        <div class="npc-dialogue-bubble">
+          <span class="npc-dialogue-speaker">${escapeHtml(name)}</span>
+          <p>${escapeHtml(dialogueLineText(dialogue.text))}</p>
+          ${dialogue.hint ? `<small>${escapeHtml(dialogue.hint)}</small>` : ""}
+        </div>
+        <div class="npc-portrait right speaking">${portraitMarkup(ASSETS.questNpc, name)}</div>
+      </div>
+    `,
+      actions
+    );
   }
 
   function openSkillTrainer(source = null) {
@@ -235,8 +284,6 @@ export function createQuestRuntime(ctx) {
     const remaining = Math.max(0, def.target - progress.kills);
     const location = questLocationText(progress);
     const rewardGold = questRewardGold(def, progress.floor);
-    const relationText = relationLabel(state, relationForQuest(def));
-    const impactText = questImpactText(state, def);
     const rewardParts = [
       def.rewardKeys ? `符文钥匙 +${def.rewardKeys}` : "",
       def.rewardDoorKey ? `${def.doorKeyName || progress.doorKeyName || "房门钥匙"} +1` : "",
@@ -250,15 +297,47 @@ export function createQuestRuntime(ctx) {
       def.rewardPotion ? potionRewardText(def.rewardPotion) : ""
     ]
       .filter(Boolean)
+      .map((part) => escapeHtml(String(part)))
       .join("<br>");
+    const safeGiverName = escapeHtml(def.giverName);
+    const safeTitle = escapeHtml(def.title);
+    const safeDesc = escapeHtml(def.desc);
+    const safeLocation = escapeHtml(location);
+    const safeBackground = escapeHtml(questBackgroundText(def));
+    const progressText = `进度 ${progress.kills}/${def.target}${
+      remaining ? `，还差 ${remaining} 个` : progress.completed ? "，可以领取奖励" : "，去确认被困者安全"
+    }`;
     const body = `
-    <div class="quest-panel">
-      <b>${def.giverName}</b>
-      <p>${def.desc}</p>
-      <div class="event-tags"><span>${relationText}</span></div>
-      <small class="quest-impact">${impactText}</small>
-      <small>目标：${location} · 进度：${progress.kills}/${def.target}${remaining ? `，还差 ${remaining} 个。` : progress.completed ? "，可以领取奖励。" : "，去确认被困者安全。"}</small>
-      <div class="quest-reward">${rewardParts}</div>
+    <div class="quest-contract-shell">
+      <article class="quest-contract quest-contract-board">
+        <header class="quest-contract-head">
+          <div class="quest-contract-kicker">
+            <span class="quest-contract-giver">委托</span>
+            <span>任务摘要</span>
+          </div>
+          <b class="quest-contract-title">${safeTitle}</b>
+          <small>${safeDesc}</small>
+        </header>
+        <div class="quest-contract-meta">
+          <span><b>委托人</b><strong>${safeGiverName}</strong></span>
+          <span><b>地点</b><strong>${safeLocation}</strong></span>
+        </div>
+        <section class="quest-contract-background">
+          <b>背景</b>
+          <span>${safeBackground}</span>
+        </section>
+        <div class="quest-contract-grid quest-contract-brief">
+          <section>
+            <b>目标</b>
+            <small>${safeLocation}</small>
+            <span>${escapeHtml(progressText)}</span>
+          </section>
+          <section class="quest-contract-reward">
+            <b>报酬</b>
+            <span>${rewardParts}</span>
+          </section>
+        </div>
+      </article>
     </div>
   `;
     const actions = [];
@@ -282,7 +361,7 @@ export function createQuestRuntime(ctx) {
       actions.push({ text: quest.claimed ? "已领取" : "继续任务", action: closeModal });
     }
     actions.push({ text: "离开", action: closeModal });
-    showModal(def.title, body, actions);
+    showModal("委托详情", body, actions);
   }
 
   // 发放任务奖励，并把任务标记为已领取。
@@ -306,7 +385,7 @@ export function createQuestRuntime(ctx) {
               doorKeyId: quest.doorKeyId,
               doorKeyName: quest.doorKeyName,
               title: `${quest.roomName || "房门"}钥匙委托`,
-              giverName: "钥匙保管人"
+              giverName: "钥匙保管人诺维"
             }
           : QUEST_DEFS[id];
     if (!def || !quest || !quest.completed || quest.claimed) return;
@@ -370,6 +449,182 @@ export function createQuestRuntime(ctx) {
 
   function potionRewardText(kind) {
     return kind === "mp" ? "小型法力药水 +1" : "小型生命药水 +1";
+  }
+
+  function questDialogueText(def) {
+    return questDialogueCopy(def).lines[0] || "";
+  }
+
+  function questBackgroundText(def) {
+    return questDialogueCopy(def).background;
+  }
+
+  function questDialogueCopy(def) {
+    const room = def.roomName || def.targetRoomName || "目标房间";
+    const rescue = def.rescueName || "被困者";
+    const rescueName = rescueStoryName(rescue);
+    const copies = {
+      rescueRoom: {
+        lines: [
+          `${room}里被困的应该是${rescue}。我在门外听见了他留下的敲墙暗号。`,
+          `${rescueName}几天前外出采矿后就失踪了，我们沿着矿灯灰一路追到这里。`,
+          "我带人试着靠近过，门缝里全是怪物拖行铁器的声音。",
+          "先把里面清出来，再和人确认安全。只要还有回应，我就不能把人留在那里。"
+        ],
+        background: `卡尔的救援队在${room}外听见求救暗号，但门后怪物太密，贸然开门会把${rescue}推到更危险的位置。先清掉房间里的威胁，再和${rescue}确认安全；这条线会接到伊芙的幸存者暗记支线。`
+      },
+      wardenErrand: {
+        lines: [
+          "我昨夜巡灯时少了三盏，它们全灭在同一段路上。",
+          "那不是灯油的问题，是怪物学会了等我们换岗。",
+          "你把那段路重新压住，我就把符文钥匙交给你，赛拉那边也能收到这层的灯号。"
+        ],
+        background: "罗恩负责浅层巡夜线，赛拉负责把这些灯号接到更深层封印。清理本层目标可以恢复巡逻路线，并让后续巡夜接力、封印巡检更容易出现。"
+      },
+      eliteBounty: {
+        lines: [
+          "我把这只精英标成了红线目标，它一直沿着巡夜界线走。",
+          "它不是迷路，它是在记我们什么时候会退。",
+          "请把它处理掉。等它带着其他东西冲过来，赛拉的封印点会先被撕开。"
+        ],
+        background: "罗恩的悬赏名单只记录会组织反扑的精英目标。处理它能削弱本层压力，保护赛拉后续封印巡检的路线。"
+      },
+      roomPurge: {
+        lines: [
+          `我看到${room}的门楣一直在跳字，像有人在里面反复写同一句话。`,
+          "我的测绘笔一靠近那里就会自己改线，地图回路已经偏了。",
+          "清干净那里，我才能回收异常残响，后面的符文测绘才有基准。"
+        ],
+        background: "缇雅先记录异常房间，再把残响送去校准装备符文槽。净化房间能稳定该区域，并衔接符文测绘、符文校准支线。"
+      },
+      lockedRoomKey: {
+        lines: [
+          `我封住了${room}。门后不是没有东西，是东西太多了。`,
+          "如果现在开门，外面的怪物会一起涌进去，里面的东西也会出来。",
+          "先清理附近，我再把专用钥匙交给你；玛拉偶尔也能弄到万能钥匙，但别指望每次都有。"
+        ],
+        background: `诺维保管${room}的专用符文钥匙，他只在门外威胁被压住后交钥匙。完成委托后可获得这道门的专用钥匙；商队管事玛拉的万能钥匙也能作为替代路线。`
+      },
+      runeSurvey: {
+        lines: [
+          "你听见墙里那种低声重复了吗？我敢说那不是风，是符文回声。",
+          "我的测绘笔已经画出三条互相矛盾的路，再画下去会把后来的人带错。",
+          "清出一段安静区域，我才能把回路重新测下来。"
+        ],
+        background: "缇雅用测绘资料判断地牢回路何时改写，但回声目标会让记录失真。清理干扰源后，测绘结果会转化为技能资源，并推进缇雅的符文校准支线。"
+      },
+      wardenSeal: {
+        lines: [
+          "我刚检查过封条，边缘开始冒黑灰，说明下面有东西在顶它。",
+          "守卫被这股气息引来，不处理掉，封印会越裂越大。",
+          "帮我巡检这段封条，别让罗恩刚补回来的巡夜线在今晚断开。"
+        ],
+        background: "赛拉负责深层封印巡检，她会根据罗恩的浅层灯号判断哪里需要加固。完成后会奖励钥匙和技能点，并让巡夜路线继续向深层推进。"
+      },
+      wardenRelay: {
+        lines: [
+          "我在等上一盏前哨灯，可它到现在都没有亮。",
+          "我要把罗恩的浅层情报送到封印点，不能让后面的人盲着眼往深处走。",
+          "你打通这一段，下一名传令员才能接上路线。"
+        ],
+        background: "赛拉的巡夜接力把罗恩的浅层情报送往深层封印点。完成它会推进巡夜人任务链，后续更容易触发封印巡检和精英悬赏。"
+      },
+      survivorTrace: {
+        lines: [
+          "墙上的三道短痕是我教给幸存者的记号，不是旧划痕。",
+          "暗记到前面突然断了，说明留下它的人开始被追。",
+          "把追踪者清掉，后面的人才敢沿这条线走，卡尔救出来的人也会认得它。"
+        ],
+        background: "伊芙整理幸存者留下的暗记，卡尔救出的人会沿这些记号撤离。追踪者会反向寻找暗记源头，清理它们能让幸存者路线更可靠，并衔接撤离掩护支线。"
+      },
+      survivorEscort: {
+        lines: [
+          "我留下的这条撤离暗记已经被怪物闻到了，它们开始沿着记号回头找。",
+          "我知道后面还有人会照着它走，如果不挡住追来的东西，他们会直接撞进死路。",
+          "替我们守住这段路，至少撑到暗记被改掉。"
+        ],
+        background: "伊芙的撤离掩护保护的是一整条临时安全线，不是单个人。完成后幸存者会在后续事件中留下更多补给和路线线索。"
+      },
+      runeCalibration: {
+        lines: [
+          "我发现有些怪物身上挂着符文回声，像把坏掉的钟带在骨头里。",
+          "它们倒下时会留下短暂频率，正好能校准装备上的符文槽。",
+          "击败这些目标，我就能把那段频率收回来。"
+        ],
+        background: "缇雅先测绘回路，再用战斗残留校准符文槽频率。完成该委托后，可以更稳定地获得符文和技能尘。"
+      },
+      merchantRoute: {
+        lines: [
+          "我的补给车不怕路远，怕的是路每晚都变。",
+          "这段商路附近又有怪物靠过来，搬药的人不敢进。",
+          "你把路清出来，后面的补给才跟得上。"
+        ],
+        background: "商队管事玛拉依靠短距离安全路线搬运药水和信标。帮她清路能恢复补给通道，并让后续交易和补给回收支线更稳定。"
+      },
+      merchantCache: {
+        lines: [
+          "我有批补给箱被怪物压在岔路口，那里面不是普通药水。",
+          "里面有信标配件和法力补给，是往深层走的人最缺的东西。",
+          "拿回来，我给你更适合远行的工具，也会把你的名字记进商队账本。"
+        ],
+        background: "玛拉的补给回收会恢复商队深层库存。完成后商队能提供信标、法力补给和其他远行资源。"
+      }
+    };
+    return copies[def.id] || {
+      lines: [
+        "我这里有份委托，有点棘手。",
+        "事情不是今天才开始，只是现在终于压不住了。",
+        "报酬已经备好，你愿意听听细节吗？"
+      ],
+      background: "这是一份临时委托，完成后会推进对应支线，并改变后续部分事件回应。"
+    };
+  }
+
+  function questDialogueState(def, quest = null, step = 0) {
+    if (!quest) {
+      const lines = questDialogueCopy(def).lines.filter(Boolean);
+      const safeStep = Math.max(0, Math.min(lines.length - 1, Number(step) || 0));
+      return {
+        text: lines[safeStep] || questDialogueText(def),
+        hint: "",
+        hasNext: safeStep < lines.length - 1,
+        nextStep: safeStep + 1
+      };
+    }
+    if (quest.claimed) {
+      return {
+        text: "谢谢你。刚才那条路已经安静下来了，后面的人会记住这份人情。",
+        hint: "这个委托已经完成并领取报酬。"
+      };
+    }
+    if (quest.completed) {
+      return {
+        text: "辛苦了，我已经听见那边安静下来。来，把约好的报酬拿上。",
+        hint: "委托已经完成，可以领取报酬。"
+      };
+    }
+    return {
+      text: `请继续，目标还没有清完。现在是 ${quest.kills || 0}/${quest.target || def.target}。`,
+      hint: "已接受的委托会在任务页继续追踪。"
+    };
+  }
+
+  function dialogueLineText(text = "") {
+    return String(text).replace(/[“”]/g, "");
+  }
+
+  function rescueStoryName(name = "") {
+    return String(name).replace(/^(矿工|斥候|学徒|商贩|巡夜人|记录员)/u, "") || String(name) || "他";
+  }
+
+  function portraitMarkup(src, alt) {
+    return `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" draggable="false"><span class="npc-nameplate">${escapeHtml(alt)}</span>`;
+  }
+
+  function heroPortraitSrc() {
+    if (state.classId === "mage") return ASSETS.mage;
+    if (state.classId === "ranger") return ASSETS.ranger;
+    return ASSETS.warrior;
   }
 
   function grantRuneReward(def) {

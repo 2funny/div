@@ -79,6 +79,7 @@ import {
   unlockedLoreEntries as unlockedLoreEntriesForState
 } from "./questPanel";
 import {
+  renderClassBuildChoiceMarkup,
   renderClassSelectMarkup,
   renderContinueSlotsMarkup,
   renderStartScreenMarkup,
@@ -254,6 +255,14 @@ export function createRenderRuntime(ctx) {
     $("classSelect").innerHTML = renderClassSelectMarkup(slotId);
   }
 
+  function chooseClassBuild(classId, slotId = ui.pendingSaveSlot || ui.currentSaveSlot || "slot-1") {
+    ui.pendingSaveSlot = slotId;
+    const cls = CLASSES[classId] || CLASSES.warrior;
+    showModal(`${cls.name}开局`, renderClassBuildChoiceMarkup(classId, slotId), [
+      { text: "返回", action: closeModal }
+    ]);
+  }
+
   // 根据当前状态渲染完整 UI，并把快照持久化到 localStorage。
   // 主渲染调度入口：根据是否有角色、是否在战斗选择对应 UI 组合。
   function render() {
@@ -261,6 +270,7 @@ export function createRenderRuntime(ctx) {
       applyFloorEffectClass(null);
       $("classSelect").classList.remove("hidden");
       $("gameView").classList.add("hidden");
+      $("loreDock").innerHTML = "";
       $("saveBtn").disabled = true;
       $("homeBtn").disabled = true;
       syncMusicToGame();
@@ -687,6 +697,7 @@ export function createRenderRuntime(ctx) {
   }
 
   function renderContext() {
+    $("loreDock").innerHTML = renderLoreShortcut();
     const enemy = state.currentEnemy;
     if (enemy) {
       const panel = battleContextMarkup({
@@ -694,17 +705,16 @@ export function createRenderRuntime(ctx) {
         risk: battleRisk(enemy),
         turn: currentBattleTurnState(),
         renderSkillActionButtons,
-        renderLoreShortcut
+        renderLoreShortcut: () => ""
       });
       $("contextTitle").textContent = panel.title;
       $("contextBody").innerHTML = panel.body;
       return;
     }
     const tutorial = renderTutorialCard();
-    const loreShortcut = renderLoreShortcut();
     const cell = state.map.cells[state.player.y][state.player.x];
-    const objectPanel = objectContextMarkup(cell.object?.type || "", tutorial, loreShortcut);
-    const panel = objectPanel || explorationContextMarkup(tutorial, selectedTileText(), loreShortcut);
+    const objectPanel = objectContextMarkup(cell.object?.type || "", tutorial, "");
+    const panel = objectPanel || explorationContextMarkup(tutorial, selectedTileText(), "");
     $("contextTitle").textContent = panel.title;
     $("contextBody").innerHTML = panel.body;
   }
@@ -1048,6 +1058,7 @@ export function createRenderRuntime(ctx) {
     battleStatusPill,
     badgeForObject,
     centerFxMarkup,
+    chooseClassBuild: withState(chooseClassBuild),
     changeBattleSkillFromModal: withState(changeBattleSkillFromModal),
     clickTile: withState(clickTile),
     combatantFxMarkup,

@@ -94,7 +94,6 @@ export function renderClassSelectMarkup(slotId: string) {
       <p>${cls.desc}</p>
       <div class="class-start-line">开局 ${INITIAL_STAT_POINTS} 属性点 · ${INITIAL_SKILL_POINTS} 技能点 · ${INITIAL_SKILL_DUST} 技能尘</div>
       ${classSummaryMarkup(cls)}
-      ${classBuildMarkup(id, slotId)}
       ${
         cls.passives?.length
           ? `<div class="class-passives">${cls.passives
@@ -105,7 +104,7 @@ export function renderClassSelectMarkup(slotId: string) {
               .join("")}</div>`
           : ""
       }
-      <button type="button" onclick="startGame('${id}', '${slotId}')">开始</button>
+      <button type="button" onclick="chooseClassBuild('${id}', '${slotId}')">选择</button>
     </article>
   `
       )
@@ -114,15 +113,27 @@ export function renderClassSelectMarkup(slotId: string) {
   );
 }
 
-function classBuildMarkup(classId: string, slotId: string) {
+export function renderClassBuildChoiceMarkup(classId: string, slotId: string) {
+  const cls = CLASSES[classId as keyof typeof CLASSES] as any;
   const presets = INITIAL_BUILD_PRESETS[classId as keyof typeof INITIAL_BUILD_PRESETS] || [];
-  if (!presets.length) return "";
-  return `<div class="class-builds">${presets
-    .map(
-      (preset) =>
-        `<button type="button" onclick="startGame('${classId}', '${slotId}', '${preset.id}')"><b>${preset.name}</b><small>${preset.desc}</small></button>`
-    )
-    .join("")}</div>`;
+  const choices = presets.length
+    ? presets
+        .map(
+          (preset) =>
+            `<button type="button" onclick="closeModal();startGame('${classId}', '${slotId}', '${preset.id}')"><b>${preset.name}</b><small>${preset.desc}</small></button>`
+        )
+        .join("")
+    : `<button type="button" onclick="closeModal();startGame('${classId}', '${slotId}')"><b>均衡开局</b><small>保留初始属性点，进入地牢后自行分配。</small></button>`;
+  return `
+    <div class="class-build-modal">
+      <div class="class-build-head">
+        <span>开局倾向</span>
+        <b>${cls?.name || "冒险者"}</b>
+        <small>选择一个开局倾向后才会创建角色。</small>
+      </div>
+      <div class="class-builds class-build-choice">${choices}</div>
+    </div>
+  `;
 }
 
 function classSummaryMarkup(cls: any) {

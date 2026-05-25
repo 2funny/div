@@ -135,13 +135,15 @@ vm.runInContext(
   assert.strictEqual(lockedDoorCell.object?.type, "lockedDoor", "locked room door should stay shut without a matching key");
   state.doorKeys["door-a"] = 1;
   openLockedDoor(lockedDoorCell);
-  assert.strictEqual(lockedDoorCell.object, null, "locked room door should open with its specific quest key");
+  assert.strictEqual(lockedDoorCell.terrain, "floor", "opened locked room doors should become passable floor entrances");
+  assert.strictEqual(lockedDoorCell.object?.type, "roomEntrance", "opened locked room doors should use the unlocked room door style");
+  assert.strictEqual(lockedDoorCell.object?.roomName, "1号房", "opened locked room doors should preserve the room name");
   assert.strictEqual(state.doorKeys["door-a"], undefined, "specific room key should be consumed after opening the door");
 
   const universalDoorCell = { terrain: "door", object: { type: "lockedDoor", keyId: "door-b", keyName: "2号房钥匙", roomName: "2号房" } };
   state.universalKeys = 1;
   openLockedDoor(universalDoorCell);
-  assert.strictEqual(universalDoorCell.object, null, "universal key should open a locked room door");
+  assert.strictEqual(universalDoorCell.object?.type, "roomEntrance", "universal key should convert a locked room door into an unlocked entrance");
   assert.strictEqual(state.universalKeys, 0, "universal key should be consumed after opening a locked room door");
 
   maybeDrop({ type: "elite", roomBoss: true, dropsKey: true, name: "Key Guardian" });
@@ -659,6 +661,21 @@ vm.runInContext(
   state.map.rooms = [{ id: "room-8-1", name: "12号房" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-1" }), "12", "room doors should expose only the compact room number");
   assert.strictEqual(roomDoorLabel({ terrain: "floor", roomId: "room-8-1" }), "", "unlocked room doors should not add a compact room-number badge");
+  assert.strictEqual(
+    roomDoorLabel({ terrain: "floor", roomId: "room-8-1", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "12号房" } }),
+    "12",
+    "main map should show room numbers on unlocked room entrance objects"
+  );
+  assert.strictEqual(
+    roomDoorLabel({ terrain: "floor", roomId: "room-8-1", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "未知房间" } }),
+    "12",
+    "main map should fall back to room metadata when generated room entrance names are stale"
+  );
+  assert.strictEqual(
+    roomDoorLabel({ terrain: "door", roomId: "room-8-1", object: { type: "lockedDoor", roomId: "room-8-1", roomName: "12号房" } }),
+    "12",
+    "main map should keep room numbers on locked room doors"
+  );
   assert(tileLabel({ seen: true, terrain: "floor", object: { type: "roomEntrance", roomId: "room-8-1", roomName: "12号房" } }).includes("未上锁入口"), "unlocked room door labels should remain available for accessibility");
   state.map.rooms = [{ id: "room-8-2", name: "13号房", threat: "danger" }];
   assert.strictEqual(roomDoorLabel({ terrain: "door", roomId: "room-8-2" }), "13", "room doors should not show suffixes or threat markers beside the room number");
@@ -1016,11 +1033,60 @@ vm.runInContext(
   let questModal = null;
   showModal = (title, body, actions) => { questModal = { title, body, actions }; };
   openQuestNpc();
-  assert(modalState().actions.some((action) => action.text.includes("接受")), "quest NPC should offer an accept action");
+  assert.strictEqual(modalState().title, "对话", "quest NPC dialogue modal title should not repeat the character name");
+  assert(modalState().body.includes("npc-dialogue-scene"), "quest NPC should open with a character dialogue scene before the task prompt");
+  assert(modalState().body.includes("npc-portrait left") && modalState().body.includes("npc-portrait right"), "quest NPC dialogue should use left and right character sides");
+  assert(modalState().body.includes("npc-nameplate"), "quest NPC dialogue should show character names on portrait plates");
+  assert(modalState().body.includes(QUEST_DEFS.wardenErrand.giverName), "quest NPC dialogue should show the full NPC name on the right portrait");
+  assert(modalState().body.includes("npc-dialogue-speaker"), "quest NPC dialogue should label the current speaker before the text");
+  assert(modalState().body.includes('npc-dialogue-speaker">' + QUEST_DEFS.wardenErrand.giverName), "current speaker label should use the speaking NPC name");
+  assert(modalState().body.includes("npc-portrait right speaking"), "the currently speaking NPC portrait should be highlighted");
+  assert(modalState().body.includes("npc-portrait left muted"), "the non-speaking hero portrait should be visually subdued");
+  assert(!modalState().body.includes("npc-speaker"), "quest NPC dialogue should not repeat the speaker name above the text");
+  assert(modalState().body.includes(ASSETS.warrior), "quest NPC dialogue should render the current hero portrait image");
+  assert(modalState().body.includes(ASSETS.questNpc), "quest NPC dialogue should render the quest giver portrait image");
+  assert(!modalState().body.includes("“") && !modalState().body.includes("”"), "quest NPC dialogue text should not include quote marks inside the bubble");
+  assert(modalState().body.includes("我"), "quest NPC dialogue should read like first-person speech");
+  assert(!modalState().body.includes("dialogue-progress"), "quest NPC dialogue should not show a mechanical progress counter");
+  assert(!modalState().body.includes("继续听完任务委托"), "quest NPC dialogue should not describe itself as listening through a commission");
+  assert(!modalState().body.includes("继续听完委托背景"), "quest NPC dialogue should avoid mechanical task-background hints");
+  assert(!modalState().body.includes("quest-dialogue-background"), "quest NPC dialogue should not dump the full task background on the first line");
+  assert(!modalState().body.includes("quest-contract"), "quest NPC dialogue should not embed the task card in the first dialogue");
+  assert(!modalState().actions.some((action) => action.text.includes("接受")), "first quest NPC dialogue should not accept the quest immediately");
+  assert(modalState().actions.some((action) => action.text === "继续"), "quest NPC dialogue should advance one line at a time");
+  const firstDialogueLine = modalState().body;
+  modalState().actions.find((action) => action.text === "继续").action();
+  assert.notStrictEqual(modalState().body, firstDialogueLine, "continuing dialogue should replace the visible line instead of showing everything at once");
+  while (modalState().actions.some((action) => action.text === "继续")) {
+    modalState().actions.find((action) => action.text === "继续").action();
+  }
+  assert(modalState().actions.some((action) => action.text.includes("查看委托")), "quest NPC dialogue should reveal the task prompt only after the final line");
+  modalState().actions.find((action) => action.text.includes("查看委托")).action();
+  assert.strictEqual(modalState().title, "委托详情", "quest prompt modal title should not repeat the quest name");
+  assert(modalState().body.includes("quest-contract"), "quest prompt should render as a dedicated task contract");
+  assert(modalState().body.includes("quest-contract-shell"), "quest prompt should use the redesigned contract shell");
+  assert(modalState().body.includes("quest-contract-board"), "quest prompt should use a single compact contract board instead of a split empty sidebar");
+  assert(modalState().body.includes("quest-contract-meta"), "quest prompt should surface giver and location in a compact meta strip");
+  assert(modalState().body.includes("quest-contract-brief"), "quest prompt should group target and reward into concise summary cards");
+  assert(!modalState().body.includes("quest-contract-aside"), "quest prompt should not waste space with an empty left sidebar");
+  assert(!modalState().body.includes("<b>关系</b>"), "quest prompt should not present character relationship as task metadata");
+  assert(!modalState().body.includes("好感度"), "quest prompt should keep favorability out of the task contract");
+  assert(!modalState().body.includes("完成后影响后续委托和事件"), "quest prompt should leave relationship consequences to character relationship UI");
+  assert.strictEqual(
+    (modalState().body.match(new RegExp(QUEST_DEFS.wardenErrand.title, "g")) || []).length,
+    1,
+    "quest prompt should show the quest title only once"
+  );
+  assert(modalState().body.includes("quest-contract-background"), "quest prompt should summarize the task background after dialogue");
+  assert(modalState().body.includes("quest-contract-title"), "quest prompt should put the quest title inside the task card");
+  assert(modalState().body.includes("quest-contract-giver"), "quest prompt should identify the task giver in the contract header");
   modalState().actions.find((action) => action.text.includes("接受")).action();
   assert.strictEqual(state.quests.length, 1, "accepting from an NPC should add an active quest to the quest list");
   assert.strictEqual(state.quests[0].accepted, true, "accepted quest should be marked active");
   assert.strictEqual(state.quests[0].kills, 0, "accepted quest starts with fresh tracked progress");
+  openQuestNpc();
+  assert(modalState().body.includes("请继续"), "accepted unfinished quests should show an encouragement line instead of reopening the task prompt");
+  assert(!modalState().actions.some((action) => action.text.includes("查看委托")), "accepted unfinished quests should not show a new task prompt action");
 
   const acceptedRewards = [];
   recordQuestKill({ type: "monster", name: "Slime" }, acceptedRewards);
@@ -1029,13 +1095,100 @@ vm.runInContext(
   recordQuestKill({ type: "monster", name: "Bat" }, acceptedRewards);
   assert.strictEqual(state.quests[0].completed, true, "quest should be marked complete when the target is met");
   openQuestNpc();
+  assert(modalState().body.includes("辛苦了") || modalState().body.includes("谢谢"), "completed quests should acknowledge completion before showing rewards");
+  modalState().actions.find((action) => action.text.includes("查看报酬")).action();
   modalState().actions.find((action) => action.text.includes("领取")).action();
   assert.strictEqual(state.quests[0].claimed, true, "quest NPC should mark completed rewards as claimed");
   assert.strictEqual(state.keys, 2, "quest NPC should reward a rune key");
+  openQuestNpc();
+  assert(modalState().body.includes("谢谢"), "claimed quests should switch to a thank-you line");
+  assert(!modalState().actions.some((action) => action.text.includes("领取")), "claimed quests should not offer rewards again");
 
   const questList = renderQuestList();
   assert(questList.includes("quest-list"), "task tab should render a quest list");
   assert(questList.includes("已领取"), "claimed quests should remain visible in the task list");
+  assert(!questList.includes("影响："), "task tab should not display character relationship impact inside quest rows");
+
+  state.floor = 5;
+  state.quests = [];
+  openQuestNpc({
+    type: "questNpc",
+    questId: "rescueRoom",
+    npcName: QUEST_DEFS.rescueRoom.giverName,
+    roomId: "room-5-1",
+    roomName: "5号房",
+    rescueName: "矿工托兰",
+    targetFloor: 5
+  });
+  assert(modalState().body.includes("5号房"), "rescue dialogue should mention the target room naturally");
+  assert(modalState().body.includes("矿工托兰"), "rescue dialogue should identify who is trapped in the room");
+  modalState().actions.find((action) => action.text === "继续").action();
+  assert(modalState().body.includes("托兰") && modalState().body.includes("外出采矿") && modalState().body.includes("失踪"), "rescue dialogue should add concrete background for the missing person on the next line");
+
+  for (const questId of Object.keys(QUEST_DEFS)) {
+    if (questId === "merchantRoute" || questId === "merchantCache") continue;
+    state.floor = 12;
+    state.quests = [];
+    state.classId = "warrior";
+    state.narrative = { relations: {}, flags: {}, eventChoices: {}, rescuedNpcIds: [], merchantTrust: 0, factionLeanings: {} };
+    openQuestNpc({
+      type: "questNpc",
+      questId,
+      npcName: QUEST_DEFS[questId].giverName,
+      roomId: "room-test",
+      roomName: "测试房",
+      rescueName: "测试被困者",
+      targetFloor: 12
+    });
+    assert(!modalState().body.includes("“") && !modalState().body.includes("”"), questId + " dialogue should not wrap lines in quote marks");
+    assert(modalState().body.includes("我"), questId + " dialogue should use first-person speech where possible");
+    assert(!modalState().body.includes("dialogue-progress"), questId + " dialogue should not show progress counters");
+    assert(!modalState().body.includes("继续听完委托背景"), questId + " dialogue should avoid mechanical task-background hints");
+    assert(!modalState().body.includes("quest-contract-background"), questId + " dialogue should not show the full background before the task prompt");
+    let guard = 0;
+    while (modalState().actions.some((action) => action.text === "继续") && guard++ < 6) {
+      modalState().actions.find((action) => action.text === "继续").action();
+    }
+    assert(modalState().actions.some((action) => action.text.includes("查看委托")), questId + " dialogue should end by offering the task summary");
+    modalState().actions.find((action) => action.text.includes("查看委托")).action();
+    assert(modalState().body.includes("quest-contract-background"), questId + " task prompt should include the background summary");
+    assert(!modalState().body.includes("这层的怪物开始沿着巡夜路线聚集。帮我清出一段路"), questId + " should not fall back to a generic quest line");
+  }
+
+  const genericQuestGivers = [
+    "巡夜人",
+    "悬赏巡夜人",
+    "净化记录员",
+    "钥匙保管人",
+    "符文测绘员",
+    "巡夜封印官",
+    "巡夜传令员",
+    "暗记记录员",
+    "幸存者领路人",
+    "回声校准师",
+    "流动商队"
+  ];
+  assert(
+    Object.values(QUEST_DEFS).every((def) => !genericQuestGivers.includes(def.giverName)),
+    "all quest givers should use named characters instead of generic role titles"
+  );
+  assert(
+    QUEST_DEFS.wardenRelay.giverName.includes("赛拉") && QUEST_DEFS.wardenSeal.giverName.includes("赛拉"),
+    "warden relay and seal quests should be connected through a recurring named NPC"
+  );
+  assert(
+    QUEST_DEFS.runeSurvey.giverName.includes("缇雅") && QUEST_DEFS.runeCalibration.giverName.includes("缇雅"),
+    "rune survey and calibration quests should be connected through a recurring named NPC"
+  );
+  assert(
+    QUEST_DEFS.survivorTrace.giverName.includes("伊芙") && QUEST_DEFS.survivorEscort.giverName.includes("伊芙"),
+    "survivor follow-up quests should be connected through a recurring named NPC"
+  );
+  assert.strictEqual(
+    QUEST_DEFS.merchantRoute.giverName,
+    QUEST_DEFS.merchantCache.giverName,
+    "merchant side quests should share one named merchant"
+  );
 
   state = { floor: 1, lore: { chapters: [], pages: [] }, quests: [], log: [] };
   const unlockedLore = unlockLoreChaptersForFloor(state, { skipOpening: true });
@@ -1057,7 +1210,7 @@ vm.runInContext(
   renderContext();
   assert(document.getElementById("contextBody").innerHTML.includes("当前目标"), "action panel should surface the current tutorial objective");
   assert(document.getElementById("contextBody").innerHTML.includes("迈出第一步"), "tutorial objective should show readable step copy");
-  assert(document.getElementById("contextBody").innerHTML.includes("地牢残页"), "action panel should expose the lore archive shortcut");
+  assert(document.getElementById("loreDock").innerHTML.includes("地牢残页"), "action panel should expose the lore archive shortcut in a fixed dock");
   openLoreArchive();
   assert(modalState().body.includes("第一章：入口不会记人"), "lore archive should open the first discovered entry");
   modalState().actions.find((action) => action.text.includes("下一页")).action();
@@ -1096,7 +1249,7 @@ vm.runInContext(
   const surveyQuest = acceptQuest("runeSurvey", {
     type: "questNpc",
     questId: "runeSurvey",
-    npcName: "符文测绘员",
+    npcName: "测绘员缇雅",
     targetFloor: 6
   });
   assert(renderQuestList().includes("符文测绘"), "quest list should render the rune survey branch");
@@ -1115,7 +1268,7 @@ vm.runInContext(
   const calibrationQuest = acceptQuest("runeCalibration", {
     type: "questNpc",
     questId: "runeCalibration",
-    npcName: "回声校准师",
+    npcName: "校准师缇雅",
     targetFloor: 8
   });
   const calibrationRewards = [];
@@ -1133,7 +1286,7 @@ vm.runInContext(
   const bountyQuest = acceptQuest("eliteBounty", {
     type: "questNpc",
     questId: "eliteBounty",
-    npcName: "悬赏巡夜人",
+    npcName: "悬赏官罗恩",
     targetFloor: 10
   });
   const bountyRewards = [];
@@ -1167,7 +1320,7 @@ vm.runInContext(
     },
     log: []
   };
-  state.floorStates[1].map.cells[2][2].object = { type: "questNpc", npcName: "巡夜人" };
+  state.floorStates[1].map.cells[2][2].object = { type: "questNpc", npcName: "巡夜人罗恩" };
   state.map.cells[3][3].object = { type: "shop" };
   const teleportTargets = knownTeleportTargets();
   assert(teleportTargets.some((target) => target.floor === 1 && target.label.includes("巡夜人")), "teleport beacon should find explored quest NPCs on saved floors");

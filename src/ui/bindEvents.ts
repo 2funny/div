@@ -1,6 +1,7 @@
 import {
   closeModal,
   initAudio,
+  modalAction,
   move,
   openSaveSlotPicker,
   renderTab,
@@ -23,7 +24,22 @@ export function bindEvents(): void {
     const modalOpen = modal ? !modal.classList.contains("hidden") : false;
     if (modalOpen && event.key === " ") {
       event.preventDefault();
-      closeModal();
+      const actions = (
+        window as typeof window & { _modalActions?: Array<{ text?: string }> }
+      )._modalActions;
+      const continueActionIndex = Array.isArray(actions)
+        ? actions.findIndex((action) => action.text === "继续")
+        : -1;
+      const questPromptActionIndex = Array.isArray(actions)
+        ? actions.findIndex(
+            (action) =>
+              typeof action.text === "string" &&
+              (action.text.includes("查看委托") || action.text.includes("查看报酬"))
+          )
+        : -1;
+      const actionIndex = continueActionIndex >= 0 ? continueActionIndex : questPromptActionIndex;
+      if (actionIndex >= 0) modalAction(actionIndex);
+      else closeModal();
       return;
     }
     const state = window.__runeDungeon?.getState?.();

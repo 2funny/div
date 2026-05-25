@@ -666,16 +666,24 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
   // 为所有房间统计可通行格子数量，并生成展示用房间名。
   // 扫描同一 roomId 的格子集合，并生成房间展示名和内部威胁等级。
   function assignRoomLabels(map) {
-    const rooms: Record<string, { id: string; cells: number }> = {};
+    const rooms: Record<string, { id: string; cells: number; minX: number; minY: number }> = {};
     for (const cell of mapCells(map)) {
       if (!cell.roomId || cell.terrain === "wall") continue;
-      rooms[cell.roomId] = rooms[cell.roomId] || { id: cell.roomId, cells: 0 };
+      rooms[cell.roomId] = rooms[cell.roomId] || {
+        id: cell.roomId,
+        cells: 0,
+        minX: cell.x,
+        minY: cell.y
+      };
       rooms[cell.roomId].cells++;
+      rooms[cell.roomId].minX = Math.min(rooms[cell.roomId].minX, cell.x);
+      rooms[cell.roomId].minY = Math.min(rooms[cell.roomId].minY, cell.y);
     }
     return Object.values(rooms)
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => a.minY - b.minY || a.minX - b.minX || a.id.localeCompare(b.id))
       .map((room, index) => ({
-        ...room,
+        id: room.id,
+        cells: room.cells,
         name: `${index + 1}号房`,
         threat: roomThreatForIndex(index)
       }));
@@ -777,7 +785,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
       };
       const source = {
         questId: "lockedRoomKey",
-        npcName: "钥匙保管人",
+        npcName: "钥匙保管人诺维",
         roomId: room.id,
         roomName: room.name,
         doorKeyId: keyId,
@@ -1281,7 +1289,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
 
   function placeQuestNpc(
     map: Cell[][],
-    source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人" }
+    source: QuestNpcSource = { questId: "wardenErrand", npcName: "巡夜人罗恩" }
   ) {
     const { avoidRoomId, avoidRoomIds, ...objectSource } = source;
     const blockedRoomIds = new Set([avoidRoomId, ...(avoidRoomIds || [])].filter(Boolean));
@@ -1313,7 +1321,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (floor >= 20 && floor % 8 === 0 && Number(chain.wardenRelay || 0) > 0) {
       return {
         questId: "wardenSeal",
-        npcName: "巡夜封印官",
+        npcName: "封印官赛拉",
         target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
@@ -1321,7 +1329,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (floor >= 18 && floor % 7 === 0) {
       return {
         questId: Number(chain.survivorEscort || 0) > 0 ? "survivorTrace" : "survivorEscort",
-        npcName: Number(chain.survivorEscort || 0) > 0 ? "暗记记录员" : "幸存者领路人",
+        npcName: Number(chain.survivorEscort || 0) > 0 ? "暗记记录员伊芙" : "领路人伊芙",
         target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
@@ -1329,7 +1337,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (floor >= 15 && floor % 5 === 0) {
       return {
         questId: "eliteBounty",
-        npcName: "悬赏巡夜人",
+        npcName: "悬赏官罗恩",
         target: 1,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
@@ -1337,7 +1345,7 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (floor >= 12 && floor % 4 === 0) {
       return {
         questId: Number(chain.runeCalibration || 0) > 0 ? "runeSurvey" : "runeCalibration",
-        npcName: Number(chain.runeCalibration || 0) > 0 ? "符文测绘员" : "回声校准师",
+        npcName: Number(chain.runeCalibration || 0) > 0 ? "测绘员缇雅" : "校准师缇雅",
         target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
@@ -1345,18 +1353,18 @@ export function createFloorRuntime({ getState, updateVisibility, ensureQuestList
     if (floor >= 8 && floor % 6 === 0) {
       return {
         questId: "wardenSeal",
-        npcName: "巡夜封印官",
+        npcName: "封印官赛拉",
         target: 2,
         targetFloor: nearbyQuestTargetFloor(floor)
       };
     }
     if (floor >= 5 && floor % 5 === 0) {
-      return { questId: "wardenRelay", npcName: "巡夜传令员", target: 2 };
+      return { questId: "wardenRelay", npcName: "传令员赛拉", target: 2 };
     }
     if (floor >= 4 && floor % 4 === 1) {
-      return { questId: "roomPurge", npcName: "净化记录员", target: 2 };
+      return { questId: "roomPurge", npcName: "记录员缇雅", target: 2 };
     }
-    return { questId: "wardenErrand", npcName: "巡夜人" };
+    return { questId: "wardenErrand", npcName: "巡夜人罗恩" };
   }
 
   function placeSkillTrainer(map: Cell[][]) {

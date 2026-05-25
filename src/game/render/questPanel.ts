@@ -8,8 +8,7 @@ import {
 import {
   dominantNarrativeBranchText,
   endingTitle,
-  endingWorldEffectText,
-  questImpactText
+  endingWorldEffectText
 } from "../quest/narrative";
 import { QUEST_DEFS } from "../quest/quests";
 import { currentTutorialStep } from "../tutorial/tutorial";
@@ -141,14 +140,12 @@ function renderQuestRow(ctx: QuestPanelContext, quest: any) {
     .filter(Boolean)
     .join(" · ");
   const targetKind = questTargetKindText(def);
-  const impactText = questImpactText(ctx.state, def);
   return `
     <article class="quest-row inventory-card ${quest.completed && !quest.claimed ? "ready" : ""}">
       <div class="item-main">
         <span class="item-kicker">${def.giverName}</span>
         <b>${def.title}</b>
         <small>${def.desc}</small>
-        <small class="quest-impact">${escapeHtml(impactText)}</small>
         <span class="item-tags"><i>目标${location}</i>${targetKind ? `<i>${targetKind}</i>` : ""}<i>${quest.kills}/${quest.target}</i>${rewards ? `<i>${rewards}</i>` : ""}</span>
       </div>
       <span class="quest-state">${stateText}</span>

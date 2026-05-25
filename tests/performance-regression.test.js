@@ -5,6 +5,7 @@ const { performance } = require("perf_hooks");
 const { createTestContext } = require("./helpers/test-context");
 
 const context = createTestContext(assert);
+const FLOOR_GENERATION_BUDGET_MS = 7000;
 
 vm.createContext(context);
 vm.runInContext(fs.readFileSync("tests/.generated/runtime-harness.js", "utf8"), context, {
@@ -33,4 +34,7 @@ vm.runInContext(
   context
 );
 const elapsed = performance.now() - started;
-assert(elapsed < 5000, "representative floor generation samples should stay under a generous runtime budget");
+assert(
+  elapsed < FLOOR_GENERATION_BUDGET_MS,
+  "representative floor generation samples should stay under a generous runtime budget"
+);

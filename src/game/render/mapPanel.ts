@@ -45,18 +45,31 @@ export function renderMapMarkup(ctx: MapMarkupContext, view = mapViewBounds(ctx.
       const isSelected = ctx.selectedTile?.x === cell.x && ctx.selectedTile?.y === cell.y;
       const showObject = shouldShowMapObject(cell);
       const isInspectable = showObject && ctx.isEnemyObject(cell.object);
+      const doorUnderlay =
+        isPlayer && showObject && ["roomEntrance", "lockedDoor"].includes(cell.object!.type)
+          ? objectSprite(cell.object as CellObject | Enemy)
+          : "";
       const tileSprite = isPlayer
-        ? sprite(
+        ? `${doorUnderlay}${sprite(
             `player facing-${state.facing || "down"}`,
             assetForClass(state.classId),
             CLASSES[state.classId || "warrior"].name
-          )
+          )}`
         : showObject
           ? objectSprite(cell.object as CellObject | Enemy)
           : "";
       const objectBadge = showObject ? badgeForObject(cell.object!.type) : "";
       const roomLabel = roomDoorLabel(cell, ctx.roomName);
-      const roomBadge = roomLabel ? `<span class="room-label">${roomLabel}</span>` : "";
+      const roomLabelClass = [
+        "room-label",
+        "door-number",
+        cell.object?.type === "lockedDoor" ? "locked-door-room-label" : ""
+      ]
+        .filter(Boolean)
+        .join(" ");
+      const roomBadge = roomLabel
+        ? `<span class="${roomLabelClass}">${roomLabel}</span>`
+        : "";
       const label = tileLabel(cell, ctx, isPlayer);
       const isPassiveRoomEntrance = cell.object?.type === "roomEntrance";
       const showHint =
@@ -232,10 +245,18 @@ export function badgeForObject(type: string) {
   return labels[type] ? `<span class="tile-badge badge-${type}">${labels[type]}</span>` : "";
 }
 
-export function roomDoorLabel(cell: Pick<Cell, "terrain" | "roomId">, roomName: TileLabelContext["roomName"]) {
-  if (cell.terrain !== "door" || !cell.roomId) return "";
-  const number = roomName(cell.roomId).match(/\d+/)?.[0];
-  return number || "";
+export function roomDoorLabel(
+  cell: Pick<Cell, "terrain" | "roomId"> & {
+    object?: { type?: string; roomId?: string | null; roomName?: string } | null;
+  },
+  roomName: TileLabelContext["roomName"]
+) {
+  const isRoomDoorObject = cell.object?.type === "roomEntrance" || cell.object?.type === "lockedDoor";
+  if (cell.terrain !== "door" && !isRoomDoorObject) return "";
+  const objectNumber = cell.object?.roomName?.match(/\d+/)?.[0];
+  if (objectNumber) return objectNumber;
+  const metadataName = roomName(cell.object?.roomId || cell.roomId);
+  return metadataName.match(/\d+/)?.[0] || "";
 }
 
 export function shouldShowMapObject(cell: Pick<Cell, "object" | "seen">) {
