@@ -4821,6 +4821,19 @@ h2 {
   color: #aebbd0;
 }
 
+.npc-dialogue-scene.hero-speaking .npc-dialogue-bubble {
+  border-color: rgba(125, 212, 190, 0.32);
+  background:
+    linear-gradient(180deg, rgba(125, 212, 190, 0.08), transparent 44%),
+    linear-gradient(135deg, rgba(10, 18, 21, 0.94), rgba(17, 30, 34, 0.82));
+}
+
+.npc-dialogue-scene.hero-speaking .npc-dialogue-speaker {
+  border-color: rgba(125, 212, 190, 0.3);
+  background: rgba(125, 212, 190, 0.1);
+  color: #c6fff0;
+}
+
 .modal-card:has(.npc-dialogue-scene) {
   width: min(760px, 100%);
 }
